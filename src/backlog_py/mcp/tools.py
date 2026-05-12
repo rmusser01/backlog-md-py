@@ -77,6 +77,12 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         description=_optional_string(kwargs.get("description")),
         notes=_optional_string(kwargs.get("notes")),
         append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
+        acceptance_criteria_add=_optional_string_list(
+            _get_alias(kwargs, "acceptanceCriteriaAdd", "acceptance_criteria_add")
+        ),
+        definition_of_done_add=_optional_string_list(
+            _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
+        ),
         final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),
         append_final_summary=_optional_string_list(_get_alias(kwargs, "finalSummaryAppend", "append_final_summary")),
         clear_final_summary=_coerce_bool(_get_alias(kwargs, "finalSummaryClear", "clear_final_summary")) or False,
@@ -84,6 +90,8 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         check_dod=_int_list(_get_alias(kwargs, "checkDod", "check_dod")),
         uncheck_ac=_int_list(_get_alias(kwargs, "uncheckAc", "uncheck_ac")),
         uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod")),
+        remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
+        remove_dod=_int_list(_get_alias(kwargs, "definitionOfDoneRemove", "removeDod", "remove_dod")),
         dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
         status=_optional_string(kwargs.get("status")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),

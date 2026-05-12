@@ -149,6 +149,8 @@ class MutableRepository(ReadOnlyRepository):
         description: str | None = None,
         notes: str | None = None,
         append_notes: str | None = None,
+        acceptance_criteria_add: Sequence[str] | None = None,
+        definition_of_done_add: Sequence[str] | None = None,
         final_summary: str | None = None,
         append_final_summary: Sequence[str] | None = None,
         clear_final_summary: bool = False,
@@ -156,6 +158,8 @@ class MutableRepository(ReadOnlyRepository):
         check_dod: Sequence[int] | None = None,
         uncheck_ac: Sequence[int] | None = None,
         uncheck_dod: Sequence[int] | None = None,
+        remove_ac: Sequence[int] | None = None,
+        remove_dod: Sequence[int] | None = None,
         dependencies: Sequence[str] | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
@@ -209,6 +213,18 @@ class MutableRepository(ReadOnlyRepository):
             parsed = parse_task_markdown(source)
         if uncheck_dod:
             source = _set_checklist_indexes(source, parsed, "DOD", uncheck_dod, checked=False)
+            parsed = parse_task_markdown(source)
+        if remove_ac:
+            source = _remove_checklist_indexes(source, parsed, "AC", remove_ac)
+            parsed = parse_task_markdown(source)
+        if remove_dod:
+            source = _remove_checklist_indexes(source, parsed, "DOD", remove_dod)
+            parsed = parse_task_markdown(source)
+        if acceptance_criteria_add:
+            source = _append_checklist_items(source, parsed, "AC", acceptance_criteria_add)
+            parsed = parse_task_markdown(source)
+        if definition_of_done_add:
+            source = _append_checklist_items(source, parsed, "DOD", definition_of_done_add)
             parsed = parse_task_markdown(source)
         if title is not None or status is not None or normalized_dependencies is not None:
             updates: dict[str, object] = {}
@@ -366,6 +382,53 @@ def _append_to_section(
     return _replace_section(source, parsed, name, content)
 
 
+def _append_checklist_items(
+    source: str,
+    parsed: ParsedTaskMarkdown,
+    marker: str,
+    items: Sequence[str],
+) -> str:
+    normalized_items = [_normalize_block(item) for item in items if _normalize_block(item)]
+    if not normalized_items:
+        return source
+    raw = _extract_marker_block(source, marker)
+    lines = raw.splitlines(keepends=True)
+    if not lines:
+        raise TaskMutationError(f"Missing {marker} checklist section")
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    prefix = "".join(lines[:-1])
+    if prefix and not prefix.endswith(("\n", "\r\n")):
+        prefix = f"{prefix}{newline}"
+    start_index = len(parsed.checklists.get(marker, [])) + 1
+    appended = "".join(
+        f"- [ ] #{index} {item}{newline}"
+        for index, item in enumerate(normalized_items, start=start_index)
+    )
+    return source.replace(raw, f"{prefix}{appended}{lines[-1]}", 1)
+
+
+def _remove_checklist_indexes(
+    source: str,
+    parsed: ParsedTaskMarkdown,
+    marker: str,
+    indexes: Sequence[int],
+) -> str:
+    _reject_checklist_indexes(marker, indexes, len(parsed.checklists.get(marker, [])))
+    remove_indexes = set(indexes)
+    raw = _extract_marker_block(source, marker)
+    lines = raw.splitlines(keepends=True)
+    item_number = 0
+    rendered: list[str] = []
+    for line in lines:
+        raw_line = line.rstrip("\r\n")
+        if _CHECKLIST_LINE_RE.match(raw_line):
+            item_number += 1
+            if item_number in remove_indexes:
+                continue
+        rendered.append(line)
+    return source.replace(raw, "".join(rendered), 1)
+
+
 def _set_checklist_indexes(
     source: str,
     parsed: ParsedTaskMarkdown,
@@ -375,9 +438,7 @@ def _set_checklist_indexes(
     checked: bool,
 ) -> str:
     items = parsed.checklists.get(marker, [])
-    for index in indexes:
-        if index < 1 or index > len(items):
-            raise TaskMutationError(f"{marker} checklist index {index} is out of range")
+    _reject_checklist_indexes(marker, indexes, len(items))
     raw = _extract_marker_block(source, marker)
     lines = raw.splitlines(keepends=True)
     item_number = 0
@@ -390,6 +451,12 @@ def _set_checklist_indexes(
                 line = _set_checklist_line(line, checked=checked)
         rendered.append(line)
     return source.replace(raw, "".join(rendered), 1)
+
+
+def _reject_checklist_indexes(marker: str, indexes: Sequence[int], item_count: int) -> None:
+    for index in indexes:
+        if index < 1 or index > item_count:
+            raise TaskMutationError(f"{marker} checklist index {index} is out of range")
 
 
 def _replace_frontmatter_values(

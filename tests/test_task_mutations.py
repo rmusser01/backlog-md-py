@@ -130,6 +130,29 @@ def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_pa
     assert "- [ ] #1 Tests written" in after
 
 
+def test_edit_task_can_add_and_remove_acceptance_criteria_and_definition_of_done(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    _repository(repo).edit_task(
+        "TASK-1",
+        acceptance_criteria_add=["New acceptance criterion"],
+        definition_of_done_add=["New verification item"],
+    )
+
+    after_add = _task_file(repo).read_text(encoding="utf-8")
+    assert "- [ ] #4 New acceptance criterion" in after_add
+    assert "- [ ] #3 New verification item" in after_add
+
+    _repository(repo).edit_task("TASK-1", remove_ac=[2], remove_dod=[1])
+
+    after_remove = _task_file(repo).read_text(encoding="utf-8")
+    assert "Preserve incomplete acceptance criteria raw line" not in after_remove
+    assert "Tests written" not in after_remove
+    assert "New acceptance criterion" in after_remove
+    assert "New verification item" in after_remove
+    assert "Trailing unowned body content must also round trip." in after_remove
+
+
 def test_edit_task_can_append_and_clear_final_summary(tmp_path):
     repo = _copy_fixture(tmp_path)
 
@@ -227,6 +250,16 @@ def test_invalid_dod_checklist_index_is_rejected_before_write(tmp_path):
 
     with pytest.raises(TaskMutationError, match="DOD checklist index 99"):
         _repository(repo).edit_task("TASK-1", check_dod=[99])
+
+    assert _snapshot_tasks(repo) == before
+
+
+def test_invalid_remove_checklist_index_is_rejected_before_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="AC checklist index 99"):
+        _repository(repo).edit_task("TASK-1", remove_ac=[99])
 
     assert _snapshot_tasks(repo) == before
 
@@ -448,6 +481,32 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "- [ ] #1 Preserve completed acceptance criteria raw line" in task_one
     assert "- [ ] #1 Tests written" in task_one
 
+    edit_checklists = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "edit",
+            "TASK-1",
+            "--ac",
+            "CLI edit AC",
+            "--dod",
+            "CLI edit DoD",
+            "--remove-ac",
+            "2",
+            "--remove-dod",
+            "1",
+            "--plain",
+        ],
+    )
+    assert edit_checklists.exit_code == 0
+    checklist_written = _task_file(repo).read_text(encoding="utf-8")
+    assert "Preserve incomplete acceptance criteria raw line" not in checklist_written
+    assert "Tests written" not in checklist_written
+    assert "CLI edit AC" in checklist_written
+    assert "CLI edit DoD" in checklist_written
+
 
 def test_cli_task_archive_uses_safe_core(tmp_path):
     repo = _copy_fixture(tmp_path)
@@ -582,12 +641,20 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         appendNotes="- MCP note.",
         finalSummary="MCP final summary.",
         finalSummaryAppend=["MCP appended final summary."],
+        acceptanceCriteriaAdd=["MCP added acceptance criterion"],
+        definitionOfDoneAdd=["MCP added verification"],
         checkAc=[1],
     )
     assert edited["id"] == "TASK-2"
     assert edited["title"] == "MCP renamed task"
 
-    unchecked = task_edit(project, task_id="TASK-2", uncheckAc=[1])
+    unchecked = task_edit(
+        project,
+        task_id="TASK-2",
+        uncheckAc=[1],
+        acceptanceCriteriaRemove=[1],
+        definitionOfDoneRemove=[1],
+    )
     assert unchecked["id"] == "TASK-2"
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "title: MCP renamed task" in written
@@ -596,7 +663,9 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "- MCP note." in written
     assert "MCP final summary." in written
     assert "MCP appended final summary." in written
-    assert "- [ ] #1 MCP create works" in written
+    assert "MCP create works" not in written
+    assert "MCP added acceptance criterion" in written
+    assert "MCP added verification" not in written
 
     task_edit(project, task_id="TASK-2", finalSummaryClear=True)
     cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")

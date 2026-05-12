@@ -52,6 +52,8 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
 @click.option("--uncheck-ac", multiple=True, type=int, help="Mark acceptance criteria index incomplete.")
 @click.option("--uncheck-dod", multiple=True, type=int, help="Mark Definition of Done index incomplete.")
+@click.option("--remove-ac", multiple=True, type=int, help="Remove acceptance criteria by index.")
+@click.option("--remove-dod", multiple=True, type=int, help="Remove Definition of Done items by index.")
 @click.option("--final-summary", default=None, help="Replace the final summary section.")
 @click.option("--append-final-summary", multiple=True, help="Append text to the final summary section.")
 @click.option("--clear-final-summary", is_flag=True, help="Clear the final summary section.")
@@ -75,6 +77,8 @@ def task_command(
     check_dod: tuple[int, ...],
     uncheck_ac: tuple[int, ...],
     uncheck_dod: tuple[int, ...],
+    remove_ac: tuple[int, ...],
+    remove_dod: tuple[int, ...],
     final_summary: str | None,
     append_final_summary: tuple[str, ...],
     clear_final_summary: bool,
@@ -113,10 +117,14 @@ def task_command(
             notes=notes,
             status=status,
             append_notes=append_notes,
+            acceptance_criteria_add=acceptance_criteria,
+            definition_of_done_add=definition_of_done_add,
             check_ac=check_ac,
             check_dod=check_dod,
             uncheck_ac=uncheck_ac,
             uncheck_dod=uncheck_dod,
+            remove_ac=remove_ac,
+            remove_dod=remove_dod,
             dependencies=dependencies if dependencies else None,
             final_summary=final_summary,
             append_final_summary=append_final_summary,
