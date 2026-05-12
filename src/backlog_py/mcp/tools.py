@@ -28,6 +28,15 @@ def task_list(project: BacklogProject, status: str | None = None, limit: int = 1
     return [_task_summary(project, task) for task in tasks[:limit]]
 
 
+def task_board(project: BacklogProject) -> dict[str, list[dict[str, Any]]]:
+    """Return the task board grouped by configured project statuses."""
+    repository = ReadOnlyRepository(project)
+    return {
+        status: [_task_summary(project, task) for task in tasks]
+        for status, tasks in repository.board().items()
+    }
+
+
 def task_view(project: BacklogProject, task_id: str) -> dict[str, Any]:
     """Return one task through the read-only repository as a JSON-safe mapping."""
     repository = ReadOnlyRepository(project)

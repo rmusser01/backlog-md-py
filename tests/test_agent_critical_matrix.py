@@ -29,6 +29,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:config-dod-defaults-upsert",
     "mcp:workflow-overview",
     "mcp:task-workflow-alias",
+    "mcp:board",
     "mcp:task-list",
     "mcp:task-search",
     "mcp:task-view",

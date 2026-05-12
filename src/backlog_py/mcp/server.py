@@ -52,6 +52,11 @@ def _register_resources(server: Any) -> None:
 
 def _register_tools(server: Any) -> None:
     @server.tool()
+    def task_board(project: str) -> dict[str, list[dict[str, Any]]]:
+        """Return tasks grouped by board status for a Backlog.md project."""
+        return tool_registry.task_board(_project(project))
+
+    @server.tool()
     def task_list(project: str, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """List tasks in a Backlog.md project."""
         return tool_registry.task_list(_project(project), status=status, limit=limit)
