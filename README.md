@@ -19,6 +19,8 @@ Until package publishing is configured, install directly from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
+# Include the MCP SDK adapter:
+python -m pip install "backlog-md-py[mcp] @ git+https://github.com/rmusser01/backlog-md-py.git"
 ```
 
 Use `backlog-py` or `python -m backlog_py` for the experimental CLI:

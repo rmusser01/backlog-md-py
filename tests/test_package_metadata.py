@@ -26,3 +26,11 @@ def test_pyproject_derives_distribution_version_from_package_attribute():
     assert pyproject["tool"]["setuptools"]["dynamic"]["version"] == {
         "attr": "backlog_py.__version__",
     }
+
+
+def test_pyproject_exposes_mcp_server_extra_and_script():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+
+    assert "mcp" in pyproject["project"]["optional-dependencies"]
+    assert any(dependency.startswith("mcp>=") for dependency in pyproject["project"]["optional-dependencies"]["mcp"])
+    assert pyproject["project"]["scripts"]["backlog-py-mcp"] == "backlog_py.mcp.server:main"

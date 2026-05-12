@@ -15,6 +15,12 @@ Until package publishing is configured, install directly from the repository:
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
 ```
 
+Install the optional MCP SDK adapter with:
+
+```bash
+python -m pip install "backlog-md-py[mcp] @ git+https://github.com/rmusser01/backlog-md-py.git"
+```
+
 For local development against a checkout:
 
 ```bash
@@ -63,19 +69,26 @@ print(task_view(project, "task-1"))
 Mutation helpers are available for implemented local-file operations, but callers
 should run them against a temporary copy first when integrating a new workflow.
 
-## MCP Status
+## MCP Server
 
-The repository currently exposes pure MCP-style resource and tool helper
-functions. The long-running MCP SDK server adapter is not implemented yet, so
-`backlog_py.mcp.server` intentionally fails closed instead of advertising a
-server that cannot run.
+The package exposes pure MCP-style helper functions without optional
+dependencies. Installing the `mcp` extra also installs a FastMCP-backed stdio
+server:
 
-For agent integrations today, use one of these patterns:
+```bash
+backlog-py-mcp
+```
 
+For agent integrations, use one of these patterns:
+
+- Run `backlog-py-mcp` as an MCP stdio server after installing
+  `backlog-md-py[mcp]`.
 - Call the pure helper functions from Python.
 - Wrap `backlog-py --cwd <project> ...` as a subprocess tool.
-- Keep the existing Node Backlog.md MCP server until this repository grows a
-  real SDK-backed server process.
+
+Every MCP tool takes a `project` argument containing the path to the Backlog.md
+project or a directory inside it. This keeps the server stateless and avoids a
+global mutable working directory.
 
 ## Validation For Consumers
 

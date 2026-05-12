@@ -44,9 +44,13 @@ dev = [
   "tomli>=2.0.0; python_version < '3.11'",
   "twine>=5.0.0",
 ]
+mcp = [
+  "mcp>=1.0.0",
+]
 
 [project.scripts]
 backlog-py = "backlog_py.cli.main:main"
+backlog-py-mcp = "backlog_py.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
