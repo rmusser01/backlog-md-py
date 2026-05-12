@@ -13,6 +13,23 @@ pass.
 The Python import package remains `backlog_py`, and the experimental CLI command
 is still `backlog-py`.
 
+## Installing In Another Project
+
+Until package publishing is configured, install directly from GitHub:
+
+```bash
+python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
+```
+
+Use `backlog-py` or `python -m backlog_py` for the experimental CLI:
+
+```bash
+backlog-py --cwd /path/to/project task list --plain
+python -m backlog_py --cwd /path/to/project board
+```
+
+See `docs/integration.md` for CLI, Python helper, and MCP integration notes.
+
 ## Oracle Fixtures
 
 Compatibility fixtures are pinned to explicit upstream Backlog.md release

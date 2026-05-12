@@ -67,3 +67,11 @@ jobs:
 
       - name: Check distribution metadata
         run: python -m twine check dist/*
+
+      - name: Smoke test wheel install
+        run: |
+          python -m venv /tmp/backlog-md-py-wheel-smoke
+          /tmp/backlog-md-py-wheel-smoke/bin/python -m pip install --upgrade pip
+          /tmp/backlog-md-py-wheel-smoke/bin/python -m pip install dist/*.whl
+          /tmp/backlog-md-py-wheel-smoke/bin/backlog-py --help
+          /tmp/backlog-md-py-wheel-smoke/bin/python -m backlog_py --help
