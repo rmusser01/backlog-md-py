@@ -29,6 +29,11 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--title", default=None, help="Replacement task title for task edit.")
 @click.option("--status", default=None, help="Task status for create/edit.")
 @click.option("--description", default=None, help="Description for task creation.")
+@click.option("--acceptance-criteria", multiple=True, help="Acceptance criterion for task creation.")
+@click.option("--definition-of-done", multiple=True, help="Definition of Done item for task creation.")
+@click.option("--definition-of-done-add", multiple=True, help="Additional Definition of Done item for task creation.")
+@click.option("--disable-definition-of-done-defaults", is_flag=True, help="Do not inherit project Definition of Done defaults.")
+@click.option("--dependency", "dependencies", multiple=True, help="Task dependency id for task creation.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
@@ -44,6 +49,11 @@ def task_command(
     title: str | None,
     status: str | None,
     description: str | None,
+    acceptance_criteria: tuple[str, ...],
+    definition_of_done: tuple[str, ...],
+    definition_of_done_add: tuple[str, ...],
+    disable_definition_of_done_defaults: bool,
+    dependencies: tuple[str, ...],
     append_notes: str | None,
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
@@ -60,6 +70,11 @@ def task_command(
             task_id=task_id,
             status=status,
             description=description or "",
+            acceptance_criteria=acceptance_criteria,
+            definition_of_done=definition_of_done or None,
+            definition_of_done_add=definition_of_done_add,
+            disable_definition_of_done_defaults=disable_definition_of_done_defaults,
+            dependencies=dependencies,
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return

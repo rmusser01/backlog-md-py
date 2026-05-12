@@ -348,6 +348,85 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "- [ ] #1 Tests written" in task_one
 
 
+def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    runner = CliRunner()
+
+    replace_definition_of_done_defaults(project, ["Project default"])
+
+    create = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "create",
+            "CLI full create task",
+            "--id",
+            "TASK-2",
+            "--description",
+            "Created with richer CLI fields.",
+            "--acceptance-criteria",
+            "CLI AC one",
+            "--acceptance-criteria",
+            "CLI AC two",
+            "--definition-of-done-add",
+            "CLI specific DoD",
+            "--dependency",
+            "TASK-1",
+            "--plain",
+        ],
+    )
+
+    assert create.exit_code == 0
+    assert "TASK-2 [To Do] CLI full create task" in create.output
+    written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "dependencies:\n- TASK-1" in written
+    assert "- [ ] #1 CLI AC one" in written
+    assert "- [ ] #2 CLI AC two" in written
+    assert "- [ ] #1 Project default" in written
+    assert "- [ ] #2 CLI specific DoD" in written
+
+    explicit = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "create",
+            "CLI explicit DoD task",
+            "--id",
+            "TASK-3",
+            "--definition-of-done",
+            "Explicit CLI DoD",
+            "--plain",
+        ],
+    )
+    assert explicit.exit_code == 0
+    explicit_written = _task_file(repo, "task-3").read_text(encoding="utf-8")
+    assert "- [ ] #1 Explicit CLI DoD" in explicit_written
+    assert "Project default" not in explicit_written
+
+    disabled = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "create",
+            "CLI disabled defaults task",
+            "--id",
+            "TASK-4",
+            "--disable-definition-of-done-defaults",
+            "--plain",
+        ],
+    )
+    assert disabled.exit_code == 0
+    disabled_written = _task_file(repo, "task-4").read_text(encoding="utf-8")
+    assert "Project default" not in disabled_written
+
+
 def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)
