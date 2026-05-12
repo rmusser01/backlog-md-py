@@ -26,14 +26,21 @@ future repository cutover paths must remain Node/Bun-free.
 
 ## Development
 
-Install the package in editable mode with test dependencies available, then run
-the focused or full test suite:
+Install the package in editable mode with test dependencies available:
 
 ```bash
 python -m pip install -e .
+python -m pip install -e ".[dev]"
+```
+
+Then run the focused or full test suite:
+
+```bash
 python -m pytest tests/test_agent_critical_matrix.py -v
 python -m pytest tests -v
 ```
+
+See `CONTRIBUTING.md` for the full local validation gate.
 
 ## Agent Cutover Gate
 

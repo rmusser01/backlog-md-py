@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,17 +8,40 @@ version = "0.1.0"
 description = "Standalone Python compatibility implementation of Backlog.md"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Robert Musser" },
+]
+keywords = ["backlog.md", "backlog", "markdown", "mcp", "task-management"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Utilities",
+]
 dependencies = [
   "click>=8.0.0",
   "loguru>=0.7.0",
   "PyYAML>=6.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/rmusser01/backlog-md-py"
+Repository = "https://github.com/rmusser01/backlog-md-py"
+Issues = "https://github.com/rmusser01/backlog-md-py/issues"
+
 [project.optional-dependencies]
 dev = [
   "bandit>=1.7.0",
+  "build>=1.2.0",
   "pytest>=8.0.0",
+  "twine>=5.0.0",
 ]
 
 [project.scripts]
