@@ -33,12 +33,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> --acceptance-criteria <item> --dependency <id> --plain",
+            "backlog task create <title> --notes <text> --acceptance-criteria <item> --plain",
         ),
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
-            "backlog task edit <id> --append-final-summary <text> --clear-final-summary --plain",
+            "backlog task edit <id> --notes <text> --append-final-summary <text> --plain",
         ),
         _golden("cli:task-archive", "CLI-INSTRUCTIONS.md", "backlog task archive <id> --plain"),
         _golden("cli:doc-list", "CLI-INSTRUCTIONS.md", "backlog doc list"),
@@ -62,11 +62,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden("mcp:task-list", "MCP tools", "task_list(project, status=None, limit=100)"),
         _golden("mcp:task-search", "MCP tools", "task_search(project, query, limit=10)"),
         _golden("mcp:task-view", "MCP tools", "task_view(project, task_id)"),
-        _golden("mcp:task-create", "MCP tools", "task_create(project, **kwargs)"),
+        _golden("mcp:task-create", "MCP tools", "task_create(project, notes='', **kwargs)"),
         _golden(
             "mcp:task-edit",
             "MCP tools",
-            "task_edit(project, task_id, finalSummaryAppend=None, finalSummaryClear=False, **kwargs)",
+            "task_edit(project, task_id, notes=None, finalSummaryAppend=None, **kwargs)",
         ),
         _golden("mcp:task-archive", "MCP tools", "task_archive(project, task_id)"),
         _golden("mcp:document-list", "MCP tools", "document_list(project, query=None, limit=100)"),

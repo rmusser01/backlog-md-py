@@ -59,6 +59,7 @@ def test_create_task_writes_valid_task_in_fixture_repo(tmp_path):
         title="New safe mutation task",
         task_id="TASK-2",
         description="Created through the safe mutation core.",
+        notes="Initial implementation note.",
         acceptance_criteria=["Task can be viewed"],
         definition_of_done=["Tests pass"],
     )
@@ -68,6 +69,7 @@ def test_create_task_writes_valid_task_in_fixture_repo(tmp_path):
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "id: TASK-2" in written
     assert "Created through the safe mutation core." in written
+    assert "Initial implementation note." in written
     assert "- [ ] #1 Task can be viewed" in written
     assert "- [ ] #1 Tests pass" in written
     assert _repository(repo).get_task("TASK-2").description == "Created through the safe mutation core."
@@ -81,6 +83,7 @@ def test_edit_task_updates_owned_sections_and_checklists_without_rewriting_unown
     edited = _repository(repo).edit_task(
         "TASK-1",
         description="Edited description.",
+        notes="Replacement implementation note.",
         append_notes="- Added implementation note.",
         final_summary="Finalized through safe edit.",
         check_ac=[2],
@@ -92,7 +95,8 @@ def test_edit_task_updates_owned_sections_and_checklists_without_rewriting_unown
     assert "Unowned body content before acceptance criteria must be preserved." in after
     assert "Trailing unowned body content must also round trip." in after
     assert "custom_field: preserve-me" in after
-    assert "- Keep unknown body text stable." in after
+    assert "- Keep unknown body text stable." not in after
+    assert "Replacement implementation note." in after
     assert "- Added implementation note." in after
     assert "Finalized through safe edit." in after
     assert "- [x] #2 Preserve incomplete acceptance criteria raw line" in after
@@ -340,6 +344,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "TASK-2",
             "--description",
             "Created from CLI.",
+            "--notes",
+            "Initial CLI note.",
             "--plain",
         ],
     )
@@ -358,6 +364,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "CLI renamed task",
             "--description",
             "Edited from CLI.",
+            "--notes",
+            "CLI replacement note.",
             "--append-notes",
             "- CLI note.",
             "--final-summary",
@@ -375,6 +383,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "title: CLI renamed task" in written
     assert "Edited from CLI." in written
     assert "dependencies:\n- TASK-1" in written
+    assert "Initial CLI note." not in written
+    assert "CLI replacement note." in written
     assert "- CLI note." in written
     assert "CLI final summary." in written
     assert "CLI appended final summary." in written
@@ -517,6 +527,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         project,
         title="MCP mutation task",
         description="Created from MCP.",
+        notes="Initial MCP note.",
         acceptanceCriteria=["MCP create works"],
     )
     assert created["id"] == "TASK-2"
@@ -526,6 +537,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         project,
         task_id="TASK-2",
         title="MCP renamed task",
+        notes="MCP replacement note.",
         appendNotes="- MCP note.",
         finalSummary="MCP final summary.",
         finalSummaryAppend=["MCP appended final summary."],
@@ -538,6 +550,8 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert unchecked["id"] == "TASK-2"
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "title: MCP renamed task" in written
+    assert "Initial MCP note." not in written
+    assert "MCP replacement note." in written
     assert "- MCP note." in written
     assert "MCP final summary." in written
     assert "MCP appended final summary." in written

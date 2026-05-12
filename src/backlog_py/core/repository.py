@@ -99,6 +99,7 @@ class MutableRepository(ReadOnlyRepository):
         task_id: str | None = None,
         status: str | None = None,
         description: str = "",
+        notes: str = "",
         acceptance_criteria: Sequence[str] | None = None,
         definition_of_done: Sequence[str] | None = None,
         definition_of_done_add: Sequence[str] | None = None,
@@ -131,6 +132,7 @@ class MutableRepository(ReadOnlyRepository):
             title=title,
             status=task_status,
             description=description,
+            notes=notes,
             acceptance_criteria=acceptance_criteria or (),
             definition_of_done=task_definition_of_done,
             dependencies=normalized_dependencies,
@@ -145,6 +147,7 @@ class MutableRepository(ReadOnlyRepository):
         *,
         title: str | None = None,
         description: str | None = None,
+        notes: str | None = None,
         append_notes: str | None = None,
         final_summary: str | None = None,
         append_final_summary: Sequence[str] | None = None,
@@ -175,6 +178,9 @@ class MutableRepository(ReadOnlyRepository):
         parsed = task.parsed
         if description is not None:
             source = _replace_section(source, parsed, "DESCRIPTION", _normalize_block(description))
+            parsed = parse_task_markdown(source)
+        if notes is not None:
+            source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", _normalize_block(notes))
             parsed = parse_task_markdown(source)
         if append_notes is not None:
             existing_notes = parsed.sections.get("IMPLEMENTATION_NOTES")
@@ -268,6 +274,7 @@ def _new_task_source(
     title: str,
     status: str,
     description: str,
+    notes: str,
     acceptance_criteria: Sequence[str],
     definition_of_done: Sequence[str],
     dependencies: Sequence[str],
@@ -292,6 +299,7 @@ def _new_task_source(
         "<!-- AC:END -->\n\n"
         "## Implementation Notes\n\n"
         "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\n"
+        f"{_normalize_block(notes)}\n"
         "<!-- SECTION:IMPLEMENTATION_NOTES:END -->\n\n"
         "## Final Summary\n\n"
         "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n"

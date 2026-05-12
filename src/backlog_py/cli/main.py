@@ -29,6 +29,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--title", default=None, help="Replacement task title for task edit.")
 @click.option("--status", default=None, help="Task status for create/edit.")
 @click.option("--description", default=None, help="Description for task creation.")
+@click.option("--notes", default=None, help="Implementation notes for task create/edit.")
 @click.option("--acceptance-criteria", multiple=True, help="Acceptance criterion for task creation.")
 @click.option("--definition-of-done", multiple=True, help="Definition of Done item for task creation.")
 @click.option("--definition-of-done-add", multiple=True, help="Additional Definition of Done item for task creation.")
@@ -51,6 +52,7 @@ def task_command(
     title: str | None,
     status: str | None,
     description: str | None,
+    notes: str | None,
     acceptance_criteria: tuple[str, ...],
     definition_of_done: tuple[str, ...],
     definition_of_done_add: tuple[str, ...],
@@ -80,6 +82,7 @@ def task_command(
             task_id=task_id,
             status=status,
             description=description or "",
+            notes=notes or "",
             acceptance_criteria=acceptance_criteria,
             definition_of_done=definition_of_done or None,
             definition_of_done_add=definition_of_done_add,
@@ -95,6 +98,7 @@ def task_command(
             args[1],
             title=title,
             description=description,
+            notes=notes,
             status=status,
             append_notes=append_notes,
             check_ac=check_ac,

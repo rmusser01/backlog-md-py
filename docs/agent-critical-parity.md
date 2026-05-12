@@ -16,8 +16,8 @@ do not block the first local-file agent cutover candidate.
 | cli:search-plain | implemented | backlog search <query> --plain | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
 | cli:config-list | implemented | backlog config list | cli:config-list |
-| cli:task-create | implemented | backlog task create <title> --acceptance-criteria <item> --dependency <id> --plain | cli:task-create |
-| cli:task-edit | implemented | backlog task edit <id> --append-final-summary <text> --clear-final-summary --plain | cli:task-edit |
+| cli:task-create | implemented | backlog task create <title> --notes <text> --acceptance-criteria <item> --plain | cli:task-create |
+| cli:task-edit | implemented | backlog task edit <id> --notes <text> --append-final-summary <text> --plain | cli:task-edit |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
@@ -36,8 +36,8 @@ do not block the first local-file agent cutover candidate.
 | mcp:task-list | implemented | task_list(project, status=None, limit=100) | mcp:task-list |
 | mcp:task-search | implemented | task_search(project, query, limit=10) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
-| mcp:task-create | implemented | task_create(project, **kwargs) | mcp:task-create |
-| mcp:task-edit | implemented | task_edit(project, task_id, finalSummaryAppend=None, finalSummaryClear=False, **kwargs) | mcp:task-edit |
+| mcp:task-create | implemented | task_create(project, notes='', **kwargs) | mcp:task-create |
+| mcp:task-edit | implemented | task_edit(project, task_id, notes=None, finalSummaryAppend=None, **kwargs) | mcp:task-edit |
 | mcp:task-archive | implemented | task_archive(project, task_id) | mcp:task-archive |
 | mcp:document-list | implemented | document_list(project, query=None, limit=100) | mcp:document-list |
 | mcp:document-search | implemented | document_list(project, query=<query>, limit=100) | mcp:document-search |
