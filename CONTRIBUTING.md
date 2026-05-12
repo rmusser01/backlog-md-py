@@ -32,6 +32,10 @@ For focused agent-cutover work, also run:
 python -m pytest tests/test_agent_critical_matrix.py -v
 ```
 
+For consuming-project cutovers, follow `docs/cutover-validation.md` so mutation
+smoke tests run against a copied repository before live Backlog.md files are
+changed.
+
 ## Compatibility Scope
 
 The current cutover target is non-interactive local-file agent workflows:

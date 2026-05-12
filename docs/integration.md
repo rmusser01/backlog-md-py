@@ -101,4 +101,5 @@ python -m bandit -r src
 ```
 
 Then run your own mutation smoke test against a copied repository, not against
-the live project backlog.
+the live project backlog. See `docs/cutover-validation.md` for a concrete
+cutover checklist.

@@ -60,6 +60,8 @@ python -m pytest tests -v
 ```
 
 See `CONTRIBUTING.md` for the full local validation gate.
+See `docs/cutover-validation.md` for a copied-repository validation checklist
+before using the tool against another project's live Backlog.md files.
 
 ## Agent Cutover Gate
 
@@ -78,8 +80,8 @@ python -m pytest tests/test_agent_critical_matrix.py -v
 ```
 
 Before cutover, also run the full local validation and copied-repo mutation
-smoke documented in the implementation plan. Mutation smoke commands must use a
-temporary copy, not the live repository backlog.
+smoke documented in `docs/cutover-validation.md`. Mutation smoke commands must
+use a temporary copy, not the live repository backlog.
 
 Browser and interactive behavior is tracked separately from the first agent
 cutover candidate:
