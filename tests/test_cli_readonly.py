@@ -2,6 +2,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from backlog_py import __version__
 from backlog_py.cli.main import main
 
 
@@ -21,6 +22,13 @@ def test_top_level_help_includes_readonly_commands():
     assert "search" in result.output
     assert "board" in result.output
     assert "config" in result.output
+
+
+def test_top_level_version_reports_package_version():
+    result = CliRunner().invoke(main, ["--version"])
+
+    assert result.exit_code == 0
+    assert __version__ in result.output
 
 
 def test_task_list_plain_outputs_task_id():

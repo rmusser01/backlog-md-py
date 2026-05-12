@@ -49,3 +49,6 @@ backlog-py = "backlog_py.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+backlog_py = ["py.typed"]

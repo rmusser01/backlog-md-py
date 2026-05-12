@@ -4,6 +4,7 @@ from pathlib import Path
 
 import click
 
+from backlog_py import __version__
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
@@ -14,6 +15,7 @@ from backlog_py.storage.project import discover_project
 
 @click.group()
 @click.option("--cwd", type=click.Path(path_type=Path), default=None, help="Backlog project directory.")
+@click.version_option(__version__, prog_name="backlog-py")
 @click.pass_context
 def main(ctx: click.Context, cwd: Path | None) -> None:
     """Python compatibility clone of Backlog.md."""
