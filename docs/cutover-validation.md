@@ -30,9 +30,11 @@ cp -R /path/to/project "$tmpdir/project"
 
 backlog-py --cwd "$tmpdir/project" task list --plain
 backlog-py --cwd "$tmpdir/project" board
-backlog-py --cwd "$tmpdir/project" task create "Cutover smoke task" --id TASK-9999 --description "Created by backlog-md-py smoke." --notes "Initial copied-repo note." --acceptance-criteria "Smoke task is visible" --definition-of-done-add "Copied-repo smoke reviewed" --plain
+backlog-py --cwd "$tmpdir/project" task create "Cutover smoke dependency base" --id TASK-9998 --description "Created by backlog-md-py smoke." --plain
+backlog-py --cwd "$tmpdir/project" task create "Cutover smoke task" --id TASK-9999 --description "Created by backlog-md-py smoke." --notes "Initial copied-repo note." --ac "Smoke task is visible" --dod "Copied-repo smoke reviewed" --dep 9998 --plain
 backlog-py --cwd "$tmpdir/project" task edit TASK-9999 --title "Cutover renamed smoke task" --notes "Copied-repo replacement note." --append-notes "- Copied-repo smoke note." --final-summary "Copied-repo smoke complete." --append-final-summary "Final smoke details appended." --plain
 backlog-py --cwd "$tmpdir/project" task archive TASK-9999 --plain
+backlog-py --cwd "$tmpdir/project" task archive TASK-9998 --plain
 backlog-py --cwd "$tmpdir/project" doc list
 backlog-py --cwd "$tmpdir/project" milestone list
 backlog-py --cwd "$tmpdir/project" config list

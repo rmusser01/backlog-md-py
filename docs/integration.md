@@ -35,6 +35,7 @@ still experimental:
 ```bash
 backlog-py --help
 backlog-py --cwd /path/to/project task list --plain
+backlog-py --cwd /path/to/project task create "Implementation task" --ac "Behavior covered" --dod "Tests pass" --dep 1 --plain
 backlog-py --cwd /path/to/project task edit TASK-2 --notes "Implementation details." --append-final-summary "Ready for review." --plain
 backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project search "query" --plain

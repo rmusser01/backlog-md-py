@@ -30,11 +30,23 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--status", default=None, help="Task status for create/edit.")
 @click.option("--description", default=None, help="Description for task creation.")
 @click.option("--notes", default=None, help="Implementation notes for task create/edit.")
-@click.option("--acceptance-criteria", multiple=True, help="Acceptance criterion for task creation.")
+@click.option(
+    "--ac",
+    "--acceptance-criteria",
+    "acceptance_criteria",
+    multiple=True,
+    help="Acceptance criterion for task creation.",
+)
 @click.option("--definition-of-done", multiple=True, help="Definition of Done item for task creation.")
-@click.option("--definition-of-done-add", multiple=True, help="Additional Definition of Done item for task creation.")
+@click.option(
+    "--dod",
+    "--definition-of-done-add",
+    "definition_of_done_add",
+    multiple=True,
+    help="Additional Definition of Done item for task creation.",
+)
 @click.option("--disable-definition-of-done-defaults", is_flag=True, help="Do not inherit project Definition of Done defaults.")
-@click.option("--dependency", "dependencies", multiple=True, help="Task dependency id for task create/edit.")
+@click.option("--dep", "--dependency", "dependencies", multiple=True, help="Task dependency id for task create/edit.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")

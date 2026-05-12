@@ -33,7 +33,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> --notes <text> --acceptance-criteria <item> --plain",
+            "backlog task create <title> --notes <text> --ac <item> --dod <item> --dep <id> --plain",
         ),
         _golden(
             "cli:task-edit",

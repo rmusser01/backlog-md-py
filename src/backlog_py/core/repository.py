@@ -112,7 +112,7 @@ class MutableRepository(ReadOnlyRepository):
         tasks = self.list_tasks()
         if _task_exists(tasks, normalized_id):
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
-        normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies or ()]
+        normalized_dependencies = _normalize_dependency_ids(dependencies)
         _reject_missing_dependencies(normalized_dependencies, tasks)
         _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
         current_config = load_config(self.project.config_path)
@@ -171,7 +171,7 @@ class MutableRepository(ReadOnlyRepository):
         normalized_dependencies = None
         if dependencies is not None:
             tasks = self.list_tasks()
-            normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies]
+            normalized_dependencies = _normalize_dependency_ids(dependencies)
             _reject_missing_dependencies(normalized_dependencies, tasks)
             _reject_circular_dependencies(task.id, normalized_dependencies, tasks)
         source = task.raw_source
@@ -452,6 +452,23 @@ def _normalize_task_id(task_id: str) -> str:
     if _TASK_ID_RE.fullmatch(normalized) is None:
         raise TaskMutationError(f"Invalid task id: {task_id}")
     return normalized
+
+
+def _normalize_dependency_ids(dependencies: Sequence[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for raw_dependency in dependencies or ():
+        for dependency in str(raw_dependency).split(","):
+            trimmed = dependency.strip()
+            if trimmed:
+                normalized.append(_normalize_dependency_id(trimmed))
+    return normalized
+
+
+def _normalize_dependency_id(task_id: str) -> str:
+    candidate = task_id.strip()
+    if candidate.isdigit():
+        candidate = f"TASK-{candidate}"
+    return _normalize_task_id(candidate)
 
 
 def _task_exists(tasks: Iterable[TaskRecord], task_id: str) -> bool:

@@ -176,6 +176,28 @@ def test_archive_task_rejects_symlinked_archive_directory_escape(tmp_path):
     assert list(outside.iterdir()) == []
 
 
+def test_task_dependencies_accept_numeric_shorthand_and_comma_lists(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+
+    second = repository.create_task(
+        title="Numeric dependency task",
+        task_id="TASK-2",
+        dependencies=["1"],
+    )
+    assert second.parsed.frontmatter["dependencies"] == ["TASK-1"]
+
+    third = repository.create_task(
+        title="Comma dependency task",
+        task_id="TASK-3",
+        dependencies=["1,task-2"],
+    )
+    assert third.parsed.frontmatter["dependencies"] == ["TASK-1", "TASK-2"]
+
+    edited = repository.edit_task("TASK-3", dependencies=["task-1"])
+    assert edited.parsed.frontmatter["dependencies"] == ["TASK-1"]
+
+
 def test_edit_task_preserves_crlf_when_toggling_checklists(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
@@ -372,8 +394,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "CLI final summary.",
             "--append-final-summary",
             "CLI appended final summary.",
-            "--dependency",
-            "TASK-1",
+            "--dep",
+            "1",
             "--plain",
         ],
     )
@@ -459,14 +481,14 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "TASK-2",
             "--description",
             "Created with richer CLI fields.",
-            "--acceptance-criteria",
+            "--ac",
             "CLI AC one",
-            "--acceptance-criteria",
+            "--ac",
             "CLI AC two",
-            "--definition-of-done-add",
+            "--dod",
             "CLI specific DoD",
-            "--dependency",
-            "TASK-1",
+            "--dep",
+            "1",
             "--plain",
         ],
     )
@@ -480,6 +502,25 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "- [ ] #1 Project default" in written
     assert "- [ ] #2 CLI specific DoD" in written
 
+    comma = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "create",
+            "CLI comma dependency task",
+            "--id",
+            "TASK-3",
+            "--dep",
+            "1,TASK-2",
+            "--plain",
+        ],
+    )
+    assert comma.exit_code == 0
+    comma_written = _task_file(repo, "task-3").read_text(encoding="utf-8")
+    assert "dependencies:\n- TASK-1\n- TASK-2" in comma_written
+
     explicit = runner.invoke(
         main,
         [
@@ -489,14 +530,14 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "create",
             "CLI explicit DoD task",
             "--id",
-            "TASK-3",
+            "TASK-4",
             "--definition-of-done",
             "Explicit CLI DoD",
             "--plain",
         ],
     )
     assert explicit.exit_code == 0
-    explicit_written = _task_file(repo, "task-3").read_text(encoding="utf-8")
+    explicit_written = _task_file(repo, "task-4").read_text(encoding="utf-8")
     assert "- [ ] #1 Explicit CLI DoD" in explicit_written
     assert "Project default" not in explicit_written
 
@@ -509,13 +550,13 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "create",
             "CLI disabled defaults task",
             "--id",
-            "TASK-4",
+            "TASK-5",
             "--disable-definition-of-done-defaults",
             "--plain",
         ],
     )
     assert disabled.exit_code == 0
-    disabled_written = _task_file(repo, "task-4").read_text(encoding="utf-8")
+    disabled_written = _task_file(repo, "task-5").read_text(encoding="utf-8")
     assert "Project default" not in disabled_written
 
 
