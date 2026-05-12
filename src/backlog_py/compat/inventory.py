@@ -38,7 +38,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
-            "backlog task edit <id> --title <title> --append-notes <text> --plain",
+            "backlog task edit <id> --title <title> --dependency <id> --plain",
         ),
         _golden("cli:doc-list", "CLI-INSTRUCTIONS.md", "backlog doc list"),
         _golden("cli:doc-view", "CLI-INSTRUCTIONS.md", "backlog doc view <path-or-id>"),

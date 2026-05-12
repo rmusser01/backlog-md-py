@@ -316,6 +316,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "- CLI note.",
             "--final-summary",
             "CLI final summary.",
+            "--dependency",
+            "TASK-1",
             "--plain",
         ],
     )
@@ -324,6 +326,7 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "title: CLI renamed task" in written
     assert "Edited from CLI." in written
+    assert "dependencies:\n- TASK-1" in written
     assert "- CLI note." in written
     assert "CLI final summary." in written
 

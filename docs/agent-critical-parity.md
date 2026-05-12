@@ -17,7 +17,7 @@ do not block the first local-file agent cutover candidate.
 | cli:board | implemented | backlog board | cli:board |
 | cli:config-list | implemented | backlog config list | cli:config-list |
 | cli:task-create | implemented | backlog task create <title> --acceptance-criteria <item> --dependency <id> --plain | cli:task-create |
-| cli:task-edit | implemented | backlog task edit <id> --title <title> --append-notes <text> --plain | cli:task-edit |
+| cli:task-edit | implemented | backlog task edit <id> --title <title> --dependency <id> --plain | cli:task-edit |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
 | cli:doc-create | implemented | backlog doc create <path> --title <title> --content <body> | cli:doc-create |

@@ -35,7 +35,7 @@ still experimental:
 ```bash
 backlog-py --help
 backlog-py --cwd /path/to/project task list --plain
-backlog-py --cwd /path/to/project task edit TASK-1 --title "Updated title" --plain
+backlog-py --cwd /path/to/project task edit TASK-2 --title "Updated title" --dependency TASK-1 --plain
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project board
 ```

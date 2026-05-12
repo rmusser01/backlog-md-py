@@ -33,7 +33,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--definition-of-done", multiple=True, help="Definition of Done item for task creation.")
 @click.option("--definition-of-done-add", multiple=True, help="Additional Definition of Done item for task creation.")
 @click.option("--disable-definition-of-done-defaults", is_flag=True, help="Do not inherit project Definition of Done defaults.")
-@click.option("--dependency", "dependencies", multiple=True, help="Task dependency id for task creation.")
+@click.option("--dependency", "dependencies", multiple=True, help="Task dependency id for task create/edit.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
@@ -91,6 +91,7 @@ def task_command(
             check_dod=check_dod,
             uncheck_ac=uncheck_ac,
             uncheck_dod=uncheck_dod,
+            dependencies=dependencies if dependencies else None,
             final_summary=final_summary,
         )
         click.echo(_format_task_line(task_record, plain=plain))
