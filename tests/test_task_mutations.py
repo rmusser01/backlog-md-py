@@ -126,6 +126,23 @@ def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_pa
     assert "- [ ] #1 Tests written" in after
 
 
+def test_edit_task_can_append_and_clear_final_summary(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    _repository(repo).edit_task("TASK-1", append_final_summary=["Added final detail."])
+
+    after_append = _task_file(repo).read_text(encoding="utf-8")
+    assert "No final summary yet." in after_append
+    assert "Added final detail." in after_append
+
+    _repository(repo).edit_task("TASK-1", clear_final_summary=True)
+
+    after_clear = _task_file(repo).read_text(encoding="utf-8")
+    assert "No final summary yet." not in after_clear
+    assert "Added final detail." not in after_clear
+    assert "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n\n<!-- SECTION:FINAL_SUMMARY:END -->" in after_clear
+
+
 def test_archive_task_moves_active_file_to_archive_without_rewrite(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
@@ -345,6 +362,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "- CLI note.",
             "--final-summary",
             "CLI final summary.",
+            "--append-final-summary",
+            "CLI appended final summary.",
             "--dependency",
             "TASK-1",
             "--plain",
@@ -358,6 +377,24 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "dependencies:\n- TASK-1" in written
     assert "- CLI note." in written
     assert "CLI final summary." in written
+    assert "CLI appended final summary." in written
+
+    clear = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "edit",
+            "TASK-2",
+            "--clear-final-summary",
+            "--plain",
+        ],
+    )
+    assert clear.exit_code == 0
+    cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "CLI final summary." not in cleared
+    assert "CLI appended final summary." not in cleared
 
     uncheck = runner.invoke(
         main,
@@ -491,6 +528,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         title="MCP renamed task",
         appendNotes="- MCP note.",
         finalSummary="MCP final summary.",
+        finalSummaryAppend=["MCP appended final summary."],
         checkAc=[1],
     )
     assert edited["id"] == "TASK-2"
@@ -502,7 +540,13 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "title: MCP renamed task" in written
     assert "- MCP note." in written
     assert "MCP final summary." in written
+    assert "MCP appended final summary." in written
     assert "- [ ] #1 MCP create works" in written
+
+    task_edit(project, task_id="TASK-2", finalSummaryClear=True)
+    cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "MCP final summary." not in cleared
+    assert "MCP appended final summary." not in cleared
 
 
 def test_mcp_bool_string_values_are_parsed_explicitly(tmp_path):

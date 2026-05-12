@@ -40,6 +40,8 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--uncheck-ac", multiple=True, type=int, help="Mark acceptance criteria index incomplete.")
 @click.option("--uncheck-dod", multiple=True, type=int, help="Mark Definition of Done index incomplete.")
 @click.option("--final-summary", default=None, help="Replace the final summary section.")
+@click.option("--append-final-summary", multiple=True, help="Append text to the final summary section.")
+@click.option("--clear-final-summary", is_flag=True, help="Clear the final summary section.")
 @click.pass_context
 def task_command(
     ctx: click.Context,
@@ -60,6 +62,8 @@ def task_command(
     uncheck_ac: tuple[int, ...],
     uncheck_dod: tuple[int, ...],
     final_summary: str | None,
+    append_final_summary: tuple[str, ...],
+    clear_final_summary: bool,
 ) -> None:
     """View tasks."""
     if args and args[0] == "archive":
@@ -99,6 +103,8 @@ def task_command(
             uncheck_dod=uncheck_dod,
             dependencies=dependencies if dependencies else None,
             final_summary=final_summary,
+            append_final_summary=append_final_summary,
+            clear_final_summary=clear_final_summary,
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return

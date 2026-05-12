@@ -35,7 +35,7 @@ still experimental:
 ```bash
 backlog-py --help
 backlog-py --cwd /path/to/project task list --plain
-backlog-py --cwd /path/to/project task edit TASK-2 --title "Updated title" --dependency TASK-1 --plain
+backlog-py --cwd /path/to/project task edit TASK-2 --append-final-summary "Ready for review." --plain
 backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project board
@@ -68,7 +68,7 @@ print(task_board(project))
 print(task_list(project, status="In Progress", limit=10))
 print(task_search(project, "release", limit=5))
 print(task_view(project, "task-1"))
-print(task_edit(project, "task-1", title="Updated title"))
+print(task_edit(project, "task-1", finalSummaryAppend=["Ready for review."]))
 print(task_archive(project, "task-1"))
 ```
 

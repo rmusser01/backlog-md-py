@@ -38,7 +38,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
-            "backlog task edit <id> --title <title> --dependency <id> --plain",
+            "backlog task edit <id> --append-final-summary <text> --clear-final-summary --plain",
         ),
         _golden("cli:task-archive", "CLI-INSTRUCTIONS.md", "backlog task archive <id> --plain"),
         _golden("cli:doc-list", "CLI-INSTRUCTIONS.md", "backlog doc list"),
@@ -63,7 +63,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden("mcp:task-search", "MCP tools", "task_search(project, query, limit=10)"),
         _golden("mcp:task-view", "MCP tools", "task_view(project, task_id)"),
         _golden("mcp:task-create", "MCP tools", "task_create(project, **kwargs)"),
-        _golden("mcp:task-edit", "MCP tools", "task_edit(project, task_id, title=None, **kwargs)"),
+        _golden(
+            "mcp:task-edit",
+            "MCP tools",
+            "task_edit(project, task_id, finalSummaryAppend=None, finalSummaryClear=False, **kwargs)",
+        ),
         _golden("mcp:task-archive", "MCP tools", "task_archive(project, task_id)"),
         _golden("mcp:document-list", "MCP tools", "document_list(project, query=None, limit=100)"),
         _golden("mcp:document-search", "MCP tools", "document_list(project, query=<query>, limit=100)"),

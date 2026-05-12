@@ -147,6 +147,8 @@ class MutableRepository(ReadOnlyRepository):
         description: str | None = None,
         append_notes: str | None = None,
         final_summary: str | None = None,
+        append_final_summary: Sequence[str] | None = None,
+        clear_final_summary: bool = False,
         check_ac: Sequence[int] | None = None,
         check_dod: Sequence[int] | None = None,
         uncheck_ac: Sequence[int] | None = None,
@@ -183,6 +185,12 @@ class MutableRepository(ReadOnlyRepository):
             parsed = parse_task_markdown(source)
         if final_summary is not None:
             source = _replace_section(source, parsed, "FINAL_SUMMARY", _normalize_block(final_summary))
+            parsed = parse_task_markdown(source)
+        if append_final_summary:
+            source = _append_to_section(source, parsed, "FINAL_SUMMARY", append_final_summary)
+            parsed = parse_task_markdown(source)
+        if clear_final_summary:
+            source = _replace_section(source, parsed, "FINAL_SUMMARY", "")
             parsed = parse_task_markdown(source)
         if check_ac:
             source = _set_checklist_indexes(source, parsed, "AC", check_ac, checked=True)
@@ -335,6 +343,19 @@ def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content
     if section is not None:
         return source.replace(section.raw.rstrip("\r\n"), new_section, 1)
     return source.rstrip() + f"\n\n{_heading_for_section(name)}\n\n{new_section}\n"
+
+
+def _append_to_section(
+    source: str,
+    parsed: ParsedTaskMarkdown,
+    name: str,
+    items: Sequence[str],
+) -> str:
+    section = parsed.sections.get(name)
+    existing_content = "" if section is None else section.content.rstrip()
+    appended = "\n".join(_normalize_block(item) for item in items if _normalize_block(item))
+    content = appended if not existing_content else f"{existing_content}\n{appended}"
+    return _replace_section(source, parsed, name, content)
 
 
 def _set_checklist_indexes(
