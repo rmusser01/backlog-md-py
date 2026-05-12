@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import pytest
@@ -71,9 +72,15 @@ def test_task_view_returns_fixture_backed_readonly_dict():
     assert "Trailing unowned body content" in result["raw_source"]
 
 
-def test_unsupported_mutation_shapes_raise_clear_not_implemented_errors():
-    with pytest.raises(NotImplementedError, match="Task mutation MCP tools are not implemented until Task 7"):
-        task_edit(_project(), task_id="TASK-1", title="Edited task")
+def test_fastmcp_task_edit_passes_title_to_safe_core(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    fake_server = mcp_server.create_server(fastmcp_cls=FakeFastMCP)
+
+    result = fake_server.tools["task_edit"](project=str(repo), task_id="TASK-1", title="FastMCP renamed task")
+
+    assert result["title"] == "FastMCP renamed task"
+    assert (repo / "backlog" / "tasks" / "task-1 - FastMCP-renamed-task.md").is_file()
 
 
 def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():

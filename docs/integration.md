@@ -35,6 +35,7 @@ still experimental:
 ```bash
 backlog-py --help
 backlog-py --cwd /path/to/project task list --plain
+backlog-py --cwd /path/to/project task edit TASK-1 --title "Updated title" --plain
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project board
 ```
@@ -57,13 +58,14 @@ a Python process:
 ```python
 from pathlib import Path
 
-from backlog_py.mcp import read_resource, task_search, task_view
+from backlog_py.mcp import read_resource, task_edit, task_search, task_view
 from backlog_py.storage.project import discover_project
 
-project = discover_project(Path("/path/to/project"))
+project = discover_project(Path("/path/to/copied/project"))
 print(read_resource("backlog://workflow/overview"))
 print(task_search(project, "release", limit=5))
 print(task_view(project, "task-1"))
+print(task_edit(project, "task-1", title="Updated title"))
 ```
 
 Mutation helpers are available for implemented local-file operations, but callers

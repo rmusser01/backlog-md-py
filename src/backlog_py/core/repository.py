@@ -143,6 +143,7 @@ class MutableRepository(ReadOnlyRepository):
         self,
         task_id: str,
         *,
+        title: str | None = None,
         description: str | None = None,
         append_notes: str | None = None,
         final_summary: str | None = None,
@@ -156,6 +157,12 @@ class MutableRepository(ReadOnlyRepository):
     ) -> TaskRecord:
         _reject_on_status_change(on_status_change)
         task = self.get_task(task_id)
+        safe_current_path = _mutation_path(task.path.parent, task.path)
+        target_path = safe_current_path
+        if title is not None:
+            target_path = self._task_path(task.id, title)
+            if target_path != safe_current_path and target_path.exists():
+                raise TaskMutationError(f"Task path already exists: {target_path.name}")
         normalized_dependencies = None
         if dependencies is not None:
             tasks = self.list_tasks()
@@ -189,8 +196,10 @@ class MutableRepository(ReadOnlyRepository):
         if uncheck_dod:
             source = _set_checklist_indexes(source, parsed, "DOD", uncheck_dod, checked=False)
             parsed = parse_task_markdown(source)
-        if status is not None or normalized_dependencies is not None:
+        if title is not None or status is not None or normalized_dependencies is not None:
             updates: dict[str, object] = {}
+            if title is not None:
+                updates["title"] = title
             if status is not None:
                 _reject_unknown_status(status, self.project.config.statuses)
                 updates["status"] = status
@@ -199,8 +208,10 @@ class MutableRepository(ReadOnlyRepository):
             source = _replace_frontmatter_values(source, parsed, updates)
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
-        _atomic_write_text(task.path, source)
-        return _load_task(task.path)
+        _atomic_write_text(target_path, source)
+        if target_path != safe_current_path:
+            safe_current_path.unlink()
+        return _load_task(target_path)
 
     def _next_task_id(self) -> str:
         max_id = 0

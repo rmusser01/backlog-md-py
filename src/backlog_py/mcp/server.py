@@ -96,6 +96,7 @@ def _register_tools(server: Any) -> None:
     def task_edit(
         project: str,
         task_id: str,
+        title: str | None = None,
         description: str | None = None,
         append_notes: str | None = None,
         final_summary: str | None = None,
@@ -112,6 +113,7 @@ def _register_tools(server: Any) -> None:
             _project(project),
             task_id=task_id,
             **_present(
+                title=title,
                 description=description,
                 append_notes=append_notes,
                 final_summary=final_summary,

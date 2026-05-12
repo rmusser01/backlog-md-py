@@ -100,6 +100,22 @@ def test_edit_task_updates_owned_sections_and_checklists_without_rewriting_unown
     assert before != after
 
 
+def test_edit_task_updates_title_and_renames_task_file_without_rewriting_unowned_body(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+
+    edited = _repository(repo).edit_task("TASK-1", title="Renamed task")
+
+    renamed_path = _task_file(repo)
+    written = renamed_path.read_text(encoding="utf-8")
+    assert edited.title == "Renamed task"
+    assert renamed_path.name == "task-1 - Renamed-task.md"
+    assert not task_path.exists()
+    assert "title: Renamed task" in written
+    assert "Unowned body content before acceptance criteria must be preserved." in written
+    assert "Trailing unowned body content must also round trip." in written
+
+
 def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_path):
     repo = _copy_fixture(tmp_path)
 
@@ -292,6 +308,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "task",
             "edit",
             "TASK-2",
+            "--title",
+            "CLI renamed task",
             "--description",
             "Edited from CLI.",
             "--append-notes",
@@ -302,8 +320,9 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
         ],
     )
     assert edit.exit_code == 0
-    assert "TASK-2 [To Do] CLI mutation task" in edit.output
+    assert "TASK-2 [To Do] CLI renamed task" in edit.output
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "title: CLI renamed task" in written
     assert "Edited from CLI." in written
     assert "- CLI note." in written
     assert "CLI final summary." in written
@@ -345,15 +364,18 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     edited = task_edit(
         project,
         task_id="TASK-2",
+        title="MCP renamed task",
         appendNotes="- MCP note.",
         finalSummary="MCP final summary.",
         checkAc=[1],
     )
     assert edited["id"] == "TASK-2"
+    assert edited["title"] == "MCP renamed task"
 
     unchecked = task_edit(project, task_id="TASK-2", uncheckAc=[1])
     assert unchecked["id"] == "TASK-2"
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "title: MCP renamed task" in written
     assert "- MCP note." in written
     assert "MCP final summary." in written
     assert "- [ ] #1 MCP create works" in written

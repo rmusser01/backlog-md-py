@@ -17,7 +17,7 @@ do not block the first local-file agent cutover candidate.
 | cli:board | implemented | backlog board | cli:board |
 | cli:config-list | implemented | backlog config list | cli:config-list |
 | cli:task-create | implemented | backlog task create <title> --status <status> --plain | cli:task-create |
-| cli:task-edit | implemented | backlog task edit <id> --append-notes <text> --plain | cli:task-edit |
+| cli:task-edit | implemented | backlog task edit <id> --title <title> --append-notes <text> --plain | cli:task-edit |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
 | cli:doc-create | implemented | backlog doc create <path> --title <title> --content <body> | cli:doc-create |
@@ -34,7 +34,7 @@ do not block the first local-file agent cutover candidate.
 | mcp:task-search | implemented | task_search(project, query, limit=10) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
 | mcp:task-create | implemented | task_create(project, **kwargs) | mcp:task-create |
-| mcp:task-edit | implemented | task_edit(project, task_id, **kwargs) | mcp:task-edit |
+| mcp:task-edit | implemented | task_edit(project, task_id, title=None, **kwargs) | mcp:task-edit |
 | mcp:document-list | implemented | document_list(project, query=None, limit=100) | mcp:document-list |
 | mcp:document-search | implemented | document_list(project, query=<query>, limit=100) | mcp:document-search |
 | mcp:document-view | implemented | document_view(project, path_or_id) | mcp:document-view |

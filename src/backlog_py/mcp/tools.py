@@ -9,9 +9,6 @@ from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, Ta
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
 
 
-_MUTATION_NOT_IMPLEMENTED = "Task mutation MCP tools are not implemented until Task 7 for this argument shape."
-
-
 def task_search(project: BacklogProject, query: str, limit: int = 10) -> list[dict[str, Any]]:
     """Search tasks through the read-only repository and return JSON-safe rows."""
     if limit <= 0:
@@ -52,11 +49,10 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
 
 def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str, Any]:
     """Edit supported task sections through the safe mutation repository."""
-    if "title" in kwargs:
-        raise NotImplementedError(_MUTATION_NOT_IMPLEMENTED)
     repository = MutableRepository(project)
     task = repository.edit_task(
         task_id,
+        title=_optional_string(kwargs.get("title")),
         description=_optional_string(kwargs.get("description")),
         append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
         final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),

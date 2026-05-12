@@ -26,6 +26,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.argument("args", nargs=-1)
 @click.option("--plain", is_flag=True, help="Print plain text output.")
 @click.option("--id", "task_id", default=None, help="Task id for task creation.")
+@click.option("--title", default=None, help="Replacement task title for task edit.")
 @click.option("--status", default=None, help="Task status for create/edit.")
 @click.option("--description", default=None, help="Description for task creation.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
@@ -40,6 +41,7 @@ def task_command(
     args: tuple[str, ...],
     plain: bool,
     task_id: str | None,
+    title: str | None,
     status: str | None,
     description: str | None,
     append_notes: str | None,
@@ -66,6 +68,7 @@ def task_command(
             raise click.UsageError("Usage: task edit TASK_ID")
         task_record = _mutable_repository(ctx).edit_task(
             args[1],
+            title=title,
             description=description,
             status=status,
             append_notes=append_notes,
