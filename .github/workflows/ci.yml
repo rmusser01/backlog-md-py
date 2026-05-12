@@ -74,4 +74,7 @@ jobs:
           /tmp/backlog-md-py-wheel-smoke/bin/python -m pip install --upgrade pip
           /tmp/backlog-md-py-wheel-smoke/bin/python -m pip install dist/*.whl
           /tmp/backlog-md-py-wheel-smoke/bin/backlog-py --help
+          /tmp/backlog-md-py-wheel-smoke/bin/backlog-py --version
           /tmp/backlog-md-py-wheel-smoke/bin/python -m backlog_py --help
+          /tmp/backlog-md-py-wheel-smoke/bin/python -m backlog_py --version
+          /tmp/backlog-md-py-wheel-smoke/bin/python -c 'from importlib.resources import files; assert files("backlog_py").joinpath("py.typed").is_file()'

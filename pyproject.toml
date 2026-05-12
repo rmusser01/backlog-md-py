@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "backlog-md-py"
-version = "0.1.0"
 description = "Standalone Python compatibility implementation of Backlog.md"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
+dynamic = ["version"]
 authors = [
   { name = "Robert Musser" },
 ]
@@ -41,6 +41,7 @@ dev = [
   "bandit>=1.7.0",
   "build>=1.2.0",
   "pytest>=8.0.0",
+  "tomli>=2.0.0; python_version < '3.11'",
   "twine>=5.0.0",
 ]
 
@@ -52,3 +53,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 backlog_py = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = { attr = "backlog_py.__version__" }
