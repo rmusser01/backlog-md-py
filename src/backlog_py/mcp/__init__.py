@@ -15,6 +15,7 @@ from backlog_py.mcp.tools import (
     milestone_rename,
     task_create,
     task_edit,
+    task_list,
     task_search,
     task_view,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "read_resource",
     "task_create",
     "task_edit",
+    "task_list",
     "task_search",
     "task_view",
 ]

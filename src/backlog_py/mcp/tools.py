@@ -17,6 +17,17 @@ def task_search(project: BacklogProject, query: str, limit: int = 10) -> list[di
     return [_task_summary(project, task) for task in repository.search_tasks(query)[:limit]]
 
 
+def task_list(project: BacklogProject, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """List tasks through the read-only repository and return JSON-safe rows."""
+    if limit <= 0:
+        return []
+    repository = ReadOnlyRepository(project)
+    tasks = repository.list_tasks()
+    if status is not None:
+        tasks = [task for task in tasks if task.status == status]
+    return [_task_summary(project, task) for task in tasks[:limit]]
+
+
 def task_view(project: BacklogProject, task_id: str) -> dict[str, Any]:
     """Return one task through the read-only repository as a JSON-safe mapping."""
     repository = ReadOnlyRepository(project)

@@ -5,6 +5,7 @@ import pytest
 
 import backlog_py.mcp as mcp
 from backlog_py.mcp import server as mcp_server
+from backlog_py.mcp import tools as mcp_tools
 from backlog_py.mcp.resources import read_resource
 from backlog_py.mcp.tools import task_edit, task_search, task_view
 from backlog_py.storage.project import discover_project
@@ -26,6 +27,32 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
     assert "document_create" in content
     assert "milestone_add" in content
     assert "definition_of_done_defaults_get" in content
+
+
+def test_task_list_returns_fixture_backed_readonly_dicts():
+    assert hasattr(mcp_tools, "task_list")
+
+    results = mcp_tools.task_list(_project())
+
+    assert results == [
+        {
+            "id": "TASK-1",
+            "title": "Example task",
+            "status": "In Progress",
+            "description": (
+                "Implement a fixture that exercises parser preservation behavior.\n"
+                "This paragraph must remain untouched by a no-op render."
+            ),
+            "path": "backlog/tasks/task-1 - Example-task.md",
+        }
+    ]
+
+
+def test_task_list_honors_status_and_limit():
+    assert hasattr(mcp_tools, "task_list")
+
+    assert mcp_tools.task_list(_project(), status="To Do") == []
+    assert mcp_tools.task_list(_project(), limit=0) == []
 
 
 def test_task_workflow_resource_alias_matches_overview():
@@ -89,8 +116,12 @@ def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():
     assert fake_server.name == "backlog-md-py"
     assert fake_server.resources["backlog://workflow/overview"]() == read_resource("backlog://workflow/overview")
     assert fake_server.resources["backlog://docs/task-workflow"]() == read_resource("backlog://docs/task-workflow")
+    assert "task_list" in fake_server.tools
     assert "task_search" in fake_server.tools
     assert "definition_of_done_defaults_upsert" in fake_server.tools
+
+    listed = fake_server.tools["task_list"](project=str(FIXTURE_REPO), status="In Progress")
+    assert listed[0]["id"] == "TASK-1"
 
     result = fake_server.tools["task_search"](project=str(FIXTURE_REPO), query="parser preservation")
 
@@ -108,6 +139,7 @@ def test_create_server_reports_missing_sdk_when_no_adapter_is_provided(monkeypat
 
 
 def test_mcp_package_exports_document_milestone_and_dod_tools():
+    assert mcp.task_list.__name__ == "task_list"
     assert mcp.document_create.__name__ == "document_create"
     assert mcp.milestone_add.__name__ == "milestone_add"
     assert mcp.definition_of_done_defaults_get.__name__ == "definition_of_done_defaults_get"

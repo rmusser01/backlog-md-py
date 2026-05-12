@@ -67,6 +67,9 @@ fixtures:
   - name: "mcp:task-workflow-alias"
     resource: "backlog://docs/task-workflow"
     agent_critical: true
+  - name: "mcp:task-list"
+    tool: "task_list"
+    agent_critical: true
   - name: "mcp:task-search"
     tool: "task_search"
     agent_critical: true

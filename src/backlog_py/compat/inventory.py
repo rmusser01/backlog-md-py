@@ -53,6 +53,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         ),
         _golden("mcp:workflow-overview", "agent-nudge.md", "backlog://workflow/overview"),
         _golden("mcp:task-workflow-alias", "agent-nudge.md", "backlog://docs/task-workflow"),
+        _golden("mcp:task-list", "MCP tools", "task_list(project, status=None, limit=100)"),
         _golden("mcp:task-search", "MCP tools", "task_search(project, query, limit=10)"),
         _golden("mcp:task-view", "MCP tools", "task_view(project, task_id)"),
         _golden("mcp:task-create", "MCP tools", "task_create(project, **kwargs)"),
