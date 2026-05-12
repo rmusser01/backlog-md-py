@@ -87,6 +87,12 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
     return _task_detail(project, task)
 
 
+def task_archive(project: BacklogProject, task_id: str) -> dict[str, Any]:
+    """Move one active task to backlog/archive/tasks."""
+    task = MutableRepository(project).archive_task(task_id)
+    return _task_detail(project, task)
+
+
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """List or search documents through the safe document service."""
     if limit <= 0:

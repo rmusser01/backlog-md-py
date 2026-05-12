@@ -126,6 +126,35 @@ def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_pa
     assert "- [ ] #1 Tests written" in after
 
 
+def test_archive_task_moves_active_file_to_archive_without_rewrite(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+
+    archived = _repository(repo).archive_task("TASK-1")
+
+    archived_path = repo / "backlog" / "archive" / "tasks" / task_path.name
+    assert archived.id == "TASK-1"
+    assert archived.path == archived_path
+    assert not task_path.exists()
+    assert archived_path.read_text(encoding="utf-8") == original
+    assert _repository(repo).list_tasks() == []
+
+
+def test_archive_task_rejects_symlinked_archive_directory_escape(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    archive_root = repo / "backlog" / "archive"
+    archive_root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(TaskMutationError, match="outside allowed base"):
+        _repository(repo).archive_task("TASK-1")
+
+    assert _task_file(repo).is_file()
+    assert list(outside.iterdir()) == []
+
+
 def test_edit_task_preserves_crlf_when_toggling_checklists(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
@@ -349,6 +378,19 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     task_one = _task_file(repo).read_text(encoding="utf-8")
     assert "- [ ] #1 Preserve completed acceptance criteria raw line" in task_one
     assert "- [ ] #1 Tests written" in task_one
+
+
+def test_cli_task_archive_uses_safe_core(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    active_path = repo / "backlog" / "tasks" / "task-1 - Example-task.md"
+
+    archive = runner.invoke(main, ["--cwd", str(repo), "task", "archive", "TASK-1", "--plain"])
+
+    assert archive.exit_code == 0
+    assert "TASK-1 [In Progress] Example task archived" in archive.output
+    assert not active_path.exists()
+    assert (repo / "backlog" / "archive" / "tasks" / "task-1 - Example-task.md").is_file()
 
 
 def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):

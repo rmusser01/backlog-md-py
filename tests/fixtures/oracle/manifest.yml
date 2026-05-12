@@ -28,6 +28,9 @@ fixtures:
   - name: "cli:task-edit"
     command: ["backlog", "task", "edit", "TASK-1", "--append-notes", "Updated from fixture", "--plain"]
     agent_critical: true
+  - name: "cli:task-archive"
+    command: ["backlog", "task", "archive", "TASK-1", "--plain"]
+    agent_critical: true
   - name: "cli:doc-list"
     command: ["backlog", "doc", "list"]
     agent_critical: true
@@ -84,6 +87,9 @@ fixtures:
     agent_critical: true
   - name: "mcp:task-edit"
     tool: "task_edit"
+    agent_critical: true
+  - name: "mcp:task-archive"
+    tool: "task_archive"
     agent_critical: true
   - name: "mcp:document-list"
     tool: "document_list"

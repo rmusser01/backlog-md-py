@@ -18,6 +18,7 @@ Supported tools:
 - task_view(project, task_id)
 - task_create(project, **kwargs)
 - task_edit(project, task_id, title=None, **kwargs)
+- task_archive(project, task_id)
 - document_list(project, query=None, limit=100)
 - document_view(project, path_or_id)
 - document_create(project, **kwargs)

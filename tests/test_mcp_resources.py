@@ -132,6 +132,19 @@ def test_fastmcp_task_edit_passes_title_to_safe_core(tmp_path):
     assert (repo / "backlog" / "tasks" / "task-1 - FastMCP-renamed-task.md").is_file()
 
 
+def test_task_archive_moves_task_to_archive_through_mcp_tool(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    result = mcp_tools.task_archive(project, "TASK-1")
+
+    assert result["id"] == "TASK-1"
+    assert result["path"] == "backlog/archive/tasks/task-1 - Example-task.md"
+    assert not (repo / "backlog" / "tasks" / "task-1 - Example-task.md").exists()
+    assert (repo / "backlog" / "archive" / "tasks" / "task-1 - Example-task.md").is_file()
+
+
 def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():
     fake_server = mcp_server.create_server(fastmcp_cls=FakeFastMCP)
 
@@ -139,6 +152,7 @@ def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():
     assert fake_server.resources["backlog://workflow/overview"]() == read_resource("backlog://workflow/overview")
     assert fake_server.resources["backlog://docs/task-workflow"]() == read_resource("backlog://docs/task-workflow")
     assert "task_board" in fake_server.tools
+    assert "task_archive" in fake_server.tools
     assert "task_list" in fake_server.tools
     assert "task_search" in fake_server.tools
     assert "definition_of_done_defaults_upsert" in fake_server.tools
@@ -165,6 +179,7 @@ def test_create_server_reports_missing_sdk_when_no_adapter_is_provided(monkeypat
 
 
 def test_mcp_package_exports_document_milestone_and_dod_tools():
+    assert mcp.task_archive.__name__ == "task_archive"
     assert mcp.task_board.__name__ == "task_board"
     assert mcp.task_list.__name__ == "task_list"
     assert mcp.document_create.__name__ == "document_create"

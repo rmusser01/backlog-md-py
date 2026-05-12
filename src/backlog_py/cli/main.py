@@ -62,6 +62,12 @@ def task_command(
     final_summary: str | None,
 ) -> None:
     """View tasks."""
+    if args and args[0] == "archive":
+        if len(args) != 2:
+            raise click.UsageError("Usage: task archive TASK_ID")
+        task_record = _mutable_repository(ctx).archive_task(args[1])
+        click.echo(f"{_format_task_line(task_record, plain=plain)} archived")
+        return
     if args and args[0] == "create":
         if len(args) != 2:
             raise click.UsageError("Usage: task create TITLE")

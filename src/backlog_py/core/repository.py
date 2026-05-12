@@ -213,6 +213,18 @@ class MutableRepository(ReadOnlyRepository):
             safe_current_path.unlink()
         return _load_task(target_path)
 
+    def archive_task(self, task_id: str) -> TaskRecord:
+        task = self.get_task(task_id)
+        safe_current_path = _mutation_path(task.path.parent, task.path)
+        archive_root = _mutation_path(self.project.backlog_dir, self.project.backlog_dir / "archive")
+        archive_dir = _mutation_path(archive_root, archive_root / "tasks")
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        target_path = _mutation_path(archive_dir, archive_dir / task.path.name)
+        if target_path.exists():
+            raise TaskMutationError(f"Archived task path already exists: {target_path.name}")
+        os.replace(safe_current_path, target_path)
+        return _load_task(target_path)
+
     def _next_task_id(self) -> str:
         max_id = 0
         for task in self.list_tasks():
