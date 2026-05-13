@@ -33,7 +33,7 @@
 - Create: `src/backlog_py/orchestration/__init__.py`
 - Test: `tests/test_orchestration.py`
 
-- [ ] **Step 1: Write failing parser tests**
+- [x] **Step 1: Write failing parser tests**
 
 Add tests that prove:
 
@@ -72,13 +72,13 @@ def test_parse_orchestration_preserves_known_and_unknown_fields():
     assert state.extra == {"custom": {"preserve": True}}
 ```
 
-- [ ] **Step 2: Run parser tests to verify failure**
+- [x] **Step 2: Run parser tests to verify failure**
 
 Run: `python -m pytest tests/test_orchestration.py -q`
 
 Expected: FAIL because `backlog_py.orchestration` does not exist.
 
-- [ ] **Step 3: Implement minimal dataclasses and parser**
+- [x] **Step 3: Implement minimal dataclasses and parser**
 
 Create frozen dataclasses:
 
@@ -123,13 +123,13 @@ class OrchestrationState:
 
 Add `parse_orchestration(task_or_frontmatter: Any) -> OrchestrationState | None`.
 
-- [ ] **Step 4: Run parser tests**
+- [x] **Step 4: Run parser tests**
 
 Run: `python -m pytest tests/test_orchestration.py -q`
 
 Expected: parser tests pass.
 
-- [ ] **Step 5: Commit parser slice**
+- [x] **Step 5: Commit parser slice**
 
 ```bash
 git add src/backlog_py/orchestration tests/test_orchestration.py
@@ -143,7 +143,7 @@ git commit -m "feat: parse orchestration metadata"
 - Modify: `src/backlog_py/orchestration/__init__.py`
 - Test: `tests/test_orchestration.py`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 Add tests that prove:
 
@@ -180,13 +180,13 @@ def test_validate_orchestration_reports_invalid_known_fields():
     }
 ```
 
-- [ ] **Step 2: Run validation tests to verify failure**
+- [x] **Step 2: Run validation tests to verify failure**
 
 Run: `python -m pytest tests/test_orchestration.py -q`
 
 Expected: FAIL because policy and validation are not implemented.
 
-- [ ] **Step 3: Implement policy and validation**
+- [x] **Step 3: Implement policy and validation**
 
 Add dataclasses:
 
@@ -222,13 +222,13 @@ Implement:
 - `validate_policy(policy)`
 - `validate_orchestration(task_or_frontmatter, policy=None)`
 
-- [ ] **Step 4: Run validation tests**
+- [x] **Step 4: Run validation tests**
 
 Run: `python -m pytest tests/test_orchestration.py -q`
 
 Expected: validation tests pass.
 
-- [ ] **Step 5: Commit validation slice**
+- [x] **Step 5: Commit validation slice**
 
 ```bash
 git add src/backlog_py/orchestration tests/test_orchestration.py
@@ -242,7 +242,7 @@ git commit -m "feat: validate orchestration metadata"
 - Modify: `src/backlog_py/orchestration/__init__.py`
 - Test: `tests/test_orchestration.py`
 
-- [ ] **Step 1: Write failing report tests**
+- [x] **Step 1: Write failing report tests**
 
 Add tests that prove:
 
@@ -271,13 +271,13 @@ def test_lease_reports_split_active_and_stale_claims(tmp_path):
     assert [task.id for task in list_stale_leases(repository, now=now)] == ["TASK-2"]
 ```
 
-- [ ] **Step 2: Run report tests to verify failure**
+- [x] **Step 2: Run report tests to verify failure**
 
 Run: `python -m pytest tests/test_orchestration.py -q`
 
 Expected: FAIL because report helpers are not implemented.
 
-- [ ] **Step 3: Implement report helpers**
+- [x] **Step 3: Implement report helpers**
 
 Implement:
 
@@ -294,13 +294,13 @@ Rules:
 - Stale lease means `lease_owner` is set and `lease_expires_at <= now`.
 - Completed tasks count as dependency-complete if their Backlog status includes `done` or `complete`, or they live under `backlog/completed`.
 
-- [ ] **Step 4: Run report tests**
+- [x] **Step 4: Run report tests**
 
 Run: `python -m pytest tests/test_orchestration.py -q`
 
 Expected: report tests pass.
 
-- [ ] **Step 5: Commit reports slice**
+- [x] **Step 5: Commit reports slice**
 
 ```bash
 git add src/backlog_py/orchestration tests/test_orchestration.py
@@ -313,7 +313,7 @@ git commit -m "feat: report orchestration readiness"
 - Modify: `README.md`
 - Test: existing focused tests
 
-- [ ] **Step 1: Add README note**
+- [x] **Step 1: Add README note**
 
 Add a concise section:
 
@@ -323,13 +323,13 @@ Add a concise section:
 `backlog-md-py` can parse optional `orchestration` frontmatter for agent or workflow coordinators. The first supported slice is read-only: parse metadata, validate it against the default workflow policy, and report eligible tasks, active claims, stale leases, and status summaries. The library does not launch agents or mutate orchestration state in this slice.
 ```
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run: `python -m pytest tests/test_orchestration.py tests/test_task_parser.py tests/test_readonly_repository.py -q`
 
 Expected: all pass.
 
-- [ ] **Step 3: Commit docs slice**
+- [x] **Step 3: Commit docs slice**
 
 ```bash
 git add README.md
@@ -341,25 +341,25 @@ git commit -m "docs: describe optional orchestration metadata"
 **Files:**
 - No new files unless verification reveals issues.
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run: `python -m pytest -q`
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run whitespace check**
+- [x] **Step 2: Run whitespace check**
 
 Run: `git diff --check origin/main...HEAD`
 
 Expected: no output.
 
-- [ ] **Step 3: Review branch diff**
+- [x] **Step 3: Review branch diff**
 
 Run: `git diff --stat origin/main...HEAD`
 
 Expected: spec doc, plan doc, orchestration package, tests, and README only.
 
-- [ ] **Step 4: Final commit if needed**
+- [x] **Step 4: Final commit if needed**
 
 If verification required fixes:
 
