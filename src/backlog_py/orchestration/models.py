@@ -93,14 +93,14 @@ class OrchestrationPolicy:
         )
 
     def can_transition(self, from_status: str, to_status: str) -> bool:
-        return _normalize_key(to_status) in self.transitions.get(_normalize_key(from_status), ())
+        return _normalize_key(to_status) in _normalized_transitions(self).get(_normalize_key(from_status), ())
 
     def is_claimable(self, status_key: str) -> bool:
-        state = self.states.get(_normalize_key(status_key))
+        state = _normalized_states(self).get(_normalize_key(status_key))
         return state is not None and state.claimable
 
     def is_terminal(self, status_key: str) -> bool:
-        state = self.states.get(_normalize_key(status_key))
+        state = _normalized_states(self).get(_normalize_key(status_key))
         return state is not None and state.terminal
 
 
@@ -132,7 +132,7 @@ def parse_orchestration(task_or_frontmatter: Any) -> OrchestrationState | None:
     review = _parse_review(orchestration.get("review"))
     return OrchestrationState(
         status_key=_optional_string(orchestration.get("status_key")),
-        version=orchestration.get("version") if isinstance(orchestration.get("version"), int) else None,
+        version=_optional_int(orchestration.get("version")),
         lease_owner=_optional_string(orchestration.get("lease_owner")),
         lease_expires_at=_optional_string(orchestration.get("lease_expires_at")),
         correlation_id=_optional_string(orchestration.get("correlation_id")),
@@ -147,7 +147,9 @@ def parse_orchestration(task_or_frontmatter: Any) -> OrchestrationState | None:
 
 def validate_policy(policy: OrchestrationPolicy) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if not any(state.terminal for state in policy.states.values()):
+    states = _normalized_states(policy)
+    transitions = _normalized_transitions(policy)
+    if not any(state.terminal for state in states.values()):
         issues.append(
             ValidationIssue(
                 code="policy_missing_terminal_state",
@@ -155,9 +157,8 @@ def validate_policy(policy: OrchestrationPolicy) -> list[ValidationIssue]:
                 path="states",
             )
         )
-    for source, targets in policy.transitions.items():
-        normalized_source = _normalize_key(source)
-        if normalized_source not in policy.states:
+    for source, targets in transitions.items():
+        if source not in states:
             issues.append(
                 ValidationIssue(
                     code="policy_unknown_transition_source",
@@ -166,8 +167,7 @@ def validate_policy(policy: OrchestrationPolicy) -> list[ValidationIssue]:
                 )
             )
         for target in targets:
-            normalized_target = _normalize_key(target)
-            if normalized_target not in policy.states:
+            if target not in states:
                 issues.append(
                     ValidationIssue(
                         code="policy_unknown_transition_target",
@@ -175,6 +175,16 @@ def validate_policy(policy: OrchestrationPolicy) -> list[ValidationIssue]:
                         path=f"transitions.{source}",
                     )
                 )
+    reachable = _reachable_states(states, transitions)
+    for state_key in states:
+        if state_key not in reachable:
+            issues.append(
+                ValidationIssue(
+                    code="policy_unreachable_state",
+                    message=f"Policy state is not reachable from any claimable state: {state_key}",
+                    path=f"states.{state_key}",
+                )
+            )
     if policy.default_review_max_attempts < 1:
         issues.append(
             ValidationIssue(
@@ -224,7 +234,7 @@ def validate_orchestration(
                     path="orchestration.status_key",
                 )
             )
-        elif _normalize_key(status_key) not in active_policy.states:
+        elif _normalize_key(status_key) not in _normalized_states(active_policy):
             issues.append(
                 ValidationIssue(
                     code="unknown_status_key",
@@ -241,9 +251,26 @@ def validate_orchestration(
                 message="orchestration.version must be a non-negative integer",
                 path="orchestration.version",
             )
-        )
+            )
 
+    lease_owner = raw.get("lease_owner")
     lease_expires_at = raw.get("lease_expires_at")
+    if lease_owner is not None and (not isinstance(lease_owner, str) or not lease_owner.strip()):
+        issues.append(
+            ValidationIssue(
+                code="invalid_lease_owner",
+                message="orchestration.lease_owner must be a non-empty string",
+                path="orchestration.lease_owner",
+            )
+        )
+    if isinstance(lease_owner, str) and lease_owner.strip() and lease_expires_at is None:
+        issues.append(
+            ValidationIssue(
+                code="missing_lease_expires_at",
+                message="orchestration.lease_expires_at is required when lease_owner is set",
+                path="orchestration.lease_expires_at",
+            )
+        )
     if lease_expires_at is not None and _parse_datetime(lease_expires_at) is None:
         issues.append(
             ValidationIssue(
@@ -252,6 +279,9 @@ def validate_orchestration(
                 path="orchestration.lease_expires_at",
             )
         )
+
+    issues.extend(_validate_workspace(raw.get("workspace")))
+    issues.extend(_validate_runner(raw.get("runner")))
 
     review = raw.get("review")
     if review is not None:
@@ -306,8 +336,8 @@ def _parse_review(value: object) -> OrchestrationReview | None:
     return OrchestrationReview(
         state=_optional_string(raw.get("state")),
         reviewer=_optional_string(raw.get("reviewer")),
-        attempts=raw.get("attempts") if isinstance(raw.get("attempts"), int) else None,
-        max_attempts=raw.get("max_attempts") if isinstance(raw.get("max_attempts"), int) else None,
+        attempts=_optional_int(raw.get("attempts")),
+        max_attempts=_optional_int(raw.get("max_attempts")),
         extra={key: item for key, item in raw.items() if key not in _REVIEW_KEYS},
     )
 
@@ -316,6 +346,65 @@ def _optional_string(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def _validate_workspace(value: object) -> list[ValidationIssue]:
+    if value is None:
+        return []
+    if not isinstance(value, Mapping):
+        return [
+            ValidationIssue(
+                code="invalid_workspace",
+                message="orchestration.workspace must be a mapping",
+                path="orchestration.workspace",
+            )
+        ]
+    return [
+        *_validate_optional_string(value, "path", "workspace"),
+        *_validate_optional_string(value, "branch", "workspace"),
+    ]
+
+
+def _validate_runner(value: object) -> list[ValidationIssue]:
+    if value is None:
+        return []
+    if not isinstance(value, Mapping):
+        return [
+            ValidationIssue(
+                code="invalid_runner",
+                message="orchestration.runner must be a mapping",
+                path="orchestration.runner",
+            )
+        ]
+    return [
+        *_validate_optional_string(value, "kind", "runner"),
+        *_validate_optional_string(value, "profile", "runner"),
+    ]
+
+
+def _validate_optional_string(
+    raw: Mapping[str, Any],
+    field_name: str,
+    section_name: str,
+) -> list[ValidationIssue]:
+    value = raw.get(field_name)
+    if value is None:
+        return []
+    if isinstance(value, str) and value.strip():
+        return []
+    return [
+        ValidationIssue(
+            code=f"invalid_{section_name}_{field_name}",
+            message=f"orchestration.{section_name}.{field_name} must be a non-empty string",
+            path=f"orchestration.{section_name}.{field_name}",
+        )
+    ]
 
 
 def _validate_review(raw: Mapping[str, Any], policy: OrchestrationPolicy) -> list[ValidationIssue]:
@@ -382,3 +471,29 @@ def _parse_datetime(value: object) -> datetime | None:
 
 def _normalize_key(value: str) -> str:
     return "".join(character for character in value.strip().casefold() if character.isalnum())
+
+
+def _normalized_states(policy: OrchestrationPolicy) -> dict[str, WorkflowStatePolicy]:
+    return {_normalize_key(key): value for key, value in policy.states.items()}
+
+
+def _normalized_transitions(policy: OrchestrationPolicy) -> dict[str, tuple[str, ...]]:
+    return {
+        _normalize_key(source): tuple(_normalize_key(target) for target in targets)
+        for source, targets in policy.transitions.items()
+    }
+
+
+def _reachable_states(
+    states: Mapping[str, WorkflowStatePolicy],
+    transitions: Mapping[str, tuple[str, ...]],
+) -> set[str]:
+    pending = [state_key for state_key, state in states.items() if state.claimable]
+    reachable: set[str] = set()
+    while pending:
+        state_key = pending.pop()
+        if state_key in reachable or state_key not in states:
+            continue
+        reachable.add(state_key)
+        pending.extend(target for target in transitions.get(state_key, ()) if target not in reachable)
+    return reachable

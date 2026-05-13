@@ -8,12 +8,14 @@ from backlog_py.core.repository import TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.orchestration import (
     OrchestrationPolicy,
+    WorkflowStatePolicy,
     list_active_claims,
     list_eligible_tasks,
     list_stale_leases,
     parse_orchestration,
     summarize_orchestration,
     validate_orchestration,
+    validate_policy,
 )
 
 
@@ -145,6 +147,129 @@ def test_validate_orchestration_reports_invalid_known_fields():
         "invalid_lease_expires_at",
         "review_attempts_exceed_max",
     }
+
+
+def test_parse_orchestration_does_not_treat_bools_as_integer_fields():
+    task = _task_with_frontmatter(
+        {
+            "id": "TASK-1",
+            "title": "Bool values",
+            "status": "To Do",
+            "orchestration": {
+                "version": True,
+                "review": {"attempts": False, "max_attempts": True},
+            },
+        }
+    )
+
+    state = parse_orchestration(task)
+
+    assert state is not None
+    assert state.version is None
+    assert state.review is not None
+    assert state.review.attempts is None
+    assert state.review.max_attempts is None
+
+
+def test_validate_orchestration_requires_lease_expiry_when_owner_is_set():
+    task = _task_with_frontmatter(
+        {
+            "id": "TASK-1",
+            "title": "Missing expiry",
+            "status": "To Do",
+            "orchestration": {"status_key": "todo", "lease_owner": "agent-a"},
+        }
+    )
+
+    issues = validate_orchestration(task, OrchestrationPolicy.default())
+
+    assert {issue.code for issue in issues} >= {"missing_lease_expires_at"}
+
+
+def test_eligible_tasks_exclude_claims_with_missing_or_invalid_lease_expiry(tmp_path):
+    repo = _repo_with_tasks(
+        tmp_path,
+        {
+            "TASK-1": {
+                "status": "To Do",
+                "orchestration": {"status_key": "todo", "lease_owner": "agent-a"},
+            },
+            "TASK-2": {
+                "status": "To Do",
+                "orchestration": {
+                    "status_key": "todo",
+                    "lease_owner": "agent-b",
+                    "lease_expires_at": "not-a-date",
+                },
+            },
+        },
+    )
+
+    eligible = list_eligible_tasks(ReadOnlyRepository.from_path(repo), now=_utc("2026-05-13T00:00:00Z"))
+
+    assert eligible == []
+
+
+def test_validate_orchestration_reports_invalid_workspace_and_runner_shapes():
+    task = _task_with_frontmatter(
+        {
+            "id": "TASK-1",
+            "title": "Invalid workspace",
+            "status": "To Do",
+            "orchestration": {
+                "workspace": "bad",
+                "runner": [],
+            },
+        }
+    )
+
+    issues = validate_orchestration(task, OrchestrationPolicy.default())
+
+    assert {issue.code for issue in issues} >= {"invalid_workspace", "invalid_runner"}
+
+
+def test_validate_orchestration_reports_invalid_workspace_and_runner_known_fields():
+    task = _task_with_frontmatter(
+        {
+            "id": "TASK-1",
+            "title": "Invalid subfields",
+            "status": "To Do",
+            "orchestration": {
+                "workspace": {"path": 42, "branch": False},
+                "runner": {"kind": True, "profile": 7},
+            },
+        }
+    )
+
+    issues = validate_orchestration(task, OrchestrationPolicy.default())
+
+    assert {issue.code for issue in issues} >= {
+        "invalid_workspace_path",
+        "invalid_workspace_branch",
+        "invalid_runner_kind",
+        "invalid_runner_profile",
+    }
+
+
+def test_validate_policy_reports_unreachable_states():
+    policy = OrchestrationPolicy(
+        states={
+            "todo": WorkflowStatePolicy(claimable=True),
+            "inprogress": WorkflowStatePolicy(),
+            "complete": WorkflowStatePolicy(terminal=True),
+            "orphan": WorkflowStatePolicy(),
+        },
+        transitions={
+            "todo": ("inprogress",),
+            "inprogress": ("complete",),
+            "complete": (),
+            "orphan": (),
+        },
+    )
+
+    issues = validate_policy(policy)
+
+    assert {issue.code for issue in issues} >= {"policy_unreachable_state"}
 
 
 def test_list_eligible_tasks_blocks_active_leases_and_incomplete_dependencies(tmp_path):
