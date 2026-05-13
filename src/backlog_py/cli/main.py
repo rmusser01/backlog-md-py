@@ -53,6 +53,8 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("-a", "--assignee", "assignees", multiple=True, help="Task assignee for create/edit.")
 @click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit.")
 @click.option("--priority", default=None, help="Task priority for create/edit.")
+@click.option("-m", "--milestone", default=None, help="Task milestone for create/edit.")
+@click.option("--clear-milestone", is_flag=True, help="Clear the task milestone on edit.")
 @click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
 @click.option("--doc", "documentation", multiple=True, help="Task documentation URL or file path for create/edit.")
 @click.option("--modified-file", "modified_files", multiple=True, help="Modified file path for create/edit.")
@@ -87,6 +89,8 @@ def task_command(
     assignees: tuple[str, ...],
     labels: tuple[str, ...],
     priority: str | None,
+    milestone: str | None,
+    clear_milestone: bool,
     references: tuple[str, ...],
     documentation: tuple[str, ...],
     modified_files: tuple[str, ...],
@@ -111,6 +115,8 @@ def task_command(
     if args and args[0] == "create":
         if len(args) != 2:
             raise click.UsageError("Usage: task create TITLE")
+        if clear_milestone:
+            raise click.UsageError("Cannot use --clear-milestone with task create.")
         task_record = _mutable_repository(ctx).create_task(
             title=args[1],
             task_id=task_id,
@@ -126,6 +132,7 @@ def task_command(
             assignees=assignees,
             labels=labels,
             priority=priority,
+            milestone=milestone,
             references=references,
             documentation=documentation,
             modified_files=modified_files,
@@ -135,6 +142,8 @@ def task_command(
     if args and args[0] == "edit":
         if len(args) != 2:
             raise click.UsageError("Usage: task edit TASK_ID")
+        if milestone is not None and clear_milestone:
+            raise click.UsageError("Cannot use --milestone and --clear-milestone together.")
         task_record = _mutable_repository(ctx).edit_task(
             args[1],
             title=title,
@@ -157,6 +166,8 @@ def task_command(
             assignees=assignees if assignees else None,
             labels=labels if labels else None,
             priority=priority,
+            milestone=milestone,
+            clear_milestone=clear_milestone,
             references=references if references else None,
             documentation=documentation if documentation else None,
             modified_files=modified_files if modified_files else None,
@@ -398,9 +409,12 @@ def _format_milestone_line(milestone: MilestoneRecord) -> str:
 
 def _format_task_metadata_lines(task_record: TaskRecord) -> list[str]:
     lines: list[str] = []
+    milestone = task_record.parsed.frontmatter.get("milestone")
     references = _frontmatter_string_list(task_record, "references")
     documentation = _frontmatter_string_list(task_record, "documentation")
     modified_files = _frontmatter_string_list(task_record, "modified_files")
+    if milestone:
+        lines.append(f"Milestone: {milestone}")
     if references:
         lines.append(f"References: {', '.join(references)}")
     if documentation:

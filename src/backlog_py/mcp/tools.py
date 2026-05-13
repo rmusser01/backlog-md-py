@@ -67,6 +67,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
+        milestone=_optional_string(_get_alias(kwargs, "milestone")),
         references=_optional_string_list(_get_alias(kwargs, "references")),
         documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
         modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
@@ -106,6 +107,9 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
+        milestone=_optional_string(_get_alias(kwargs, "milestone")) if "milestone" in kwargs else None,
+        clear_milestone=("milestone" in kwargs and kwargs.get("milestone") is None)
+        or (_coerce_bool(_get_alias(kwargs, "clearMilestone", "clear_milestone")) or False),
         references=_optional_string_list(_get_alias(kwargs, "references")),
         add_references=_optional_string_list(_get_alias(kwargs, "addReferences", "add_references")),
         remove_references=_optional_string_list(_get_alias(kwargs, "removeReferences", "remove_references")),
@@ -213,6 +217,9 @@ def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
     references = _frontmatter_string_list(task, "references")
     documentation = _frontmatter_string_list(task, "documentation")
     modified_files = _frontmatter_string_list(task, "modified_files")
+    milestone = task.parsed.frontmatter.get("milestone")
+    if milestone:
+        summary["milestone"] = str(milestone)
     if references:
         summary["references"] = references
     if documentation:

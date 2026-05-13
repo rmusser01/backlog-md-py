@@ -109,6 +109,7 @@ class MutableRepository(ReadOnlyRepository):
         assignees: Sequence[str] | None = None,
         labels: Sequence[str] | None = None,
         priority: str | None = None,
+        milestone: str | None = None,
         references: Sequence[str] | None = None,
         documentation: Sequence[str] | None = None,
         modified_files: Sequence[str] | None = None,
@@ -147,6 +148,7 @@ class MutableRepository(ReadOnlyRepository):
             assignees=_normalize_metadata_list(assignees),
             labels=_normalize_metadata_list(labels),
             priority=_normalize_optional_string(priority),
+            milestone=_normalize_optional_string(milestone),
             references=_normalize_metadata_list(references),
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
@@ -181,6 +183,8 @@ class MutableRepository(ReadOnlyRepository):
         assignees: Sequence[str] | None = None,
         labels: Sequence[str] | None = None,
         priority: str | None = None,
+        milestone: str | None = None,
+        clear_milestone: bool = False,
         references: Sequence[str] | None = None,
         add_references: Sequence[str] | None = None,
         remove_references: Sequence[str] | None = None,
@@ -192,6 +196,8 @@ class MutableRepository(ReadOnlyRepository):
         on_status_change: bool | None = None,
     ) -> TaskRecord:
         _reject_on_status_change(on_status_change)
+        if milestone is not None and clear_milestone:
+            raise TaskMutationError("Cannot set and clear milestone in one edit")
         task = self.get_task(task_id)
         safe_current_path = _mutation_path(task.path.parent, task.path)
         target_path = safe_current_path
@@ -265,6 +271,7 @@ class MutableRepository(ReadOnlyRepository):
         normalized_assignees = _normalize_metadata_list(assignees) if assignees is not None else None
         normalized_labels = _normalize_metadata_list(labels) if labels is not None else None
         normalized_priority = _normalize_optional_string(priority) if priority is not None else None
+        normalized_milestone = _normalize_optional_string(milestone) if milestone is not None else None
         normalized_references = _metadata_update(
             parsed.frontmatter,
             "references",
@@ -289,6 +296,8 @@ class MutableRepository(ReadOnlyRepository):
             or normalized_assignees is not None
             or normalized_labels is not None
             or normalized_priority is not None
+            or normalized_milestone is not None
+            or clear_milestone
             or normalized_references is not None
             or normalized_documentation is not None
             or normalized_modified_files is not None
@@ -307,6 +316,10 @@ class MutableRepository(ReadOnlyRepository):
                 updates["labels"] = normalized_labels
             if normalized_priority is not None:
                 updates["priority"] = normalized_priority
+            if normalized_milestone is not None:
+                updates["milestone"] = normalized_milestone
+            if clear_milestone:
+                updates["milestone"] = None
             if normalized_references is not None:
                 updates["references"] = normalized_references
             if normalized_documentation is not None:
@@ -376,6 +389,7 @@ def _new_task_source(
     assignees: Sequence[str],
     labels: Sequence[str],
     priority: str | None,
+    milestone: str | None,
     references: Sequence[str],
     documentation: Sequence[str],
     modified_files: Sequence[str],
@@ -393,6 +407,8 @@ def _new_task_source(
         frontmatter["labels"] = list(labels)
     if priority:
         frontmatter["priority"] = priority
+    if milestone:
+        frontmatter["milestone"] = milestone
     if references:
         frontmatter["references"] = list(references)
     if documentation:
@@ -614,7 +630,11 @@ def _replace_frontmatter_values(
     updates: dict[str, object],
 ) -> str:
     frontmatter = dict(parsed.frontmatter)
-    frontmatter.update(updates)
+    for key, value in updates.items():
+        if value is None:
+            frontmatter.pop(key, None)
+        else:
+            frontmatter[key] = value
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
     body = parsed.body
     return f"---\n{yaml_text}\n---\n{body}"

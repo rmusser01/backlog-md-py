@@ -84,6 +84,7 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
         assignees=["codex", "reviewer"],
         labels=["parity", "metadata"],
         priority="high",
+        milestone="Release 1",
         references=["https://example.com/issue/1", "src/api.py,docs/design.md"],
         documentation=["https://docs.example.com", "docs/spec.md"],
         modified_files=["src/api.py", "src/ui.py"],
@@ -92,6 +93,7 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
     assert task.parsed.frontmatter["assignee"] == ["codex", "reviewer"]
     assert task.parsed.frontmatter["labels"] == ["parity", "metadata"]
     assert task.parsed.frontmatter["priority"] == "high"
+    assert task.parsed.frontmatter["milestone"] == "Release 1"
     assert task.parsed.frontmatter["references"] == ["https://example.com/issue/1", "src/api.py", "docs/design.md"]
     assert task.parsed.frontmatter["documentation"] == ["https://docs.example.com", "docs/spec.md"]
     assert task.parsed.frontmatter["modified_files"] == ["src/api.py", "src/ui.py"]
@@ -168,6 +170,7 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
         assignees=["maintainer"],
         labels=["updated", "parity"],
         priority="medium",
+        milestone="Release 2",
         references=["ref-a.py,ref-b.py"],
         documentation=["doc-a.md"],
         modified_files=["src/edited.py,tests/test_edited.py"],
@@ -177,12 +180,24 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
     assert edited.parsed.frontmatter["assignee"] == ["maintainer"]
     assert edited.parsed.frontmatter["labels"] == ["updated", "parity"]
     assert edited.parsed.frontmatter["priority"] == "medium"
+    assert edited.parsed.frontmatter["milestone"] == "Release 2"
     assert edited.parsed.frontmatter["references"] == ["ref-a.py", "ref-b.py"]
     assert edited.parsed.frontmatter["documentation"] == ["doc-a.md"]
     assert edited.parsed.frontmatter["modified_files"] == ["src/edited.py", "tests/test_edited.py"]
     assert "custom_field: preserve-me" in written
     assert "nested_unknown:" in written
     assert "Trailing unowned body content must also round trip." in written
+
+
+def test_edit_task_can_clear_milestone_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    repository.create_task(title="Milestoned task", task_id="TASK-2", milestone="Release 1")
+
+    edited = repository.edit_task("TASK-2", clear_milestone=True)
+
+    assert "milestone" not in edited.parsed.frontmatter
+    assert "milestone:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
 
 
 def test_edit_task_adds_and_removes_reference_and_documentation_frontmatter(tmp_path):
@@ -542,6 +557,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "doc-a.md",
             "--doc",
             "doc-b.md",
+            "--milestone",
+            "Release CLI",
             "--modified-file",
             "src/api.py",
             "--modified-file",
@@ -563,6 +580,7 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     )
     assert edit.exit_code == 0
     assert "TASK-2 [To Do] CLI renamed task" in edit.output
+    assert "Milestone: Release CLI" in edit.output
     assert "References: ref-a.py, ref-b.py" in edit.output
     assert "Documentation: doc-a.md, doc-b.md" in edit.output
     assert "Modified files: src/api.py, tests/test_api.py" in edit.output
@@ -571,6 +589,7 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "assignee:\n- maintainer" in written
     assert "labels:\n- edited\n- metadata" in written
     assert "priority: medium" in written
+    assert "milestone: Release CLI" in written
     assert "references:\n- ref-a.py\n- ref-b.py" in written
     assert "documentation:\n- doc-a.md\n- doc-b.md" in written
     assert "modified_files:\n- src/api.py\n- tests/test_api.py" in written
@@ -583,6 +602,23 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "- CLI note." in written
     assert "CLI final summary." in written
     assert "CLI appended final summary." in written
+
+    clear_milestone = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "edit",
+            "TASK-2",
+            "--clear-milestone",
+            "--plain",
+        ],
+    )
+    assert clear_milestone.exit_code == 0
+    assert "Milestone:" not in clear_milestone.output
+    milestone_cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "milestone:" not in milestone_cleared
 
     clear = runner.invoke(
         main,
@@ -707,6 +743,8 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "https://docs.example.com",
             "--doc",
             "docs/spec.md",
+            "--milestone",
+            "Release Create",
             "--modified-file",
             "src/create.py,tests/test_create.py",
             "-a",
@@ -731,6 +769,7 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
 
     assert create.exit_code == 0
     assert "TASK-2 [To Do] CLI full create task" in create.output
+    assert "Milestone: Release Create" in create.output
     assert "References: https://example.com/issue/1, src/api.py, docs/design.md" in create.output
     assert "Documentation: https://docs.example.com, docs/spec.md" in create.output
     assert "Modified files: src/create.py, tests/test_create.py" in create.output
@@ -738,6 +777,7 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "assignee:\n- codex\n- reviewer" in written
     assert "labels:\n- cli\n- metadata" in written
     assert "priority: high" in written
+    assert "milestone: Release Create" in written
     assert "references:\n- https://example.com/issue/1\n- src/api.py\n- docs/design.md" in written
     assert "documentation:\n- https://docs.example.com\n- docs/spec.md" in written
     assert "modified_files:\n- src/create.py\n- tests/test_create.py" in written
@@ -820,6 +860,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         assignee=["codex"],
         labels=["mcp", "metadata"],
         priority="high",
+        milestone="Release MCP",
         implementationPlan="MCP create plan.",
         references=["ref1.py", "ref2.py"],
         documentation=["doc1.md", "doc2.md"],
@@ -827,6 +868,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     )
     assert created["id"] == "TASK-2"
     assert created["description"] == "Created from MCP."
+    assert created["milestone"] == "Release MCP"
     assert created["modifiedFiles"] == ["src/mcp.py", "tests/test_mcp.py"]
 
     edited = task_edit(
@@ -843,6 +885,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         assignee=["reviewer"],
         labels=["mcp", "edited"],
         priority="medium",
+        milestone="Release MCP Edit",
         planSet="MCP edited plan.",
         planAppend=["MCP appended plan."],
         addReferences=["ref3.py"],
@@ -853,6 +896,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     )
     assert edited["id"] == "TASK-2"
     assert edited["title"] == "MCP renamed task"
+    assert edited["milestone"] == "Release MCP Edit"
     assert edited["modifiedFiles"] == ["src/mcp_edit.py", "tests/test_mcp_edit.py"]
 
     unchecked = task_edit(
@@ -868,6 +912,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "assignee:\n- reviewer" in written
     assert "labels:\n- mcp\n- edited" in written
     assert "priority: medium" in written
+    assert "milestone: Release MCP Edit" in written
     assert "references:\n- ref2.py\n- ref3.py" in written
     assert "documentation:\n- doc1.md\n- doc3.md" in written
     assert "modified_files:\n- src/mcp_edit.py\n- tests/test_mcp_edit.py" in written
@@ -887,6 +932,10 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "MCP final summary." not in cleared
     assert "MCP appended final summary." not in cleared
+
+    cleared_milestone = task_edit(project, task_id="TASK-2", milestone=None)
+    assert "milestone" not in cleared_milestone
+    assert "milestone:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
 
     task_edit(project, task_id="TASK-2", planClear=True)
     plan_cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
