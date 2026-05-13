@@ -53,6 +53,8 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("-a", "--assignee", "assignees", multiple=True, help="Task assignee for create/edit.")
 @click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit.")
 @click.option("--priority", default=None, help="Task priority for create/edit.")
+@click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
+@click.option("--doc", "documentation", multiple=True, help="Task documentation URL or file path for create/edit.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
@@ -84,6 +86,8 @@ def task_command(
     assignees: tuple[str, ...],
     labels: tuple[str, ...],
     priority: str | None,
+    references: tuple[str, ...],
+    documentation: tuple[str, ...],
     append_notes: str | None,
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
@@ -120,6 +124,8 @@ def task_command(
             assignees=assignees,
             labels=labels,
             priority=priority,
+            references=references,
+            documentation=documentation,
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
@@ -148,6 +154,8 @@ def task_command(
             assignees=assignees if assignees else None,
             labels=labels if labels else None,
             priority=priority,
+            references=references if references else None,
+            documentation=documentation if documentation else None,
             final_summary=final_summary,
             append_final_summary=append_final_summary,
             clear_final_summary=clear_final_summary,
@@ -359,7 +367,9 @@ def _milestone_service(ctx: click.Context) -> MilestoneService:
 
 def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:
     if plain:
-        return f"{task_record.id} [{task_record.status}] {task_record.title}"
+        line = f"{task_record.id} [{task_record.status}] {task_record.title}"
+        metadata = _format_task_metadata_lines(task_record)
+        return "\n".join([line, *metadata])
     return f"{task_record.id} - {task_record.title} ({task_record.status})"
 
 
@@ -380,6 +390,26 @@ def _format_document_line(document: DocumentRecord) -> str:
 
 def _format_milestone_line(milestone: MilestoneRecord) -> str:
     return f"{milestone.name} {milestone.path_relative}".rstrip()
+
+
+def _format_task_metadata_lines(task_record: TaskRecord) -> list[str]:
+    lines: list[str] = []
+    references = _frontmatter_string_list(task_record, "references")
+    documentation = _frontmatter_string_list(task_record, "documentation")
+    if references:
+        lines.append(f"References: {', '.join(references)}")
+    if documentation:
+        lines.append(f"Documentation: {', '.join(documentation)}")
+    return lines
+
+
+def _frontmatter_string_list(task_record: TaskRecord, key: str) -> list[str]:
+    value = task_record.parsed.frontmatter.get(key)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
 
 
 def _bool_text(value: bool) -> str:

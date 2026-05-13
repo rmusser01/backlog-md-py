@@ -109,6 +109,8 @@ class MutableRepository(ReadOnlyRepository):
         assignees: Sequence[str] | None = None,
         labels: Sequence[str] | None = None,
         priority: str | None = None,
+        references: Sequence[str] | None = None,
+        documentation: Sequence[str] | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
         _reject_on_status_change(on_status_change)
@@ -144,6 +146,8 @@ class MutableRepository(ReadOnlyRepository):
             assignees=_normalize_metadata_list(assignees),
             labels=_normalize_metadata_list(labels),
             priority=_normalize_optional_string(priority),
+            references=_normalize_metadata_list(references),
+            documentation=_normalize_metadata_list(documentation),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
@@ -175,6 +179,12 @@ class MutableRepository(ReadOnlyRepository):
         assignees: Sequence[str] | None = None,
         labels: Sequence[str] | None = None,
         priority: str | None = None,
+        references: Sequence[str] | None = None,
+        add_references: Sequence[str] | None = None,
+        remove_references: Sequence[str] | None = None,
+        documentation: Sequence[str] | None = None,
+        add_documentation: Sequence[str] | None = None,
+        remove_documentation: Sequence[str] | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
@@ -252,6 +262,20 @@ class MutableRepository(ReadOnlyRepository):
         normalized_assignees = _normalize_metadata_list(assignees) if assignees is not None else None
         normalized_labels = _normalize_metadata_list(labels) if labels is not None else None
         normalized_priority = _normalize_optional_string(priority) if priority is not None else None
+        normalized_references = _metadata_update(
+            parsed.frontmatter,
+            "references",
+            replace=references,
+            add=add_references,
+            remove=remove_references,
+        )
+        normalized_documentation = _metadata_update(
+            parsed.frontmatter,
+            "documentation",
+            replace=documentation,
+            add=add_documentation,
+            remove=remove_documentation,
+        )
         if (
             title is not None
             or status is not None
@@ -259,6 +283,8 @@ class MutableRepository(ReadOnlyRepository):
             or normalized_assignees is not None
             or normalized_labels is not None
             or normalized_priority is not None
+            or normalized_references is not None
+            or normalized_documentation is not None
         ):
             updates: dict[str, object] = {}
             if title is not None:
@@ -274,6 +300,10 @@ class MutableRepository(ReadOnlyRepository):
                 updates["labels"] = normalized_labels
             if normalized_priority is not None:
                 updates["priority"] = normalized_priority
+            if normalized_references is not None:
+                updates["references"] = normalized_references
+            if normalized_documentation is not None:
+                updates["documentation"] = normalized_documentation
             source = _replace_frontmatter_values(source, parsed, updates)
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
@@ -337,6 +367,8 @@ def _new_task_source(
     assignees: Sequence[str],
     labels: Sequence[str],
     priority: str | None,
+    references: Sequence[str],
+    documentation: Sequence[str],
 ) -> str:
     frontmatter: dict[str, object] = {
         "id": task_id,
@@ -351,6 +383,10 @@ def _new_task_source(
         frontmatter["labels"] = list(labels)
     if priority:
         frontmatter["priority"] = priority
+    if references:
+        frontmatter["references"] = list(references)
+    if documentation:
+        frontmatter["documentation"] = list(documentation)
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
     return (
         f"---\n{yaml_text}\n---\n\n"
@@ -655,6 +691,36 @@ def _normalize_metadata_list(values: Sequence[str] | None) -> list[str]:
             if trimmed:
                 normalized.append(trimmed)
     return normalized
+
+
+def _metadata_update(
+    frontmatter: dict[str, object],
+    key: str,
+    *,
+    replace: Sequence[str] | None,
+    add: Sequence[str] | None,
+    remove: Sequence[str] | None,
+) -> list[str] | None:
+    if replace is not None:
+        return _normalize_metadata_list(replace)
+    if add is None and remove is None:
+        return None
+    values = _frontmatter_string_list(frontmatter.get(key))
+    remove_values = set(_normalize_metadata_list(remove))
+    if remove_values:
+        values = [value for value in values if value not in remove_values]
+    for value in _normalize_metadata_list(add):
+        if value not in values:
+            values.append(value)
+    return values
+
+
+def _frontmatter_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
 
 
 def _normalize_optional_string(value: str | None) -> str | None:

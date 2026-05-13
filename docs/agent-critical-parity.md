@@ -16,8 +16,8 @@ do not block the first local-file agent cutover candidate.
 | cli:search-plain | implemented | backlog search <query> --plain | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
 | cli:config-list | implemented | backlog config list | cli:config-list |
-| cli:task-create | implemented | backlog task create <title> --plan <text> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain | cli:task-create |
-| cli:task-edit | implemented | backlog task edit <id> --plan <text> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
+| cli:task-create | implemented | backlog task create <title> --plan <text> --ref <item> --doc <item> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain | cli:task-create |
+| cli:task-edit | implemented | backlog task edit <id> --plan <text> --ref <item> --doc <item> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
@@ -36,8 +36,8 @@ do not block the first local-file agent cutover candidate.
 | mcp:task-list | implemented | task_list(project, status=None, limit=100) | mcp:task-list |
 | mcp:task-search | implemented | task_search(project, query, limit=10) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
-| mcp:task-create | implemented | task_create(project, implementationPlan=None, assignee=None, labels=None, priority=None, **kwargs) | mcp:task-create |
-| mcp:task-edit | implemented | task_edit(project, task_id, planSet=None, planAppend=None, planClear=False, **kwargs) | mcp:task-edit |
+| mcp:task-create | implemented | task_create(project, references=None, documentation=None, implementationPlan=None, **kwargs) | mcp:task-create |
+| mcp:task-edit | implemented | task_edit(project, task_id, references=None, addReferences=None, documentation=None, addDocumentation=None, **kwargs) | mcp:task-edit |
 | mcp:task-archive | implemented | task_archive(project, task_id) | mcp:task-archive |
 | mcp:document-list | implemented | document_list(project, query=None, limit=100) | mcp:document-list |
 | mcp:document-search | implemented | document_list(project, query=<query>, limit=100) | mcp:document-search |

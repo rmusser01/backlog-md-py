@@ -88,6 +88,8 @@ def _register_tools(server: Any) -> None:
         assignee: list[str] | None = None,
         labels: list[str] | None = None,
         priority: str | None = None,
+        references: list[str] | None = None,
+        documentation: list[str] | None = None,
         on_status_change: bool | None = None,
     ) -> dict[str, Any]:
         """Create a task in a Backlog.md project."""
@@ -108,6 +110,8 @@ def _register_tools(server: Any) -> None:
                 assignee=assignee,
                 labels=labels,
                 priority=priority,
+                references=references,
+                documentation=documentation,
                 on_status_change=on_status_change,
             ),
         )
@@ -138,6 +142,12 @@ def _register_tools(server: Any) -> None:
         assignee: list[str] | None = None,
         labels: list[str] | None = None,
         priority: str | None = None,
+        references: list[str] | None = None,
+        add_references: list[str] | None = None,
+        remove_references: list[str] | None = None,
+        documentation: list[str] | None = None,
+        add_documentation: list[str] | None = None,
+        remove_documentation: list[str] | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> dict[str, Any]:
@@ -168,6 +178,12 @@ def _register_tools(server: Any) -> None:
                 assignee=assignee,
                 labels=labels,
                 priority=priority,
+                references=references,
+                add_references=add_references,
+                remove_references=remove_references,
+                documentation=documentation,
+                add_documentation=add_documentation,
+                remove_documentation=remove_documentation,
                 status=status,
                 on_status_change=on_status_change,
             ),

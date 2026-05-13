@@ -67,6 +67,8 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
+        references=_optional_string_list(_get_alias(kwargs, "references")),
+        documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
     return _task_detail(project, task)
@@ -103,6 +105,12 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
+        references=_optional_string_list(_get_alias(kwargs, "references")),
+        add_references=_optional_string_list(_get_alias(kwargs, "addReferences", "add_references")),
+        remove_references=_optional_string_list(_get_alias(kwargs, "removeReferences", "remove_references")),
+        documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
+        add_documentation=_optional_string_list(_get_alias(kwargs, "addDocumentation", "add_documentation")),
+        remove_documentation=_optional_string_list(_get_alias(kwargs, "removeDocumentation", "remove_documentation")),
         status=_optional_string(kwargs.get("status")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
@@ -193,13 +201,20 @@ def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]
 
 
 def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
-    return {
+    summary: dict[str, Any] = {
         "id": task.id,
         "title": task.title,
         "status": task.status,
         "description": task.description,
         "path": _relative_task_path(project, task),
     }
+    references = _frontmatter_string_list(task, "references")
+    documentation = _frontmatter_string_list(task, "documentation")
+    if references:
+        summary["references"] = references
+    if documentation:
+        summary["documentation"] = documentation
+    return summary
 
 
 def _task_detail(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
@@ -233,6 +248,15 @@ def _milestone_detail(project: BacklogProject, milestone: MilestoneRecord) -> di
 
 def _relative_task_path(project: BacklogProject, task: TaskRecord) -> str:
     return task.path.relative_to(project.root).as_posix()
+
+
+def _frontmatter_string_list(task: TaskRecord, key: str) -> list[str]:
+    value = task.parsed.frontmatter.get(key)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
 
 
 def _fresh_project(project: BacklogProject) -> BacklogProject:

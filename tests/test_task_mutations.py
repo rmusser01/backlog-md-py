@@ -84,11 +84,15 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
         assignees=["codex", "reviewer"],
         labels=["parity", "metadata"],
         priority="high",
+        references=["https://example.com/issue/1", "src/api.py,docs/design.md"],
+        documentation=["https://docs.example.com", "docs/spec.md"],
     )
 
     assert task.parsed.frontmatter["assignee"] == ["codex", "reviewer"]
     assert task.parsed.frontmatter["labels"] == ["parity", "metadata"]
     assert task.parsed.frontmatter["priority"] == "high"
+    assert task.parsed.frontmatter["references"] == ["https://example.com/issue/1", "src/api.py", "docs/design.md"]
+    assert task.parsed.frontmatter["documentation"] == ["https://docs.example.com", "docs/spec.md"]
 
 
 def test_create_task_writes_plan_section_after_acceptance_criteria(tmp_path):
@@ -162,15 +166,41 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
         assignees=["maintainer"],
         labels=["updated", "parity"],
         priority="medium",
+        references=["ref-a.py,ref-b.py"],
+        documentation=["doc-a.md"],
     )
 
     written = _task_file(repo).read_text(encoding="utf-8")
     assert edited.parsed.frontmatter["assignee"] == ["maintainer"]
     assert edited.parsed.frontmatter["labels"] == ["updated", "parity"]
     assert edited.parsed.frontmatter["priority"] == "medium"
+    assert edited.parsed.frontmatter["references"] == ["ref-a.py", "ref-b.py"]
+    assert edited.parsed.frontmatter["documentation"] == ["doc-a.md"]
     assert "custom_field: preserve-me" in written
     assert "nested_unknown:" in written
     assert "Trailing unowned body content must also round trip." in written
+
+
+def test_edit_task_adds_and_removes_reference_and_documentation_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    repository.create_task(
+        title="Referenced task",
+        task_id="TASK-2",
+        references=["ref-a.py", "ref-b.py"],
+        documentation=["doc-a.md", "doc-b.md"],
+    )
+
+    edited = repository.edit_task(
+        "TASK-2",
+        add_references=["ref-c.py"],
+        remove_references=["ref-a.py"],
+        add_documentation=["doc-c.md"],
+        remove_documentation=["doc-b.md"],
+    )
+
+    assert edited.parsed.frontmatter["references"] == ["ref-b.py", "ref-c.py"]
+    assert edited.parsed.frontmatter["documentation"] == ["doc-a.md", "doc-c.md"]
 
 
 def test_edit_task_sets_appends_and_clears_plan_without_rewriting_unowned_body(tmp_path):
@@ -502,6 +532,12 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "CLI plan.",
             "--append-plan",
             "CLI appended plan.",
+            "--ref",
+            "ref-a.py,ref-b.py",
+            "--doc",
+            "doc-a.md",
+            "--doc",
+            "doc-b.md",
             "--final-summary",
             "CLI final summary.",
             "--append-final-summary",
@@ -519,11 +555,15 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     )
     assert edit.exit_code == 0
     assert "TASK-2 [To Do] CLI renamed task" in edit.output
+    assert "References: ref-a.py, ref-b.py" in edit.output
+    assert "Documentation: doc-a.md, doc-b.md" in edit.output
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "title: CLI renamed task" in written
     assert "assignee:\n- maintainer" in written
     assert "labels:\n- edited\n- metadata" in written
     assert "priority: medium" in written
+    assert "references:\n- ref-a.py\n- ref-b.py" in written
+    assert "documentation:\n- doc-a.md\n- doc-b.md" in written
     assert "CLI plan." in written
     assert "CLI appended plan." in written
     assert "Edited from CLI." in written
@@ -649,6 +689,14 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "Created with richer CLI fields.",
             "--plan",
             "CLI create plan.",
+            "--ref",
+            "https://example.com/issue/1",
+            "--ref",
+            "src/api.py,docs/design.md",
+            "--doc",
+            "https://docs.example.com",
+            "--doc",
+            "docs/spec.md",
             "-a",
             "codex",
             "-a",
@@ -671,10 +719,14 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
 
     assert create.exit_code == 0
     assert "TASK-2 [To Do] CLI full create task" in create.output
+    assert "References: https://example.com/issue/1, src/api.py, docs/design.md" in create.output
+    assert "Documentation: https://docs.example.com, docs/spec.md" in create.output
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "assignee:\n- codex\n- reviewer" in written
     assert "labels:\n- cli\n- metadata" in written
     assert "priority: high" in written
+    assert "references:\n- https://example.com/issue/1\n- src/api.py\n- docs/design.md" in written
+    assert "documentation:\n- https://docs.example.com\n- docs/spec.md" in written
     assert "## Implementation Plan" in written
     assert "CLI create plan." in written
     assert "dependencies:\n- TASK-1" in written
@@ -755,6 +807,8 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         labels=["mcp", "metadata"],
         priority="high",
         implementationPlan="MCP create plan.",
+        references=["ref1.py", "ref2.py"],
+        documentation=["doc1.md", "doc2.md"],
     )
     assert created["id"] == "TASK-2"
     assert created["description"] == "Created from MCP."
@@ -775,6 +829,10 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         priority="medium",
         planSet="MCP edited plan.",
         planAppend=["MCP appended plan."],
+        addReferences=["ref3.py"],
+        removeReferences=["ref1.py"],
+        addDocumentation=["doc3.md"],
+        removeDocumentation=["doc2.md"],
     )
     assert edited["id"] == "TASK-2"
     assert edited["title"] == "MCP renamed task"
@@ -792,6 +850,8 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "assignee:\n- reviewer" in written
     assert "labels:\n- mcp\n- edited" in written
     assert "priority: medium" in written
+    assert "references:\n- ref2.py\n- ref3.py" in written
+    assert "documentation:\n- doc1.md\n- doc3.md" in written
     assert "MCP edited plan." in written
     assert "MCP appended plan." in written
     assert "MCP create plan." not in written
