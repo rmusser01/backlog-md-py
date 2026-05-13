@@ -33,12 +33,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain",
+            "backlog task create <title> --plan <text> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain",
         ),
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
-            "backlog task edit <id> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain",
+            "backlog task edit <id> --plan <text> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain",
         ),
         _golden("cli:task-archive", "CLI-INSTRUCTIONS.md", "backlog task archive <id> --plain"),
         _golden("cli:doc-list", "CLI-INSTRUCTIONS.md", "backlog doc list"),
@@ -65,12 +65,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-create",
             "MCP tools",
-            "task_create(project, assignee=None, labels=None, priority=None, **kwargs)",
+            "task_create(project, implementationPlan=None, assignee=None, labels=None, priority=None, **kwargs)",
         ),
         _golden(
             "mcp:task-edit",
             "MCP tools",
-            "task_edit(project, task_id, assignee=None, labels=None, priority=None, **kwargs)",
+            "task_edit(project, task_id, planSet=None, planAppend=None, planClear=False, **kwargs)",
         ),
         _golden("mcp:task-archive", "MCP tools", "task_archive(project, task_id)"),
         _golden("mcp:document-list", "MCP tools", "document_list(project, query=None, limit=100)"),

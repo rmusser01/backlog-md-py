@@ -99,6 +99,7 @@ class MutableRepository(ReadOnlyRepository):
         task_id: str | None = None,
         status: str | None = None,
         description: str = "",
+        plan: str = "",
         notes: str = "",
         acceptance_criteria: Sequence[str] | None = None,
         definition_of_done: Sequence[str] | None = None,
@@ -135,6 +136,7 @@ class MutableRepository(ReadOnlyRepository):
             title=title,
             status=task_status,
             description=description,
+            plan=plan,
             notes=notes,
             acceptance_criteria=acceptance_criteria or (),
             definition_of_done=task_definition_of_done,
@@ -153,6 +155,9 @@ class MutableRepository(ReadOnlyRepository):
         *,
         title: str | None = None,
         description: str | None = None,
+        plan: str | None = None,
+        append_plan: Sequence[str] | None = None,
+        clear_plan: bool = False,
         notes: str | None = None,
         append_notes: str | None = None,
         acceptance_criteria_add: Sequence[str] | None = None,
@@ -191,6 +196,15 @@ class MutableRepository(ReadOnlyRepository):
         parsed = task.parsed
         if description is not None:
             source = _replace_section(source, parsed, "DESCRIPTION", _normalize_block(description))
+            parsed = parse_task_markdown(source)
+        if plan is not None:
+            source = _replace_or_insert_section(source, parsed, "PLAN", _normalize_block(plan))
+            parsed = parse_task_markdown(source)
+        if append_plan:
+            source = _append_to_structured_section(source, parsed, "PLAN", append_plan)
+            parsed = parse_task_markdown(source)
+        if clear_plan:
+            source = _remove_section(source, parsed, "PLAN")
             parsed = parse_task_markdown(source)
         if notes is not None:
             source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", _normalize_block(notes))
@@ -315,6 +329,7 @@ def _new_task_source(
     title: str,
     status: str,
     description: str,
+    plan: str,
     notes: str,
     acceptance_criteria: Sequence[str],
     definition_of_done: Sequence[str],
@@ -347,6 +362,7 @@ def _new_task_source(
         "<!-- AC:BEGIN -->\n"
         f"{_render_checklist(acceptance_criteria)}"
         "<!-- AC:END -->\n\n"
+        f"{_render_optional_section('PLAN', plan)}"
         "## Implementation Notes\n\n"
         "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\n"
         f"{_normalize_block(notes)}\n"
@@ -393,14 +409,65 @@ def _mutation_path(base: Path, candidate: Path) -> Path:
 
 def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
     section = parsed.sections.get(name)
-    new_section = (
-        f"<!-- SECTION:{name}:BEGIN -->\n"
-        f"{content}\n"
-        f"<!-- SECTION:{name}:END -->"
-    )
+    new_section = _render_section_markers(name, content)
     if section is not None:
         return source.replace(section.raw.rstrip("\r\n"), new_section, 1)
     return source.rstrip() + f"\n\n{_heading_for_section(name)}\n\n{new_section}\n"
+
+
+def _replace_or_insert_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
+    if name in parsed.sections:
+        return _replace_section(source, parsed, name, content)
+    return _insert_section(source, name, content)
+
+
+def _append_to_structured_section(
+    source: str,
+    parsed: ParsedTaskMarkdown,
+    name: str,
+    items: Sequence[str],
+) -> str:
+    section = parsed.sections.get(name)
+    existing_content = "" if section is None else section.content.rstrip()
+    appended = "\n".join(_normalize_block(item) for item in items if _normalize_block(item))
+    if not appended:
+        return source
+    content = appended if not existing_content else f"{existing_content}\n{appended}"
+    return _replace_or_insert_section(source, parsed, name, content)
+
+
+def _remove_section(source: str, parsed: ParsedTaskMarkdown, name: str) -> str:
+    section = parsed.sections.get(name)
+    if section is None:
+        return source
+    section_start = source.find(section.raw)
+    if section_start == -1:
+        return source
+    heading = _heading_for_section(name)
+    heading_start = source.rfind(heading, 0, section_start)
+    remove_start = heading_start if heading_start != -1 else section_start
+    remove_end = section_start + len(section.raw)
+    while remove_end < len(source) and source[remove_end] in "\r\n":
+        remove_end += 1
+    before = source[:remove_start].rstrip()
+    after = source[remove_end:].lstrip()
+    if before and after:
+        return f"{before}\n\n{after}"
+    if before:
+        return f"{before}\n"
+    return after
+
+
+def _insert_section(source: str, name: str, content: str) -> str:
+    block = f"{_heading_for_section(name)}\n\n{_render_section_markers(name, content)}"
+    if name == "PLAN":
+        try:
+            acceptance_block = _extract_marker_block(source, "AC")
+        except TaskMutationError:
+            acceptance_block = ""
+        if acceptance_block:
+            return source.replace(acceptance_block, f"{acceptance_block.rstrip()}\n\n{block}", 1)
+    return source.rstrip() + f"\n\n{block}\n"
 
 
 def _append_to_section(
@@ -530,6 +597,21 @@ def _render_checklist(items: Sequence[str]) -> str:
     return "".join(f"- [ ] #{index} {item}\n" for index, item in enumerate(items, start=1))
 
 
+def _render_optional_section(name: str, content: str) -> str:
+    normalized = _normalize_block(content)
+    if not normalized:
+        return ""
+    return f"{_heading_for_section(name)}\n\n{_render_section_markers(name, normalized)}\n\n"
+
+
+def _render_section_markers(name: str, content: str) -> str:
+    return (
+        f"<!-- SECTION:{name}:BEGIN -->\n"
+        f"{content}\n"
+        f"<!-- SECTION:{name}:END -->"
+    )
+
+
 def _definition_of_done_for_create(
     *,
     explicit: Sequence[str] | None,
@@ -652,6 +734,7 @@ def _slug_title(title: str) -> str:
 def _heading_for_section(name: str) -> str:
     headings = {
         "DESCRIPTION": "## Description",
+        "PLAN": "## Implementation Plan",
         "IMPLEMENTATION_NOTES": "## Implementation Notes",
         "FINAL_SUMMARY": "## Final Summary",
     }

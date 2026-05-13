@@ -29,6 +29,9 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--title", default=None, help="Replacement task title for task edit.")
 @click.option("--status", default=None, help="Task status for create/edit.")
 @click.option("--description", default=None, help="Description for task creation.")
+@click.option("--plan", default=None, help="Implementation plan for task create/edit.")
+@click.option("--append-plan", multiple=True, help="Append text to the implementation plan.")
+@click.option("--clear-plan", is_flag=True, help="Clear the implementation plan section.")
 @click.option("--notes", default=None, help="Implementation notes for task create/edit.")
 @click.option(
     "--ac",
@@ -69,6 +72,9 @@ def task_command(
     title: str | None,
     status: str | None,
     description: str | None,
+    plan: str | None,
+    append_plan: tuple[str, ...],
+    clear_plan: bool,
     notes: str | None,
     acceptance_criteria: tuple[str, ...],
     definition_of_done: tuple[str, ...],
@@ -104,6 +110,7 @@ def task_command(
             task_id=task_id,
             status=status,
             description=description or "",
+            plan=plan or "",
             notes=notes or "",
             acceptance_criteria=acceptance_criteria,
             definition_of_done=definition_of_done or None,
@@ -123,6 +130,9 @@ def task_command(
             args[1],
             title=title,
             description=description,
+            plan=plan,
+            append_plan=append_plan,
+            clear_plan=clear_plan,
             notes=notes,
             status=status,
             append_notes=append_notes,

@@ -91,6 +91,24 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
     assert task.parsed.frontmatter["priority"] == "high"
 
 
+def test_create_task_writes_plan_section_after_acceptance_criteria(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    task = _repository(repo).create_task(
+        title="Planned task",
+        task_id="TASK-2",
+        acceptance_criteria=["Plan is recorded"],
+        plan="1. Research current behavior\n2. Implement focused patch",
+    )
+
+    source = task.raw_source
+    assert "## Implementation Plan" in source
+    assert "<!-- SECTION:PLAN:BEGIN -->" in source
+    assert "1. Research current behavior" in task.parsed.sections["PLAN"].content
+    assert source.index("## Acceptance Criteria") < source.index("## Implementation Plan")
+    assert source.index("## Implementation Plan") < source.index("## Implementation Notes")
+
+
 def test_edit_task_updates_owned_sections_and_checklists_without_rewriting_unowned_body(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
@@ -153,6 +171,28 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
     assert "custom_field: preserve-me" in written
     assert "nested_unknown:" in written
     assert "Trailing unowned body content must also round trip." in written
+
+
+def test_edit_task_sets_appends_and_clears_plan_without_rewriting_unowned_body(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    edited = _repository(repo).edit_task("TASK-1", plan="1. Inspect\n2. Patch")
+
+    written = _task_file(repo).read_text(encoding="utf-8")
+    assert edited.parsed.sections["PLAN"].content.strip() == "1. Inspect\n2. Patch"
+    assert written.index("## Acceptance Criteria") < written.index("## Implementation Plan")
+    assert written.index("## Implementation Plan") < written.index("## Implementation Notes")
+    assert "custom_field: preserve-me" in written
+    assert "Trailing unowned body content must also round trip." in written
+
+    appended = _repository(repo).edit_task("TASK-1", append_plan=["3. Verify"])
+
+    assert appended.parsed.sections["PLAN"].content.strip() == "1. Inspect\n2. Patch\n3. Verify"
+
+    cleared = _repository(repo).edit_task("TASK-1", clear_plan=True)
+
+    assert "PLAN" not in cleared.parsed.sections
+    assert "## Implementation Plan" not in _task_file(repo).read_text(encoding="utf-8")
 
 
 def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_path):
@@ -458,6 +498,10 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "CLI replacement note.",
             "--append-notes",
             "- CLI note.",
+            "--plan",
+            "CLI plan.",
+            "--append-plan",
+            "CLI appended plan.",
             "--final-summary",
             "CLI final summary.",
             "--append-final-summary",
@@ -480,6 +524,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "assignee:\n- maintainer" in written
     assert "labels:\n- edited\n- metadata" in written
     assert "priority: medium" in written
+    assert "CLI plan." in written
+    assert "CLI appended plan." in written
     assert "Edited from CLI." in written
     assert "dependencies:\n- TASK-1" in written
     assert "Initial CLI note." not in written
@@ -504,6 +550,23 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "CLI final summary." not in cleared
     assert "CLI appended final summary." not in cleared
+
+    clear_plan = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "edit",
+            "TASK-2",
+            "--clear-plan",
+            "--plain",
+        ],
+    )
+    assert clear_plan.exit_code == 0
+    plan_cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "CLI plan." not in plan_cleared
+    assert "CLI appended plan." not in plan_cleared
 
     uncheck = runner.invoke(
         main,
@@ -584,6 +647,8 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "TASK-2",
             "--description",
             "Created with richer CLI fields.",
+            "--plan",
+            "CLI create plan.",
             "-a",
             "codex",
             "-a",
@@ -610,6 +675,8 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "assignee:\n- codex\n- reviewer" in written
     assert "labels:\n- cli\n- metadata" in written
     assert "priority: high" in written
+    assert "## Implementation Plan" in written
+    assert "CLI create plan." in written
     assert "dependencies:\n- TASK-1" in written
     assert "- [ ] #1 CLI AC one" in written
     assert "- [ ] #2 CLI AC two" in written
@@ -687,6 +754,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         assignee=["codex"],
         labels=["mcp", "metadata"],
         priority="high",
+        implementationPlan="MCP create plan.",
     )
     assert created["id"] == "TASK-2"
     assert created["description"] == "Created from MCP."
@@ -705,6 +773,8 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         assignee=["reviewer"],
         labels=["mcp", "edited"],
         priority="medium",
+        planSet="MCP edited plan.",
+        planAppend=["MCP appended plan."],
     )
     assert edited["id"] == "TASK-2"
     assert edited["title"] == "MCP renamed task"
@@ -722,6 +792,9 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "assignee:\n- reviewer" in written
     assert "labels:\n- mcp\n- edited" in written
     assert "priority: medium" in written
+    assert "MCP edited plan." in written
+    assert "MCP appended plan." in written
+    assert "MCP create plan." not in written
     assert "Initial MCP note." not in written
     assert "MCP replacement note." in written
     assert "- MCP note." in written
@@ -735,6 +808,11 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "MCP final summary." not in cleared
     assert "MCP appended final summary." not in cleared
+
+    task_edit(project, task_id="TASK-2", planClear=True)
+    plan_cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "MCP edited plan." not in plan_cleared
+    assert "MCP appended plan." not in plan_cleared
 
 
 def test_mcp_bool_string_values_are_parsed_explicitly(tmp_path):
