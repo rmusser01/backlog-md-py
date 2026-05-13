@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Mapping
 
 
@@ -42,6 +43,58 @@ class OrchestrationState:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class WorkflowStatePolicy:
+    claimable: bool = False
+    terminal: bool = False
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    code: str
+    message: str
+    path: str
+    severity: str = "error"
+
+
+@dataclass(frozen=True)
+class OrchestrationPolicy:
+    states: dict[str, WorkflowStatePolicy]
+    transitions: dict[str, tuple[str, ...]]
+    default_review_max_attempts: int = 3
+    default_lease_ttl_seconds: int = 3600
+
+    @classmethod
+    def default(cls) -> "OrchestrationPolicy":
+        return cls(
+            states={
+                "todo": WorkflowStatePolicy(claimable=True),
+                "inprogress": WorkflowStatePolicy(),
+                "review": WorkflowStatePolicy(),
+                "complete": WorkflowStatePolicy(terminal=True),
+                "triage": WorkflowStatePolicy(),
+            },
+            transitions={
+                "todo": ("inprogress",),
+                "inprogress": ("review", "triage"),
+                "review": ("complete", "inprogress", "triage"),
+                "triage": ("todo", "inprogress"),
+                "complete": (),
+            },
+        )
+
+    def can_transition(self, from_status: str, to_status: str) -> bool:
+        return _normalize_key(to_status) in self.transitions.get(_normalize_key(from_status), ())
+
+    def is_claimable(self, status_key: str) -> bool:
+        state = self.states.get(_normalize_key(status_key))
+        return state is not None and state.claimable
+
+    def is_terminal(self, status_key: str) -> bool:
+        state = self.states.get(_normalize_key(status_key))
+        return state is not None and state.terminal
+
+
 _STATE_KEYS = {
     "status_key",
     "version",
@@ -81,6 +134,129 @@ def parse_orchestration(task_or_frontmatter: Any) -> OrchestrationState | None:
         raw=orchestration,
         extra={key: value for key, value in orchestration.items() if key not in _STATE_KEYS},
     )
+
+
+def validate_policy(policy: OrchestrationPolicy) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if not any(state.terminal for state in policy.states.values()):
+        issues.append(
+            ValidationIssue(
+                code="policy_missing_terminal_state",
+                message="Orchestration policy must define at least one terminal state",
+                path="states",
+            )
+        )
+    for source, targets in policy.transitions.items():
+        normalized_source = _normalize_key(source)
+        if normalized_source not in policy.states:
+            issues.append(
+                ValidationIssue(
+                    code="policy_unknown_transition_source",
+                    message=f"Transition source is not a known state: {source}",
+                    path=f"transitions.{source}",
+                )
+            )
+        for target in targets:
+            normalized_target = _normalize_key(target)
+            if normalized_target not in policy.states:
+                issues.append(
+                    ValidationIssue(
+                        code="policy_unknown_transition_target",
+                        message=f"Transition target is not a known state: {target}",
+                        path=f"transitions.{source}",
+                    )
+                )
+    if policy.default_review_max_attempts < 1:
+        issues.append(
+            ValidationIssue(
+                code="policy_invalid_review_max_attempts",
+                message="Default review max attempts must be at least 1",
+                path="review.max_attempts",
+            )
+        )
+    if policy.default_lease_ttl_seconds < 1:
+        issues.append(
+            ValidationIssue(
+                code="policy_invalid_lease_ttl",
+                message="Default lease TTL must be at least 1 second",
+                path="lease.default_ttl_seconds",
+            )
+        )
+    return issues
+
+
+def validate_orchestration(
+    task_or_frontmatter: Any,
+    policy: OrchestrationPolicy | None = None,
+) -> list[ValidationIssue]:
+    active_policy = policy or OrchestrationPolicy.default()
+    frontmatter = _frontmatter(task_or_frontmatter)
+    raw_orchestration = frontmatter.get("orchestration")
+    if raw_orchestration is None:
+        return []
+    if not isinstance(raw_orchestration, Mapping):
+        return [
+            ValidationIssue(
+                code="orchestration_not_mapping",
+                message="orchestration frontmatter must be a mapping",
+                path="orchestration",
+            )
+        ]
+
+    raw = dict(raw_orchestration)
+    issues: list[ValidationIssue] = []
+    status_key = raw.get("status_key")
+    if status_key is not None:
+        if not isinstance(status_key, str) or not status_key.strip():
+            issues.append(
+                ValidationIssue(
+                    code="invalid_status_key",
+                    message="orchestration.status_key must be a non-empty string",
+                    path="orchestration.status_key",
+                )
+            )
+        elif _normalize_key(status_key) not in active_policy.states:
+            issues.append(
+                ValidationIssue(
+                    code="unknown_status_key",
+                    message=f"Unknown orchestration status: {status_key}",
+                    path="orchestration.status_key",
+                )
+            )
+
+    version = raw.get("version")
+    if version is not None and (not isinstance(version, int) or isinstance(version, bool) or version < 0):
+        issues.append(
+            ValidationIssue(
+                code="invalid_version",
+                message="orchestration.version must be a non-negative integer",
+                path="orchestration.version",
+            )
+        )
+
+    lease_expires_at = raw.get("lease_expires_at")
+    if lease_expires_at is not None and _parse_datetime(lease_expires_at) is None:
+        issues.append(
+            ValidationIssue(
+                code="invalid_lease_expires_at",
+                message="orchestration.lease_expires_at must be an ISO-8601 timestamp",
+                path="orchestration.lease_expires_at",
+            )
+        )
+
+    review = raw.get("review")
+    if review is not None:
+        if not isinstance(review, Mapping):
+            issues.append(
+                ValidationIssue(
+                    code="invalid_review",
+                    message="orchestration.review must be a mapping",
+                    path="orchestration.review",
+                )
+            )
+        else:
+            issues.extend(_validate_review(dict(review), active_policy))
+    return issues
 
 
 def _frontmatter(task_or_frontmatter: Any) -> Mapping[str, Any]:
@@ -131,3 +307,69 @@ def _optional_string(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _validate_review(raw: Mapping[str, Any], policy: OrchestrationPolicy) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    attempts = raw.get("attempts")
+    max_attempts = raw.get("max_attempts")
+    if attempts is not None and (not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0):
+        issues.append(
+            ValidationIssue(
+                code="invalid_review_attempts",
+                message="orchestration.review.attempts must be a non-negative integer",
+                path="orchestration.review.attempts",
+            )
+        )
+    if (
+        max_attempts is not None
+        and (not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts < 1)
+    ):
+        issues.append(
+            ValidationIssue(
+                code="invalid_review_max_attempts",
+                message="orchestration.review.max_attempts must be a positive integer",
+                path="orchestration.review.max_attempts",
+            )
+        )
+    if (
+        isinstance(attempts, int)
+        and not isinstance(attempts, bool)
+        and attempts >= 0
+        and isinstance(max_attempts, int)
+        and not isinstance(max_attempts, bool)
+        and max_attempts >= 1
+        and attempts > max_attempts
+    ):
+        issues.append(
+            ValidationIssue(
+                code="review_attempts_exceed_max",
+                message="orchestration.review.attempts cannot exceed max_attempts",
+                path="orchestration.review.attempts",
+            )
+        )
+    if max_attempts is None and isinstance(attempts, int) and attempts > policy.default_review_max_attempts:
+        issues.append(
+            ValidationIssue(
+                code="review_attempts_exceed_max",
+                message="orchestration.review.attempts cannot exceed policy default max attempts",
+                path="orchestration.review.attempts",
+            )
+        )
+    return issues
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _normalize_key(value: str) -> str:
+    return "".join(character for character in value.strip().casefold() if character.isalnum())

@@ -1,6 +1,10 @@
 from backlog_py.core.repository import TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
-from backlog_py.orchestration import parse_orchestration
+from backlog_py.orchestration import (
+    OrchestrationPolicy,
+    parse_orchestration,
+    validate_orchestration,
+)
 
 
 def _task_with_frontmatter(frontmatter: dict[str, object]) -> TaskRecord:
@@ -78,3 +82,37 @@ def test_parse_orchestration_preserves_known_and_unknown_fields():
     assert state.review.attempts == 1
     assert state.review.max_attempts == 3
     assert state.extra == {"custom": {"preserve": True}}
+
+
+def test_default_policy_accepts_expected_transitions():
+    policy = OrchestrationPolicy.default()
+
+    assert policy.can_transition("todo", "inprogress")
+    assert policy.can_transition("inprogress", "review")
+    assert policy.can_transition("review", "complete")
+    assert not policy.can_transition("complete", "todo")
+
+
+def test_validate_orchestration_reports_invalid_known_fields():
+    task = _task_with_frontmatter(
+        {
+            "id": "TASK-1",
+            "title": "Invalid",
+            "status": "To Do",
+            "orchestration": {
+                "status_key": "missing",
+                "version": -1,
+                "lease_expires_at": "not-a-date",
+                "review": {"attempts": 4, "max_attempts": 3},
+            },
+        }
+    )
+
+    issues = validate_orchestration(task, OrchestrationPolicy.default())
+
+    assert {issue.code for issue in issues} >= {
+        "unknown_status_key",
+        "invalid_version",
+        "invalid_lease_expires_at",
+        "review_attempts_exceed_max",
+    }
