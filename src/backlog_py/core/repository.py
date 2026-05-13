@@ -105,6 +105,9 @@ class MutableRepository(ReadOnlyRepository):
         definition_of_done_add: Sequence[str] | None = None,
         disable_definition_of_done_defaults: bool = False,
         dependencies: Sequence[str] | None = None,
+        assignees: Sequence[str] | None = None,
+        labels: Sequence[str] | None = None,
+        priority: str | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
         _reject_on_status_change(on_status_change)
@@ -136,6 +139,9 @@ class MutableRepository(ReadOnlyRepository):
             acceptance_criteria=acceptance_criteria or (),
             definition_of_done=task_definition_of_done,
             dependencies=normalized_dependencies,
+            assignees=_normalize_metadata_list(assignees),
+            labels=_normalize_metadata_list(labels),
+            priority=_normalize_optional_string(priority),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
@@ -161,6 +167,9 @@ class MutableRepository(ReadOnlyRepository):
         remove_ac: Sequence[int] | None = None,
         remove_dod: Sequence[int] | None = None,
         dependencies: Sequence[str] | None = None,
+        assignees: Sequence[str] | None = None,
+        labels: Sequence[str] | None = None,
+        priority: str | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
@@ -226,7 +235,17 @@ class MutableRepository(ReadOnlyRepository):
         if definition_of_done_add:
             source = _append_checklist_items(source, parsed, "DOD", definition_of_done_add)
             parsed = parse_task_markdown(source)
-        if title is not None or status is not None or normalized_dependencies is not None:
+        normalized_assignees = _normalize_metadata_list(assignees) if assignees is not None else None
+        normalized_labels = _normalize_metadata_list(labels) if labels is not None else None
+        normalized_priority = _normalize_optional_string(priority) if priority is not None else None
+        if (
+            title is not None
+            or status is not None
+            or normalized_dependencies is not None
+            or normalized_assignees is not None
+            or normalized_labels is not None
+            or normalized_priority is not None
+        ):
             updates: dict[str, object] = {}
             if title is not None:
                 updates["title"] = title
@@ -235,6 +254,12 @@ class MutableRepository(ReadOnlyRepository):
                 updates["status"] = status
             if normalized_dependencies is not None:
                 updates["dependencies"] = normalized_dependencies
+            if normalized_assignees is not None:
+                updates["assignee"] = normalized_assignees
+            if normalized_labels is not None:
+                updates["labels"] = normalized_labels
+            if normalized_priority is not None:
+                updates["priority"] = normalized_priority
             source = _replace_frontmatter_values(source, parsed, updates)
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
@@ -294,6 +319,9 @@ def _new_task_source(
     acceptance_criteria: Sequence[str],
     definition_of_done: Sequence[str],
     dependencies: Sequence[str],
+    assignees: Sequence[str],
+    labels: Sequence[str],
+    priority: str | None,
 ) -> str:
     frontmatter: dict[str, object] = {
         "id": task_id,
@@ -302,6 +330,12 @@ def _new_task_source(
     }
     if dependencies:
         frontmatter["dependencies"] = list(dependencies)
+    if assignees:
+        frontmatter["assignee"] = list(assignees)
+    if labels:
+        frontmatter["labels"] = list(labels)
+    if priority:
+        frontmatter["priority"] = priority
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
     return (
         f"---\n{yaml_text}\n---\n\n"
@@ -529,6 +563,23 @@ def _normalize_dependency_ids(dependencies: Sequence[str] | None) -> list[str]:
             if trimmed:
                 normalized.append(_normalize_dependency_id(trimmed))
     return normalized
+
+
+def _normalize_metadata_list(values: Sequence[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for raw_value in values or ():
+        for value in str(raw_value).split(","):
+            trimmed = value.strip()
+            if trimmed:
+                normalized.append(trimmed)
+    return normalized
+
+
+def _normalize_optional_string(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _normalize_dependency_id(task_id: str) -> str:

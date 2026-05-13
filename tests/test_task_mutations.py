@@ -75,6 +75,22 @@ def test_create_task_writes_valid_task_in_fixture_repo(tmp_path):
     assert _repository(repo).get_task("TASK-2").description == "Created through the safe mutation core."
 
 
+def test_create_task_writes_metadata_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    task = _repository(repo).create_task(
+        title="Metadata task",
+        task_id="TASK-2",
+        assignees=["codex", "reviewer"],
+        labels=["parity", "metadata"],
+        priority="high",
+    )
+
+    assert task.parsed.frontmatter["assignee"] == ["codex", "reviewer"]
+    assert task.parsed.frontmatter["labels"] == ["parity", "metadata"]
+    assert task.parsed.frontmatter["priority"] == "high"
+
+
 def test_edit_task_updates_owned_sections_and_checklists_without_rewriting_unowned_body(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
@@ -117,6 +133,25 @@ def test_edit_task_updates_title_and_renames_task_file_without_rewriting_unowned
     assert not task_path.exists()
     assert "title: Renamed task" in written
     assert "Unowned body content before acceptance criteria must be preserved." in written
+    assert "Trailing unowned body content must also round trip." in written
+
+
+def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    edited = _repository(repo).edit_task(
+        "TASK-1",
+        assignees=["maintainer"],
+        labels=["updated", "parity"],
+        priority="medium",
+    )
+
+    written = _task_file(repo).read_text(encoding="utf-8")
+    assert edited.parsed.frontmatter["assignee"] == ["maintainer"]
+    assert edited.parsed.frontmatter["labels"] == ["updated", "parity"]
+    assert edited.parsed.frontmatter["priority"] == "medium"
+    assert "custom_field: preserve-me" in written
+    assert "nested_unknown:" in written
     assert "Trailing unowned body content must also round trip." in written
 
 
@@ -429,6 +464,12 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "CLI appended final summary.",
             "--dep",
             "1",
+            "-a",
+            "maintainer",
+            "-l",
+            "edited,metadata",
+            "--priority",
+            "medium",
             "--plain",
         ],
     )
@@ -436,6 +477,9 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "TASK-2 [To Do] CLI renamed task" in edit.output
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "title: CLI renamed task" in written
+    assert "assignee:\n- maintainer" in written
+    assert "labels:\n- edited\n- metadata" in written
+    assert "priority: medium" in written
     assert "Edited from CLI." in written
     assert "dependencies:\n- TASK-1" in written
     assert "Initial CLI note." not in written
@@ -540,6 +584,14 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "TASK-2",
             "--description",
             "Created with richer CLI fields.",
+            "-a",
+            "codex",
+            "-a",
+            "reviewer",
+            "-l",
+            "cli,metadata",
+            "--priority",
+            "high",
             "--ac",
             "CLI AC one",
             "--ac",
@@ -555,6 +607,9 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert create.exit_code == 0
     assert "TASK-2 [To Do] CLI full create task" in create.output
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "assignee:\n- codex\n- reviewer" in written
+    assert "labels:\n- cli\n- metadata" in written
+    assert "priority: high" in written
     assert "dependencies:\n- TASK-1" in written
     assert "- [ ] #1 CLI AC one" in written
     assert "- [ ] #2 CLI AC two" in written
@@ -629,6 +684,9 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         description="Created from MCP.",
         notes="Initial MCP note.",
         acceptanceCriteria=["MCP create works"],
+        assignee=["codex"],
+        labels=["mcp", "metadata"],
+        priority="high",
     )
     assert created["id"] == "TASK-2"
     assert created["description"] == "Created from MCP."
@@ -644,6 +702,9 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         acceptanceCriteriaAdd=["MCP added acceptance criterion"],
         definitionOfDoneAdd=["MCP added verification"],
         checkAc=[1],
+        assignee=["reviewer"],
+        labels=["mcp", "edited"],
+        priority="medium",
     )
     assert edited["id"] == "TASK-2"
     assert edited["title"] == "MCP renamed task"
@@ -658,6 +719,9 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert unchecked["id"] == "TASK-2"
     written = _task_file(repo, "task-2").read_text(encoding="utf-8")
     assert "title: MCP renamed task" in written
+    assert "assignee:\n- reviewer" in written
+    assert "labels:\n- mcp\n- edited" in written
+    assert "priority: medium" in written
     assert "Initial MCP note." not in written
     assert "MCP replacement note." in written
     assert "- MCP note." in written

@@ -63,6 +63,9 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         )
         or False,
         dependencies=_optional_string_list(_get_alias(kwargs, "dependencies")),
+        assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
+        labels=_optional_string_list(_get_alias(kwargs, "labels")),
+        priority=_optional_string(_get_alias(kwargs, "priority")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
     return _task_detail(project, task)
@@ -93,6 +96,9 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
         remove_dod=_int_list(_get_alias(kwargs, "definitionOfDoneRemove", "removeDod", "remove_dod")),
         dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
+        assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
+        labels=_optional_string_list(_get_alias(kwargs, "labels")),
+        priority=_optional_string(_get_alias(kwargs, "priority")),
         status=_optional_string(kwargs.get("status")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )

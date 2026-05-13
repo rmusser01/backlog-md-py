@@ -35,8 +35,8 @@ still experimental:
 ```bash
 backlog-py --help
 backlog-py --cwd /path/to/project task list --plain
-backlog-py --cwd /path/to/project task create "Implementation task" --ac "Behavior covered" --dod "Tests pass" --dep 1 --plain
-backlog-py --cwd /path/to/project task edit TASK-2 --notes "Implementation details." --ac "Regression covered" --dod "Package check passes" --remove-ac 1 --append-final-summary "Ready for review." --plain
+backlog-py --cwd /path/to/project task create "Implementation task" -a codex -l implementation --priority high --ac "Behavior covered" --dod "Tests pass" --dep 1 --plain
+backlog-py --cwd /path/to/project task edit TASK-2 -a reviewer -l ready --priority medium --notes "Implementation details." --ac "Regression covered" --dod "Package check passes" --remove-ac 1 --append-final-summary "Ready for review." --plain
 backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project board
@@ -69,7 +69,7 @@ print(task_board(project))
 print(task_list(project, status="In Progress", limit=10))
 print(task_search(project, "release", limit=5))
 print(task_view(project, "task-1"))
-print(task_edit(project, "task-1", notes="Implementation details.", finalSummaryAppend=["Ready for review."]))
+print(task_edit(project, "task-1", assignee=["reviewer"], labels=["ready"], priority="medium", notes="Implementation details.", finalSummaryAppend=["Ready for review."]))
 print(task_archive(project, "task-1"))
 ```
 

@@ -47,6 +47,9 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 )
 @click.option("--disable-definition-of-done-defaults", is_flag=True, help="Do not inherit project Definition of Done defaults.")
 @click.option("--dep", "--dependency", "dependencies", multiple=True, help="Task dependency id for task create/edit.")
+@click.option("-a", "--assignee", "assignees", multiple=True, help="Task assignee for create/edit.")
+@click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit.")
+@click.option("--priority", default=None, help="Task priority for create/edit.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
@@ -72,6 +75,9 @@ def task_command(
     definition_of_done_add: tuple[str, ...],
     disable_definition_of_done_defaults: bool,
     dependencies: tuple[str, ...],
+    assignees: tuple[str, ...],
+    labels: tuple[str, ...],
+    priority: str | None,
     append_notes: str | None,
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
@@ -104,6 +110,9 @@ def task_command(
             definition_of_done_add=definition_of_done_add,
             disable_definition_of_done_defaults=disable_definition_of_done_defaults,
             dependencies=dependencies,
+            assignees=assignees,
+            labels=labels,
+            priority=priority,
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
@@ -126,6 +135,9 @@ def task_command(
             remove_ac=remove_ac,
             remove_dod=remove_dod,
             dependencies=dependencies if dependencies else None,
+            assignees=assignees if assignees else None,
+            labels=labels if labels else None,
+            priority=priority,
             final_summary=final_summary,
             append_final_summary=append_final_summary,
             clear_final_summary=clear_final_summary,

@@ -84,6 +84,9 @@ def _register_tools(server: Any) -> None:
         definition_of_done_add: list[str] | None = None,
         disable_definition_of_done_defaults: bool = False,
         dependencies: list[str] | None = None,
+        assignee: list[str] | None = None,
+        labels: list[str] | None = None,
+        priority: str | None = None,
         on_status_change: bool | None = None,
     ) -> dict[str, Any]:
         """Create a task in a Backlog.md project."""
@@ -100,6 +103,9 @@ def _register_tools(server: Any) -> None:
                 definition_of_done_add=definition_of_done_add,
                 disable_definition_of_done_defaults=disable_definition_of_done_defaults,
                 dependencies=dependencies,
+                assignee=assignee,
+                labels=labels,
+                priority=priority,
                 on_status_change=on_status_change,
             ),
         )
@@ -124,6 +130,9 @@ def _register_tools(server: Any) -> None:
         remove_ac: list[int] | None = None,
         remove_dod: list[int] | None = None,
         dependencies: list[str] | None = None,
+        assignee: list[str] | None = None,
+        labels: list[str] | None = None,
+        priority: str | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> dict[str, Any]:
@@ -148,6 +157,9 @@ def _register_tools(server: Any) -> None:
                 remove_ac=remove_ac,
                 remove_dod=remove_dod,
                 dependencies=dependencies,
+                assignee=assignee,
+                labels=labels,
+                priority=priority,
                 status=status,
                 on_status_change=on_status_change,
             ),
