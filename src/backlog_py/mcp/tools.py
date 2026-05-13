@@ -45,10 +45,13 @@ def task_list(
     priority: str | None = None,
     milestone: str | None = None,
     search: str | None = None,
+    parent_task_id: str | None = None,
+    parentTaskId: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tasks through the read-only repository and return JSON-safe rows."""
     if limit <= 0:
         return []
+    parent_filter = parent_task_id if parent_task_id is not None else parentTaskId
     repository = ReadOnlyRepository(project)
     if search is None:
         tasks = repository.list_tasks(
@@ -57,6 +60,7 @@ def task_list(
             labels=labels,
             priority=priority,
             milestone=milestone,
+            parent_task_id=parent_filter,
         )
     else:
         tasks = repository.search_tasks(
@@ -66,6 +70,7 @@ def task_list(
             labels=labels,
             priority=priority,
             milestone=milestone,
+            parent_task_id=parent_filter,
         )
     return [_task_summary(project, task) for task in tasks[:limit]]
 
@@ -111,6 +116,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
         milestone=_optional_string(_get_alias(kwargs, "milestone")),
+        parent_task_id=_optional_string(_get_alias(kwargs, "parentTaskId", "parent_task_id", "parent")),
         references=_optional_string_list(_get_alias(kwargs, "references")),
         documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
         modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
@@ -267,8 +273,11 @@ def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
     documentation = _frontmatter_string_list(task, "documentation")
     modified_files = _frontmatter_string_list(task, "modified_files")
     milestone = task.parsed.frontmatter.get("milestone")
+    parent_task_id = task.parsed.frontmatter.get("parent_task_id")
     if milestone:
         summary["milestone"] = str(milestone)
+    if parent_task_id:
+        summary["parentTaskId"] = str(parent_task_id)
     if references:
         summary["references"] = references
     if documentation:

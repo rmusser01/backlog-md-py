@@ -128,6 +128,22 @@ def test_task_list_plain_filters_by_metadata(tmp_path):
         assert "TASK-2" not in result.output
 
 
+def test_task_list_plain_filters_by_parent(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    repository = MutableRepository.from_path(repo)
+    repository.create_task(title="Child task", parent_task_id="TASK-1")
+    repository.create_task(title="Sibling task", task_id="TASK-2")
+
+    result = _invoke_repo(repo, "task", "list", "--plain", "-p", "1")
+
+    assert result.exit_code == 0
+    assert "TASK-1.1" in result.output
+    assert "Child task" in result.output
+    assert "TASK-1 [In Progress] Example task" not in result.output
+    assert "TASK-2" not in result.output
+
+
 def test_task_list_rejects_invalid_priority_filter(tmp_path):
     repo = _metadata_filter_repo(tmp_path)
 

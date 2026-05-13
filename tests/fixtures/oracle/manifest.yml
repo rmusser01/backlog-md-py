@@ -8,7 +8,7 @@ fixtures:
     command: ["backlog", "--help"]
     agent_critical: true
   - name: "cli:task-list-plain"
-    command: ["backlog", "task", "list", "--plain"]
+    command: ["backlog", "task", "list", "--parent", "1", "--plain"]
     agent_critical: true
   - name: "cli:task-view-plain"
     command: ["backlog", "task", "1", "--plain"]
@@ -23,7 +23,7 @@ fixtures:
     command: ["backlog", "board"]
     agent_critical: true
   - name: "cli:task-create"
-    command: ["backlog", "task", "create", "Temporary smoke task", "--status", "To Do", "--final-summary", "Created summary", "--plain"]
+    command: ["backlog", "task", "create", "Temporary smoke task", "--status", "To Do", "--parent", "1", "--final-summary", "Created summary", "--plain"]
     agent_critical: true
   - name: "cli:task-edit"
     command: ["backlog", "task", "edit", "TASK-1", "--append-notes", "Updated from fixture", "--plain"]

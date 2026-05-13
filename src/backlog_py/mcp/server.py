@@ -64,6 +64,7 @@ def _register_tools(server: Any) -> None:
         labels: list[str] | None = None,
         priority: str | None = None,
         milestone: str | None = None,
+        parent_task_id: str | None = None,
         search: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -75,6 +76,7 @@ def _register_tools(server: Any) -> None:
             labels=labels,
             priority=priority,
             milestone=milestone,
+            parent_task_id=parent_task_id,
             search=search,
             limit=limit,
         )
@@ -122,6 +124,7 @@ def _register_tools(server: Any) -> None:
         labels: list[str] | None = None,
         priority: str | None = None,
         milestone: str | None = None,
+        parent_task_id: str | None = None,
         references: list[str] | None = None,
         documentation: list[str] | None = None,
         modified_files: list[str] | None = None,
@@ -147,6 +150,7 @@ def _register_tools(server: Any) -> None:
                 labels=labels,
                 priority=priority,
                 milestone=milestone,
+                parent_task_id=parent_task_id,
                 references=references,
                 documentation=documentation,
                 modifiedFiles=modified_files,

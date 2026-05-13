@@ -99,6 +99,21 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
     assert task.parsed.frontmatter["modified_files"] == ["src/api.py", "src/ui.py"]
 
 
+def test_create_task_with_parent_generates_child_id_and_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+
+    first_child = repository.create_task(title="First child task", parent_task_id="1")
+    second_child = repository.create_task(title="Second child task", parent_task_id="TASK-1")
+
+    assert first_child.id == "TASK-1.1"
+    assert first_child.parsed.frontmatter["parent_task_id"] == "TASK-1"
+    assert second_child.id == "TASK-1.2"
+    assert second_child.parsed.frontmatter["parent_task_id"] == "TASK-1"
+    assert (repo / "backlog" / "tasks" / "task-1.1 - First-child-task.md").is_file()
+    assert (repo / "backlog" / "tasks" / "task-1.2 - Second-child-task.md").is_file()
+
+
 def test_create_task_writes_plan_section_after_acceptance_criteria(tmp_path):
     repo = _copy_fixture(tmp_path)
 

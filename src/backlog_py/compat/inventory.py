@@ -28,7 +28,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-list-plain",
             "CLI-INSTRUCTIONS.md",
-            "backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --plain",
+            "backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --parent <taskId> --plain",
         ),
         _golden("cli:task-view-plain", "CLI-INSTRUCTIONS.md", "backlog task <id> --plain"),
         _golden(
@@ -41,7 +41,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> --plan <text> --final-summary <text> --milestone <milestone> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain",
+            "backlog task create <title> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain",
         ),
         _golden(
             "cli:task-edit",
@@ -70,7 +70,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-list",
             "MCP tools",
-            "task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, search=None)",
+            "task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, parentTaskId=None, search=None)",
         ),
         _golden(
             "mcp:task-search",
@@ -81,7 +81,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-create",
             "MCP tools",
-            "task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs)",
+            "task_create(project, milestone=None, parentTaskId=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs)",
         ),
         _golden(
             "mcp:task-edit",

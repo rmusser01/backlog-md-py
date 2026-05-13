@@ -85,6 +85,31 @@ def test_task_list_honors_frontmatter_metadata_filters(tmp_path):
     assert [task["id"] for task in mcp_tools.task_list(project, milestone="release 1")] == ["TASK-1"]
 
 
+def test_task_list_and_create_honor_parent_task_id(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    child = mcp_tools.task_create(project, title="MCP child task", parentTaskId="1")
+    MutableRepository(project).create_task(title="MCP sibling task", task_id="TASK-2")
+
+    assert child["id"] == "TASK-1.1"
+    assert child["parentTaskId"] == "TASK-1"
+    assert [task["id"] for task in mcp_tools.task_list(project, parentTaskId="TASK-1")] == ["TASK-1.1"]
+
+
+def test_task_list_search_honors_parent_task_id(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    mcp_tools.task_create(project, title="Parented searchable task", parentTaskId="1")
+    MutableRepository(project).create_task(title="Unparented searchable task", task_id="TASK-2")
+
+    result = mcp_tools.task_list(project, search="searchable", parentTaskId="1")
+
+    assert [task["id"] for task in result] == ["TASK-1.1"]
+
+
 def test_task_list_honors_search_filter(tmp_path):
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)

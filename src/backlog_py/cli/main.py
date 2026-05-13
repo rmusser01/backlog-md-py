@@ -54,6 +54,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit/list.")
 @click.option("--priority", default=None, help="Task priority for create/edit/list.")
 @click.option("-m", "--milestone", default=None, help="Task milestone for create/edit/list.")
+@click.option("-p", "--parent", "parent_task_id", default=None, help="Parent task id for create/list.")
 @click.option("--clear-milestone", is_flag=True, help="Clear the task milestone on edit.")
 @click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
 @click.option("--doc", "documentation", multiple=True, help="Task documentation URL or file path for create/edit.")
@@ -90,6 +91,7 @@ def task_command(
     labels: tuple[str, ...],
     priority: str | None,
     milestone: str | None,
+    parent_task_id: str | None,
     clear_milestone: bool,
     references: tuple[str, ...],
     documentation: tuple[str, ...],
@@ -134,6 +136,7 @@ def task_command(
             labels=labels,
             priority=priority,
             milestone=milestone,
+            parent_task_id=parent_task_id,
             references=references,
             documentation=documentation,
             modified_files=modified_files,
@@ -185,6 +188,7 @@ def task_command(
             labels=labels,
             priority=_priority_filter(priority),
             milestone=milestone,
+            parent_task_id=parent_task_id,
         ):
             click.echo(_format_task_line(task_record, plain=plain))
         return

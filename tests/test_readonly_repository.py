@@ -141,6 +141,26 @@ def test_repository_filters_tasks_by_frontmatter_metadata(tmp_path):
     assert repository.list_tasks(labels=["parser", "docs"]) == []
 
 
+def test_repository_filters_tasks_by_parent_task_id(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    mutable_repository.create_task(title="Child task", parent_task_id="TASK-1")
+    mutable_repository.create_task(title="Sibling task", task_id="TASK-2")
+    repository = ReadOnlyRepository.from_path(repo)
+
+    assert [task.id for task in repository.list_tasks(parent_task_id="1")] == ["TASK-1.1"]
+
+
+def test_repository_search_filters_tasks_by_parent_task_id(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    mutable_repository.create_task(title="Parented searchable task", parent_task_id="TASK-1")
+    mutable_repository.create_task(title="Unparented searchable task", task_id="TASK-2")
+    repository = ReadOnlyRepository.from_path(repo)
+
+    assert [task.id for task in repository.search_tasks("searchable", parent_task_id="1")] == ["TASK-1.1"]
+
+
 def test_repository_search_filters_by_status_priority_and_modified_files(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     mutable_repository = MutableRepository.from_path(repo)
