@@ -197,10 +197,16 @@ def task_command(
 @main.command("search")
 @click.argument("query")
 @click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.option("--status", default=None, help="Filter matching tasks by status.")
+@click.option("--priority", default=None, help="Filter matching tasks by priority.")
 @click.pass_context
-def search_command(ctx: click.Context, query: str, plain: bool) -> None:
+def search_command(ctx: click.Context, query: str, plain: bool, status: str | None, priority: str | None) -> None:
     """Search active tasks."""
-    for task_record in _repository(ctx).search_tasks(query):
+    for task_record in _repository(ctx).search_tasks(
+        query,
+        status=status,
+        priority=_priority_filter(priority),
+    ):
         click.echo(_format_task_line(task_record, plain=plain))
 
 

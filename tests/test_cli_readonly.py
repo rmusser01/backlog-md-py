@@ -84,6 +84,17 @@ def test_search_plain_outputs_matching_task():
     assert "Example task" in result.output
 
 
+def test_search_plain_filters_by_status_and_priority(tmp_path):
+    repo = _metadata_filter_repo(tmp_path)
+
+    result = _invoke_repo(repo, "search", "task", "--status", "To Do", "--priority", "low", "--plain")
+
+    assert result.exit_code == 0
+    assert "TASK-2" in result.output
+    assert "Documentation task" in result.output
+    assert "TASK-1" not in result.output
+
+
 def test_board_outputs_status_grouping():
     result = _invoke("board")
 

@@ -31,7 +31,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --plain",
         ),
         _golden("cli:task-view-plain", "CLI-INSTRUCTIONS.md", "backlog task <id> --plain"),
-        _golden("cli:search-plain", "CLI-INSTRUCTIONS.md", "backlog search <query> --plain"),
+        _golden(
+            "cli:search-plain",
+            "CLI-INSTRUCTIONS.md",
+            "backlog search <query> --status <status> --priority <priority> --plain",
+        ),
         _golden("cli:board", "CLI-INSTRUCTIONS.md", "backlog board"),
         _golden("cli:config-list", "ADVANCED-CONFIG.md", "backlog config list"),
         _golden(
