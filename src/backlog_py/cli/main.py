@@ -124,6 +124,7 @@ def task_command(
             description=description or "",
             plan=plan or "",
             notes=notes or "",
+            final_summary=final_summary or "",
             acceptance_criteria=acceptance_criteria,
             definition_of_done=definition_of_done or None,
             definition_of_done_add=definition_of_done_add,

@@ -779,6 +779,8 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "Created with richer CLI fields.",
             "--plan",
             "CLI create plan.",
+            "--final-summary",
+            "CLI create final summary.",
             "--ref",
             "https://example.com/issue/1",
             "--ref",
@@ -827,6 +829,7 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "modified_files:\n- src/create.py\n- tests/test_create.py" in written
     assert "## Implementation Plan" in written
     assert "CLI create plan." in written
+    assert "CLI create final summary." in written
     assert "dependencies:\n- TASK-1" in written
     assert "- [ ] #1 CLI AC one" in written
     assert "- [ ] #2 CLI AC two" in written
@@ -909,11 +912,13 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         references=["ref1.py", "ref2.py"],
         documentation=["doc1.md", "doc2.md"],
         modifiedFiles=["src/mcp.py", "tests/test_mcp.py"],
+        finalSummary="MCP create final summary.",
     )
     assert created["id"] == "TASK-2"
     assert created["description"] == "Created from MCP."
     assert created["milestone"] == "Release MCP"
     assert created["modifiedFiles"] == ["src/mcp.py", "tests/test_mcp.py"]
+    assert "MCP create final summary." in _task_file(repo, "task-2").read_text(encoding="utf-8")
 
     edited = task_edit(
         project,

@@ -96,6 +96,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         description=str(kwargs.get("description") or ""),
         plan=str(_get_alias(kwargs, "implementationPlan", "implementation_plan", "plan") or ""),
         notes=str(kwargs.get("notes") or ""),
+        final_summary=str(_get_alias(kwargs, "finalSummary", "final_summary") or ""),
         acceptance_criteria=_optional_string_list(_get_alias(kwargs, "acceptanceCriteria", "acceptance_criteria")),
         definition_of_done=_optional_string_list(_get_alias(kwargs, "definitionOfDone", "definition_of_done")),
         definition_of_done_add=_optional_string_list(

@@ -149,6 +149,7 @@ class MutableRepository(ReadOnlyRepository):
         description: str = "",
         plan: str = "",
         notes: str = "",
+        final_summary: str = "",
         acceptance_criteria: Sequence[str] | None = None,
         definition_of_done: Sequence[str] | None = None,
         definition_of_done_add: Sequence[str] | None = None,
@@ -190,6 +191,7 @@ class MutableRepository(ReadOnlyRepository):
             description=description,
             plan=plan,
             notes=notes,
+            final_summary=final_summary,
             acceptance_criteria=acceptance_criteria or (),
             definition_of_done=task_definition_of_done,
             dependencies=normalized_dependencies,
@@ -521,6 +523,7 @@ def _new_task_source(
     description: str,
     plan: str,
     notes: str,
+    final_summary: str,
     acceptance_criteria: Sequence[str],
     definition_of_done: Sequence[str],
     dependencies: Sequence[str],
@@ -571,6 +574,7 @@ def _new_task_source(
         "<!-- SECTION:IMPLEMENTATION_NOTES:END -->\n\n"
         "## Final Summary\n\n"
         "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n"
+        f"{_normalize_block(final_summary)}\n"
         "<!-- SECTION:FINAL_SUMMARY:END -->\n\n"
         "## Definition of Done\n"
         "<!-- DOD:BEGIN -->\n"

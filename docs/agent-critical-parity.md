@@ -16,7 +16,7 @@ do not block the first local-file agent cutover candidate.
 | cli:search-plain | implemented | backlog search <query> --status <status> --priority <priority> --plain | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
 | cli:config-list | implemented | backlog config list | cli:config-list |
-| cli:task-create | implemented | backlog task create <title> --plan <text> --milestone <milestone> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain | cli:task-create |
+| cli:task-create | implemented | backlog task create <title> --plan <text> --final-summary <text> --milestone <milestone> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain | cli:task-create |
 | cli:task-edit | implemented | backlog task edit <id> --plan <text> --milestone <milestone> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
@@ -36,7 +36,7 @@ do not block the first local-file agent cutover candidate.
 | mcp:task-list | implemented | task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, search=None) | mcp:task-list |
 | mcp:task-search | implemented | task_search(project, query='', limit=10, *, status=None, priority=None, modified_files=None) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
-| mcp:task-create | implemented | task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, **kwargs) | mcp:task-create |
+| mcp:task-create | implemented | task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs) | mcp:task-create |
 | mcp:task-edit | implemented | task_edit(project, task_id, milestone=None, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs) | mcp:task-edit |
 | mcp:task-archive | implemented | task_archive(project, task_id) | mcp:task-archive |
 | mcp:task-complete | implemented | task_complete(project, task_id) | mcp:task-complete |
