@@ -44,6 +44,15 @@ class OrchestrationState:
 
 
 @dataclass(frozen=True)
+class OrchestrationSummary:
+    by_status: dict[str, int]
+    eligible_count: int
+    active_claim_count: int
+    stale_lease_count: int
+    validation_issue_count: int
+
+
+@dataclass(frozen=True)
 class WorkflowStatePolicy:
     claimable: bool = False
     terminal: bool = False
