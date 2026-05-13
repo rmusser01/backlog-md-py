@@ -11,7 +11,7 @@ do not block the first local-file agent cutover candidate.
 | Inventory item | Status | Expected command, resource, or tool | Fixture |
 | --- | --- | --- | --- |
 | cli:help | implemented | backlog --help | cli:help |
-| cli:task-list-plain | implemented | backlog task list --plain | cli:task-list-plain |
+| cli:task-list-plain | implemented | backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --plain | cli:task-list-plain |
 | cli:task-view-plain | implemented | backlog task <id> --plain | cli:task-view-plain |
 | cli:search-plain | implemented | backlog search <query> --plain | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
@@ -33,7 +33,7 @@ do not block the first local-file agent cutover candidate.
 | mcp:workflow-overview | implemented | backlog://workflow/overview | mcp:workflow-overview |
 | mcp:task-workflow-alias | implemented | backlog://docs/task-workflow | mcp:task-workflow-alias |
 | mcp:board | implemented | task_board(project) | mcp:board |
-| mcp:task-list | implemented | task_list(project, status=None, limit=100) | mcp:task-list |
+| mcp:task-list | implemented | task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None) | mcp:task-list |
 | mcp:task-search | implemented | task_search(project, query, limit=10) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
 | mcp:task-create | implemented | task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, **kwargs) | mcp:task-create |

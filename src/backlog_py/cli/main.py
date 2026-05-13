@@ -27,7 +27,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--plain", is_flag=True, help="Print plain text output.")
 @click.option("--id", "task_id", default=None, help="Task id for task creation.")
 @click.option("--title", default=None, help="Replacement task title for task edit.")
-@click.option("--status", default=None, help="Task status for create/edit.")
+@click.option("--status", default=None, help="Task status for create/edit/list.")
 @click.option("--description", default=None, help="Description for task creation.")
 @click.option("--plan", default=None, help="Implementation plan for task create/edit.")
 @click.option("--append-plan", multiple=True, help="Append text to the implementation plan.")
@@ -50,10 +50,10 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 )
 @click.option("--disable-definition-of-done-defaults", is_flag=True, help="Do not inherit project Definition of Done defaults.")
 @click.option("--dep", "--dependency", "dependencies", multiple=True, help="Task dependency id for task create/edit.")
-@click.option("-a", "--assignee", "assignees", multiple=True, help="Task assignee for create/edit.")
-@click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit.")
-@click.option("--priority", default=None, help="Task priority for create/edit.")
-@click.option("-m", "--milestone", default=None, help="Task milestone for create/edit.")
+@click.option("-a", "--assignee", "assignees", multiple=True, help="Task assignee for create/edit/list.")
+@click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit/list.")
+@click.option("--priority", default=None, help="Task priority for create/edit/list.")
+@click.option("-m", "--milestone", default=None, help="Task milestone for create/edit/list.")
 @click.option("--clear-milestone", is_flag=True, help="Clear the task milestone on edit.")
 @click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
 @click.option("--doc", "documentation", multiple=True, help="Task documentation URL or file path for create/edit.")
@@ -178,7 +178,13 @@ def task_command(
         click.echo(_format_task_line(task_record, plain=plain))
         return
     if args == ("list",):
-        for task_record in _repository(ctx).list_tasks():
+        for task_record in _repository(ctx).list_tasks(
+            status=status,
+            assignee=assignees,
+            labels=labels,
+            priority=_priority_filter(priority),
+            milestone=milestone,
+        ):
             click.echo(_format_task_line(task_record, plain=plain))
         return
     if len(args) != 1:
@@ -431,6 +437,20 @@ def _frontmatter_string_list(task_record: TaskRecord, key: str) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def _priority_filter(priority: str | None) -> str | None:
+    if priority is None:
+        return None
+    normalized = priority.strip().casefold()
+    if not normalized:
+        return None
+    valid_priorities = {"high", "medium", "low"}
+    if normalized not in valid_priorities:
+        raise click.ClickException(
+            f"Invalid priority: {priority}\nValid values are: high, medium, low"
+        )
+    return normalized
 
 
 def _bool_text(value: bool) -> str:

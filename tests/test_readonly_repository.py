@@ -1,6 +1,7 @@
+import shutil
 from pathlib import Path
 
-from backlog_py.core.repository import ReadOnlyRepository
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
@@ -12,6 +13,12 @@ def _snapshot_files(root: Path) -> dict[Path, str]:
         for path in sorted((root / "backlog").rglob("*"))
         if path.is_file()
     }
+
+
+def _copy_fixture_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    return repo
 
 
 def test_repository_lists_tasks_from_fixture_repo():
@@ -103,3 +110,32 @@ def test_repository_sorts_dotted_task_ids(tmp_path):
     tasks = ReadOnlyRepository.from_path(tmp_path).list_tasks()
 
     assert [task.id for task in tasks] == ["TASK-2.1", "TASK-10"]
+
+
+def test_repository_filters_tasks_by_frontmatter_metadata(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    mutable_repository.edit_task(
+        "TASK-1",
+        assignees=["Codex"],
+        labels=["Parser", "UI"],
+        priority="high",
+        milestone="Release 1",
+    )
+    mutable_repository.create_task(
+        title="Documentation task",
+        task_id="TASK-2",
+        status="To Do",
+        assignees=["reviewer"],
+        labels=["docs"],
+        priority="low",
+        milestone="Release 2",
+    )
+    repository = ReadOnlyRepository.from_path(repo)
+
+    assert [task.id for task in repository.list_tasks(status="in progress")] == ["TASK-1"]
+    assert [task.id for task in repository.list_tasks(assignee="codex")] == ["TASK-1"]
+    assert [task.id for task in repository.list_tasks(labels=["parser", "ui"])] == ["TASK-1"]
+    assert [task.id for task in repository.list_tasks(priority="HIGH")] == ["TASK-1"]
+    assert [task.id for task in repository.list_tasks(milestone="release 1")] == ["TASK-1"]
+    assert repository.list_tasks(labels=["parser", "docs"]) == []

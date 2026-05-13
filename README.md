@@ -27,6 +27,7 @@ Use `backlog-py` or `python -m backlog_py` for the experimental CLI:
 
 ```bash
 backlog-py --cwd /path/to/project task list --plain
+backlog-py --cwd /path/to/project task list --priority high -a codex -l implementation --milestone "Release 1" --plain
 python -m backlog_py --cwd /path/to/project board
 ```
 

@@ -25,7 +25,11 @@ class CompatibilityInventory:
 def load_builtin_inventory() -> CompatibilityInventory:
     items = (
         _golden("cli:help", "CLI-INSTRUCTIONS.md", "backlog --help"),
-        _golden("cli:task-list-plain", "CLI-INSTRUCTIONS.md", "backlog task list --plain"),
+        _golden(
+            "cli:task-list-plain",
+            "CLI-INSTRUCTIONS.md",
+            "backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --plain",
+        ),
         _golden("cli:task-view-plain", "CLI-INSTRUCTIONS.md", "backlog task <id> --plain"),
         _golden("cli:search-plain", "CLI-INSTRUCTIONS.md", "backlog search <query> --plain"),
         _golden("cli:board", "CLI-INSTRUCTIONS.md", "backlog board"),
@@ -59,7 +63,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden("mcp:workflow-overview", "agent-nudge.md", "backlog://workflow/overview"),
         _golden("mcp:task-workflow-alias", "agent-nudge.md", "backlog://docs/task-workflow"),
         _golden("mcp:board", "MCP tools", "task_board(project)"),
-        _golden("mcp:task-list", "MCP tools", "task_list(project, status=None, limit=100)"),
+        _golden(
+            "mcp:task-list",
+            "MCP tools",
+            "task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None)",
+        ),
         _golden("mcp:task-search", "MCP tools", "task_search(project, query, limit=10)"),
         _golden("mcp:task-view", "MCP tools", "task_view(project, task_id)"),
         _golden(

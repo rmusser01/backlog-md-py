@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 import backlog_py.mcp as mcp
+from backlog_py.core.repository import MutableRepository
 from backlog_py.mcp import server as mcp_server
 from backlog_py.mcp import tools as mcp_tools
 from backlog_py.mcp.resources import read_resource
@@ -53,6 +54,35 @@ def test_task_list_honors_status_and_limit():
 
     assert mcp_tools.task_list(_project(), status="To Do") == []
     assert mcp_tools.task_list(_project(), limit=0) == []
+
+
+def test_task_list_honors_frontmatter_metadata_filters(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.edit_task(
+        "TASK-1",
+        assignees=["Codex"],
+        labels=["Parser", "UI"],
+        priority="high",
+        milestone="Release 1",
+    )
+    repository.create_task(
+        title="Documentation task",
+        task_id="TASK-2",
+        status="To Do",
+        assignees=["reviewer"],
+        labels=["docs"],
+        priority="low",
+        milestone="Release 2",
+    )
+
+    assert [task["id"] for task in mcp_tools.task_list(project, status="in progress")] == ["TASK-1"]
+    assert [task["id"] for task in mcp_tools.task_list(project, assignee="codex")] == ["TASK-1"]
+    assert [task["id"] for task in mcp_tools.task_list(project, labels=["parser", "ui"])] == ["TASK-1"]
+    assert [task["id"] for task in mcp_tools.task_list(project, priority="HIGH")] == ["TASK-1"]
+    assert [task["id"] for task in mcp_tools.task_list(project, milestone="release 1")] == ["TASK-1"]
 
 
 def test_task_board_returns_status_grouped_fixture_rows():

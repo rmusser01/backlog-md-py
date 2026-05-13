@@ -52,8 +52,28 @@ class ReadOnlyRepository:
     def from_path(cls, cwd: Path) -> "ReadOnlyRepository":
         return cls(discover_project(Path.cwd(), explicit_cwd=cwd))
 
-    def list_tasks(self) -> list[TaskRecord]:
-        return sorted(self._load_tasks(), key=lambda task: (_task_sort_key(task.id), task.title))
+    def list_tasks(
+        self,
+        *,
+        status: str | None = None,
+        assignee: str | Sequence[str] | None = None,
+        labels: str | Sequence[str] | None = None,
+        priority: str | None = None,
+        milestone: str | None = None,
+    ) -> list[TaskRecord]:
+        tasks = sorted(self._load_tasks(), key=lambda task: (_task_sort_key(task.id), task.title))
+        return [
+            task
+            for task in tasks
+            if _task_matches_filters(
+                task,
+                status=status,
+                assignee=assignee,
+                labels=labels,
+                priority=priority,
+                milestone=milestone,
+            )
+        ]
 
     def get_task(self, task_id: str) -> TaskRecord:
         normalized_id = task_id.casefold()
@@ -373,6 +393,62 @@ def _load_task(path: Path) -> TaskRecord:
         path=path,
         parsed=parsed,
     )
+
+
+def _task_matches_filters(
+    task: TaskRecord,
+    *,
+    status: str | None,
+    assignee: str | Sequence[str] | None,
+    labels: str | Sequence[str] | None,
+    priority: str | None,
+    milestone: str | None,
+) -> bool:
+    return (
+        _matches_text(task.status, status)
+        and _matches_frontmatter_values(task, "assignee", assignee)
+        and _matches_frontmatter_values(task, "labels", labels)
+        and _matches_frontmatter_text(task, "priority", priority)
+        and _matches_frontmatter_text(task, "milestone", milestone)
+    )
+
+
+def _matches_frontmatter_text(task: TaskRecord, key: str, requested: str | None) -> bool:
+    value = task.parsed.frontmatter.get(key)
+    return _matches_text(None if value is None else str(value), requested)
+
+
+def _matches_text(actual: str | None, requested: str | None) -> bool:
+    if requested is None:
+        return True
+    normalized_requested = requested.strip().casefold()
+    if not normalized_requested:
+        return True
+    return actual is not None and actual.strip().casefold() == normalized_requested
+
+
+def _matches_frontmatter_values(
+    task: TaskRecord,
+    key: str,
+    requested: str | Sequence[str] | None,
+) -> bool:
+    requested_values = _normalize_filter_values(requested)
+    if not requested_values:
+        return True
+    actual_values = {
+        value.strip().casefold()
+        for value in _frontmatter_string_list(task.parsed.frontmatter.get(key))
+        if value.strip()
+    }
+    return all(value.strip().casefold() in actual_values for value in requested_values)
+
+
+def _normalize_filter_values(values: str | Sequence[str] | None) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        return _normalize_metadata_list([values])
+    return _normalize_metadata_list(values)
 
 
 def _new_task_source(

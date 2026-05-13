@@ -57,9 +57,25 @@ def _register_tools(server: Any) -> None:
         return tool_registry.task_board(_project(project))
 
     @server.tool()
-    def task_list(project: str, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def task_list(
+        project: str,
+        status: str | None = None,
+        assignee: str | None = None,
+        labels: list[str] | None = None,
+        priority: str | None = None,
+        milestone: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         """List tasks in a Backlog.md project."""
-        return tool_registry.task_list(_project(project), status=status, limit=limit)
+        return tool_registry.task_list(
+            _project(project),
+            status=status,
+            assignee=assignee,
+            labels=labels,
+            priority=priority,
+            milestone=milestone,
+            limit=limit,
+        )
 
     @server.tool()
     def task_search(project: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
