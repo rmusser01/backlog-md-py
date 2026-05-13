@@ -111,6 +111,7 @@ class MutableRepository(ReadOnlyRepository):
         priority: str | None = None,
         references: Sequence[str] | None = None,
         documentation: Sequence[str] | None = None,
+        modified_files: Sequence[str] | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
         _reject_on_status_change(on_status_change)
@@ -148,6 +149,7 @@ class MutableRepository(ReadOnlyRepository):
             priority=_normalize_optional_string(priority),
             references=_normalize_metadata_list(references),
             documentation=_normalize_metadata_list(documentation),
+            modified_files=_normalize_metadata_list(modified_files),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
@@ -185,6 +187,7 @@ class MutableRepository(ReadOnlyRepository):
         documentation: Sequence[str] | None = None,
         add_documentation: Sequence[str] | None = None,
         remove_documentation: Sequence[str] | None = None,
+        modified_files: Sequence[str] | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
@@ -276,6 +279,9 @@ class MutableRepository(ReadOnlyRepository):
             add=add_documentation,
             remove=remove_documentation,
         )
+        normalized_modified_files = (
+            _normalize_metadata_list(modified_files) if modified_files is not None else None
+        )
         if (
             title is not None
             or status is not None
@@ -285,6 +291,7 @@ class MutableRepository(ReadOnlyRepository):
             or normalized_priority is not None
             or normalized_references is not None
             or normalized_documentation is not None
+            or normalized_modified_files is not None
         ):
             updates: dict[str, object] = {}
             if title is not None:
@@ -304,6 +311,8 @@ class MutableRepository(ReadOnlyRepository):
                 updates["references"] = normalized_references
             if normalized_documentation is not None:
                 updates["documentation"] = normalized_documentation
+            if normalized_modified_files is not None:
+                updates["modified_files"] = normalized_modified_files
             source = _replace_frontmatter_values(source, parsed, updates)
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
@@ -369,6 +378,7 @@ def _new_task_source(
     priority: str | None,
     references: Sequence[str],
     documentation: Sequence[str],
+    modified_files: Sequence[str],
 ) -> str:
     frontmatter: dict[str, object] = {
         "id": task_id,
@@ -387,6 +397,8 @@ def _new_task_source(
         frontmatter["references"] = list(references)
     if documentation:
         frontmatter["documentation"] = list(documentation)
+    if modified_files:
+        frontmatter["modified_files"] = list(modified_files)
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
     return (
         f"---\n{yaml_text}\n---\n\n"

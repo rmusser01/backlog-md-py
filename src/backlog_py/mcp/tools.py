@@ -69,6 +69,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         priority=_optional_string(_get_alias(kwargs, "priority")),
         references=_optional_string_list(_get_alias(kwargs, "references")),
         documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
+        modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
     return _task_detail(project, task)
@@ -111,6 +112,7 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
         add_documentation=_optional_string_list(_get_alias(kwargs, "addDocumentation", "add_documentation")),
         remove_documentation=_optional_string_list(_get_alias(kwargs, "removeDocumentation", "remove_documentation")),
+        modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
         status=_optional_string(kwargs.get("status")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
@@ -210,10 +212,13 @@ def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
     }
     references = _frontmatter_string_list(task, "references")
     documentation = _frontmatter_string_list(task, "documentation")
+    modified_files = _frontmatter_string_list(task, "modified_files")
     if references:
         summary["references"] = references
     if documentation:
         summary["documentation"] = documentation
+    if modified_files:
+        summary["modifiedFiles"] = modified_files
     return summary
 
 

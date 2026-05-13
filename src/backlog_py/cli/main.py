@@ -55,6 +55,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--priority", default=None, help="Task priority for create/edit.")
 @click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
 @click.option("--doc", "documentation", multiple=True, help="Task documentation URL or file path for create/edit.")
+@click.option("--modified-file", "modified_files", multiple=True, help="Modified file path for create/edit.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
@@ -88,6 +89,7 @@ def task_command(
     priority: str | None,
     references: tuple[str, ...],
     documentation: tuple[str, ...],
+    modified_files: tuple[str, ...],
     append_notes: str | None,
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
@@ -126,6 +128,7 @@ def task_command(
             priority=priority,
             references=references,
             documentation=documentation,
+            modified_files=modified_files,
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
@@ -156,6 +159,7 @@ def task_command(
             priority=priority,
             references=references if references else None,
             documentation=documentation if documentation else None,
+            modified_files=modified_files if modified_files else None,
             final_summary=final_summary,
             append_final_summary=append_final_summary,
             clear_final_summary=clear_final_summary,
@@ -396,10 +400,13 @@ def _format_task_metadata_lines(task_record: TaskRecord) -> list[str]:
     lines: list[str] = []
     references = _frontmatter_string_list(task_record, "references")
     documentation = _frontmatter_string_list(task_record, "documentation")
+    modified_files = _frontmatter_string_list(task_record, "modified_files")
     if references:
         lines.append(f"References: {', '.join(references)}")
     if documentation:
         lines.append(f"Documentation: {', '.join(documentation)}")
+    if modified_files:
+        lines.append(f"Modified files: {', '.join(modified_files)}")
     return lines
 
 

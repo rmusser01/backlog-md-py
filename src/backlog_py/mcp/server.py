@@ -90,6 +90,7 @@ def _register_tools(server: Any) -> None:
         priority: str | None = None,
         references: list[str] | None = None,
         documentation: list[str] | None = None,
+        modified_files: list[str] | None = None,
         on_status_change: bool | None = None,
     ) -> dict[str, Any]:
         """Create a task in a Backlog.md project."""
@@ -112,6 +113,7 @@ def _register_tools(server: Any) -> None:
                 priority=priority,
                 references=references,
                 documentation=documentation,
+                modifiedFiles=modified_files,
                 on_status_change=on_status_change,
             ),
         )
@@ -148,6 +150,7 @@ def _register_tools(server: Any) -> None:
         documentation: list[str] | None = None,
         add_documentation: list[str] | None = None,
         remove_documentation: list[str] | None = None,
+        modified_files: list[str] | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> dict[str, Any]:
@@ -184,6 +187,7 @@ def _register_tools(server: Any) -> None:
                 documentation=documentation,
                 add_documentation=add_documentation,
                 remove_documentation=remove_documentation,
+                modifiedFiles=modified_files,
                 status=status,
                 on_status_change=on_status_change,
             ),
