@@ -116,6 +116,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
         milestone=_optional_string(_get_alias(kwargs, "milestone")),
+        ordinal=_get_alias(kwargs, "ordinal"),
         parent_task_id=_optional_string(_get_alias(kwargs, "parentTaskId", "parent_task_id", "parent")),
         references=_optional_string_list(_get_alias(kwargs, "references")),
         documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
@@ -157,6 +158,7 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         labels=_optional_string_list(_get_alias(kwargs, "labels")),
         priority=_optional_string(_get_alias(kwargs, "priority")),
         milestone=_optional_string(_get_alias(kwargs, "milestone")) if "milestone" in kwargs else None,
+        ordinal=_get_alias(kwargs, "ordinal"),
         clear_milestone=("milestone" in kwargs and kwargs.get("milestone") is None)
         or (_coerce_bool(_get_alias(kwargs, "clearMilestone", "clear_milestone")) or False),
         references=_optional_string_list(_get_alias(kwargs, "references")),
@@ -273,9 +275,12 @@ def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
     documentation = _frontmatter_string_list(task, "documentation")
     modified_files = _frontmatter_string_list(task, "modified_files")
     milestone = task.parsed.frontmatter.get("milestone")
+    ordinal = task.parsed.frontmatter.get("ordinal")
     parent_task_id = task.parsed.frontmatter.get("parent_task_id")
     if milestone:
         summary["milestone"] = str(milestone)
+    if ordinal is not None:
+        summary["ordinal"] = ordinal
     if parent_task_id:
         summary["parentTaskId"] = str(parent_task_id)
     if references:

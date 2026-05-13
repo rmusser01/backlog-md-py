@@ -85,6 +85,7 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
         labels=["parity", "metadata"],
         priority="high",
         milestone="Release 1",
+        ordinal=1000,
         references=["https://example.com/issue/1", "src/api.py,docs/design.md"],
         documentation=["https://docs.example.com", "docs/spec.md"],
         modified_files=["src/api.py", "src/ui.py"],
@@ -94,6 +95,7 @@ def test_create_task_writes_metadata_frontmatter(tmp_path):
     assert task.parsed.frontmatter["labels"] == ["parity", "metadata"]
     assert task.parsed.frontmatter["priority"] == "high"
     assert task.parsed.frontmatter["milestone"] == "Release 1"
+    assert task.parsed.frontmatter["ordinal"] == 1000
     assert task.parsed.frontmatter["references"] == ["https://example.com/issue/1", "src/api.py", "docs/design.md"]
     assert task.parsed.frontmatter["documentation"] == ["https://docs.example.com", "docs/spec.md"]
     assert task.parsed.frontmatter["modified_files"] == ["src/api.py", "src/ui.py"]
@@ -186,6 +188,7 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
         labels=["updated", "parity"],
         priority="medium",
         milestone="Release 2",
+        ordinal=2000,
         references=["ref-a.py,ref-b.py"],
         documentation=["doc-a.md"],
         modified_files=["src/edited.py,tests/test_edited.py"],
@@ -196,6 +199,7 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
     assert edited.parsed.frontmatter["labels"] == ["updated", "parity"]
     assert edited.parsed.frontmatter["priority"] == "medium"
     assert edited.parsed.frontmatter["milestone"] == "Release 2"
+    assert edited.parsed.frontmatter["ordinal"] == 2000
     assert edited.parsed.frontmatter["references"] == ["ref-a.py", "ref-b.py"]
     assert edited.parsed.frontmatter["documentation"] == ["doc-a.md"]
     assert edited.parsed.frontmatter["modified_files"] == ["src/edited.py", "tests/test_edited.py"]
@@ -213,6 +217,20 @@ def test_edit_task_can_clear_milestone_frontmatter(tmp_path):
 
     assert "milestone" not in edited.parsed.frontmatter
     assert "milestone:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
+
+
+def test_task_ordinal_rejects_invalid_values_before_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="Invalid ordinal"):
+        repository.create_task(title="Bad ordinal", task_id="TASK-2", ordinal=-1)
+
+    with pytest.raises(TaskMutationError, match="Invalid ordinal"):
+        repository.edit_task("TASK-1", ordinal="later")
+
+    assert _snapshot_tasks(repo) == before
 
 
 def test_edit_task_adds_and_removes_reference_and_documentation_frontmatter(tmp_path):
@@ -402,6 +420,15 @@ def test_task_dependencies_accept_numeric_shorthand_and_comma_lists(tmp_path):
 
     edited = repository.edit_task("TASK-3", dependencies=["task-1"])
     assert edited.parsed.frontmatter["dependencies"] == ["TASK-1"]
+
+
+def test_list_tasks_orders_by_ordinal_before_task_id(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    repository.create_task(title="Second ordered task", task_id="TASK-2", ordinal=20)
+    repository.create_task(title="First ordered task", task_id="TASK-3", ordinal=10)
+
+    assert [task.id for task in repository.list_tasks()] == ["TASK-3", "TASK-2", "TASK-1"]
 
 
 def test_edit_task_preserves_crlf_when_toggling_checklists(tmp_path):
@@ -618,6 +645,8 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
             "doc-b.md",
             "--milestone",
             "Release CLI",
+            "--ordinal",
+            "2000",
             "--modified-file",
             "src/api.py",
             "--modified-file",
@@ -649,6 +678,7 @@ def test_cli_task_create_and_edit_use_safe_core(tmp_path):
     assert "labels:\n- edited\n- metadata" in written
     assert "priority: medium" in written
     assert "milestone: Release CLI" in written
+    assert "ordinal: 2000" in written
     assert "references:\n- ref-a.py\n- ref-b.py" in written
     assert "documentation:\n- doc-a.md\n- doc-b.md" in written
     assert "modified_files:\n- src/api.py\n- tests/test_api.py" in written
@@ -806,6 +836,8 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
             "docs/spec.md",
             "--milestone",
             "Release Create",
+            "--ordinal",
+            "1000",
             "--modified-file",
             "src/create.py,tests/test_create.py",
             "-a",
@@ -839,6 +871,7 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "labels:\n- cli\n- metadata" in written
     assert "priority: high" in written
     assert "milestone: Release Create" in written
+    assert "ordinal: 1000" in written
     assert "references:\n- https://example.com/issue/1\n- src/api.py\n- docs/design.md" in written
     assert "documentation:\n- https://docs.example.com\n- docs/spec.md" in written
     assert "modified_files:\n- src/create.py\n- tests/test_create.py" in written
@@ -909,6 +942,28 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "Project default" not in disabled_written
 
 
+def test_cli_task_create_and_edit_reject_invalid_ordinal(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    before = _snapshot_tasks(repo)
+
+    create = runner.invoke(
+        main,
+        ["--cwd", str(repo), "task", "create", "Bad ordinal", "--id", "TASK-2", "--ordinal", "-1", "--plain"],
+    )
+
+    edit = runner.invoke(
+        main,
+        ["--cwd", str(repo), "task", "edit", "TASK-1", "--ordinal", "later", "--plain"],
+    )
+
+    assert create.exit_code != 0
+    assert "Invalid ordinal: -1. Must be a non-negative number." in create.output
+    assert edit.exit_code != 0
+    assert "Invalid ordinal: later. Must be a non-negative number." in edit.output
+    assert _snapshot_tasks(repo) == before
+
+
 def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)
@@ -923,6 +978,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         labels=["mcp", "metadata"],
         priority="high",
         milestone="Release MCP",
+        ordinal=1000,
         implementationPlan="MCP create plan.",
         references=["ref1.py", "ref2.py"],
         documentation=["doc1.md", "doc2.md"],
@@ -932,6 +988,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert created["id"] == "TASK-2"
     assert created["description"] == "Created from MCP."
     assert created["milestone"] == "Release MCP"
+    assert created["ordinal"] == 1000
     assert created["modifiedFiles"] == ["src/mcp.py", "tests/test_mcp.py"]
     assert "MCP create final summary." in _task_file(repo, "task-2").read_text(encoding="utf-8")
 
@@ -950,6 +1007,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
         labels=["mcp", "edited"],
         priority="medium",
         milestone="Release MCP Edit",
+        ordinal=2000,
         planSet="MCP edited plan.",
         planAppend=["MCP appended plan."],
         addReferences=["ref3.py"],
@@ -961,6 +1019,7 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert edited["id"] == "TASK-2"
     assert edited["title"] == "MCP renamed task"
     assert edited["milestone"] == "Release MCP Edit"
+    assert edited["ordinal"] == 2000
     assert edited["modifiedFiles"] == ["src/mcp_edit.py", "tests/test_mcp_edit.py"]
 
     unchecked = task_edit(

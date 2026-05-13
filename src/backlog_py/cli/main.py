@@ -9,7 +9,13 @@ from backlog_py.core.board_export import export_board_to_file, update_readme_wit
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
-from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.core.repository import (
+    MutableRepository,
+    ReadOnlyRepository,
+    TaskMutationError,
+    TaskRecord,
+    normalize_ordinal_value,
+)
 from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
 
@@ -55,6 +61,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit/list.")
 @click.option("--priority", default=None, help="Task priority for create/edit/list.")
 @click.option("-m", "--milestone", default=None, help="Task milestone for create/edit/list.")
+@click.option("--ordinal", default=None, help="Set task ordinal for custom ordering.")
 @click.option("-p", "--parent", "parent_task_id", default=None, help="Parent task id for create/list.")
 @click.option("--clear-milestone", is_flag=True, help="Clear the task milestone on edit.")
 @click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
@@ -92,6 +99,7 @@ def task_command(
     labels: tuple[str, ...],
     priority: str | None,
     milestone: str | None,
+    ordinal: str | None,
     parent_task_id: str | None,
     clear_milestone: bool,
     references: tuple[str, ...],
@@ -137,6 +145,7 @@ def task_command(
             labels=labels,
             priority=priority,
             milestone=milestone,
+            ordinal=_parse_ordinal(ordinal),
             parent_task_id=parent_task_id,
             references=references,
             documentation=documentation,
@@ -172,6 +181,7 @@ def task_command(
             labels=labels if labels else None,
             priority=priority,
             milestone=milestone,
+            ordinal=_parse_ordinal(ordinal),
             clear_milestone=clear_milestone,
             references=references if references else None,
             documentation=documentation if documentation else None,
@@ -495,6 +505,13 @@ def _priority_filter(priority: str | None) -> str | None:
             f"Invalid priority: {priority}\nValid values are: high, medium, low"
         )
     return normalized
+
+
+def _parse_ordinal(ordinal: str | None) -> int | float | None:
+    try:
+        return normalize_ordinal_value(ordinal)
+    except TaskMutationError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _bool_text(value: bool) -> str:

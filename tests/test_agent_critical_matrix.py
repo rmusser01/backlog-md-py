@@ -91,6 +91,16 @@ def test_agent_critical_inventory_enumerates_cutover_and_deferral_scope():
         assert item.deferred_reason
 
 
+def test_agent_critical_inventory_tracks_task_ordinal_mutation_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "--ordinal <number>" in by_name["cli:task-create"].expected
+    assert "--ordinal <number>" in by_name["cli:task-edit"].expected
+    assert "ordinal=None" in by_name["mcp:task-create"].expected
+    assert "ordinal=None" in by_name["mcp:task-edit"].expected
+
+
 def test_agent_critical_inventory_has_fixture_coverage():
     inventory = load_builtin_inventory()
     manifest = load_oracle_manifest(MANIFEST_PATH)

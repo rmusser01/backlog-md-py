@@ -28,6 +28,8 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
     assert "document_create" in content
     assert "milestone_add" in content
     assert "definition_of_done_defaults_get" in content
+    assert "task_create(project, ordinal=None" in content
+    assert "task_edit(project, task_id, ordinal=None" in content
 
 
 def test_task_list_returns_fixture_backed_readonly_dicts():

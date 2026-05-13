@@ -5,6 +5,7 @@ import re
 import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -62,7 +63,7 @@ class ReadOnlyRepository:
         milestone: str | None = None,
         parent_task_id: str | None = None,
     ) -> list[TaskRecord]:
-        tasks = sorted(self._load_tasks(), key=lambda task: (_task_sort_key(task.id), task.title))
+        tasks = sorted(self._load_tasks(), key=_task_record_sort_key)
         return [
             task
             for task in tasks
@@ -164,6 +165,7 @@ class MutableRepository(ReadOnlyRepository):
         labels: Sequence[str] | None = None,
         priority: str | None = None,
         milestone: str | None = None,
+        ordinal: int | float | str | None = None,
         references: Sequence[str] | None = None,
         documentation: Sequence[str] | None = None,
         modified_files: Sequence[str] | None = None,
@@ -211,6 +213,7 @@ class MutableRepository(ReadOnlyRepository):
             labels=_normalize_metadata_list(labels),
             priority=_normalize_optional_string(priority),
             milestone=_normalize_optional_string(milestone),
+            ordinal=normalize_ordinal_value(ordinal),
             parent_task_id=normalized_parent_task_id,
             references=_normalize_metadata_list(references),
             documentation=_normalize_metadata_list(documentation),
@@ -247,6 +250,7 @@ class MutableRepository(ReadOnlyRepository):
         labels: Sequence[str] | None = None,
         priority: str | None = None,
         milestone: str | None = None,
+        ordinal: int | float | str | None = None,
         clear_milestone: bool = False,
         references: Sequence[str] | None = None,
         add_references: Sequence[str] | None = None,
@@ -335,6 +339,7 @@ class MutableRepository(ReadOnlyRepository):
         normalized_labels = _normalize_metadata_list(labels) if labels is not None else None
         normalized_priority = _normalize_optional_string(priority) if priority is not None else None
         normalized_milestone = _normalize_optional_string(milestone) if milestone is not None else None
+        normalized_ordinal = normalize_ordinal_value(ordinal) if ordinal is not None else None
         normalized_references = _metadata_update(
             parsed.frontmatter,
             "references",
@@ -360,6 +365,7 @@ class MutableRepository(ReadOnlyRepository):
             or normalized_labels is not None
             or normalized_priority is not None
             or normalized_milestone is not None
+            or normalized_ordinal is not None
             or clear_milestone
             or normalized_references is not None
             or normalized_documentation is not None
@@ -381,6 +387,8 @@ class MutableRepository(ReadOnlyRepository):
                 updates["priority"] = normalized_priority
             if normalized_milestone is not None:
                 updates["milestone"] = normalized_milestone
+            if normalized_ordinal is not None:
+                updates["ordinal"] = normalized_ordinal
             if clear_milestone:
                 updates["milestone"] = None
             if normalized_references is not None:
@@ -565,6 +573,7 @@ def _new_task_source(
     labels: Sequence[str],
     priority: str | None,
     milestone: str | None,
+    ordinal: int | float | None,
     parent_task_id: str | None,
     references: Sequence[str],
     documentation: Sequence[str],
@@ -585,6 +594,8 @@ def _new_task_source(
         frontmatter["priority"] = priority
     if milestone:
         frontmatter["milestone"] = milestone
+    if ordinal is not None:
+        frontmatter["ordinal"] = ordinal
     if parent_task_id:
         frontmatter["parent_task_id"] = parent_task_id
     if references:
@@ -941,6 +952,31 @@ def _normalize_optional_string(value: str | None) -> str | None:
     return normalized or None
 
 
+def normalize_ordinal_value(value: int | float | str | None) -> int | float | None:
+    """Return a YAML-safe non-negative ordinal value or reject invalid input."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
+    if isinstance(value, int):
+        number: int | float = value
+    elif isinstance(value, float):
+        number = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
+        try:
+            number = int(text) if re.fullmatch(r"\d+", text) else float(text)
+        except ValueError as exc:
+            raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.") from exc
+    else:
+        raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
+    if not isfinite(float(number)) or number < 0:
+        raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
+    return number
+
+
 def _normalize_dependency_id(task_id: str) -> str:
     candidate = task_id.strip()
     if re.fullmatch(r"\d+(?:\.\d+)*", candidate):
@@ -1062,6 +1098,20 @@ def _statuses_from_tasks(tasks: Iterable[TaskRecord]) -> list[str]:
 def _task_sort_key(task_id: str) -> tuple[str, tuple[tuple[int, int | str], ...]]:
     prefix, _, suffix = task_id.partition("-")
     return prefix, tuple(_sort_segment(segment) for segment in suffix.replace(".", "-").split("-"))
+
+
+def _task_record_sort_key(task: TaskRecord) -> tuple[int, float, tuple[str, tuple[tuple[int, int | str], ...]], str]:
+    ordinal = _task_ordinal(task)
+    if ordinal is None:
+        return 1, 0.0, _task_sort_key(task.id), task.title
+    return 0, float(ordinal), _task_sort_key(task.id), task.title
+
+
+def _task_ordinal(task: TaskRecord) -> int | float | None:
+    try:
+        return normalize_ordinal_value(task.parsed.frontmatter.get("ordinal"))
+    except TaskMutationError:
+        return None
 
 
 def _sort_segment(segment: str) -> tuple[int, int | str]:

@@ -26,10 +26,10 @@ fixtures:
     command: ["backlog", "board", "export", "status.md", "--force", "--export-version", "v1.45.1"]
     agent_critical: true
   - name: "cli:task-create"
-    command: ["backlog", "task", "create", "Temporary smoke task", "--status", "To Do", "--parent", "1", "--final-summary", "Created summary", "--plain"]
+    command: ["backlog", "task", "create", "Temporary smoke task", "--status", "To Do", "--parent", "1", "--ordinal", "1000", "--final-summary", "Created summary", "--plain"]
     agent_critical: true
   - name: "cli:task-edit"
-    command: ["backlog", "task", "edit", "TASK-1", "--append-notes", "Updated from fixture", "--plain"]
+    command: ["backlog", "task", "edit", "TASK-1", "--ordinal", "2000", "--append-notes", "Updated from fixture", "--plain"]
     agent_critical: true
   - name: "cli:task-archive"
     command: ["backlog", "task", "archive", "TASK-1", "--plain"]
