@@ -33,6 +33,14 @@ python -m backlog_py --cwd /path/to/project board
 
 See `docs/integration.md` for CLI, Python helper, and MCP integration notes.
 
+## Optional Orchestration Metadata
+
+`backlog-md-py` can parse optional `orchestration` frontmatter for agent or
+workflow coordinators. The current supported slice is read-only: parse metadata,
+validate it against the default workflow policy, and report eligible tasks,
+active claims, stale leases, and status summaries. The library does not launch
+agents or mutate orchestration state in this slice.
+
 ## Oracle Fixtures
 
 Compatibility fixtures are pinned to explicit upstream Backlog.md release
