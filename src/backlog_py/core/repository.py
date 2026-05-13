@@ -82,11 +82,28 @@ class ReadOnlyRepository:
                 return task
         raise KeyError(f"Task not found: {task_id}")
 
-    def search_tasks(self, query: str) -> list[TaskRecord]:
+    def search_tasks(
+        self,
+        query: str = "",
+        *,
+        status: str | None = None,
+        assignee: str | Sequence[str] | None = None,
+        labels: str | Sequence[str] | None = None,
+        priority: str | None = None,
+        milestone: str | None = None,
+        modified_files: str | Sequence[str] | None = None,
+    ) -> list[TaskRecord]:
         return [
             task
-            for task in self.list_tasks()
+            for task in self.list_tasks(
+                status=status,
+                assignee=assignee,
+                labels=labels,
+                priority=priority,
+                milestone=milestone,
+            )
             if contains_query(_search_text(task), query)
+            and _matches_modified_file_filters(task, modified_files)
         ]
 
     def board(self) -> "OrderedDict[str, list[TaskRecord]]":
@@ -441,6 +458,27 @@ def _matches_frontmatter_values(
         if value.strip()
     }
     return all(value.strip().casefold() in actual_values for value in requested_values)
+
+
+def _matches_modified_file_filters(
+    task: TaskRecord,
+    requested: str | Sequence[str] | None,
+) -> bool:
+    requested_values = _normalize_filter_values(requested)
+    if not requested_values:
+        return True
+    modified_files = [
+        value.strip().casefold()
+        for value in _frontmatter_string_list(task.parsed.frontmatter.get("modified_files"))
+        if value.strip()
+    ]
+    if not modified_files:
+        return False
+    return any(
+        requested_value.strip().casefold() in modified_file
+        for requested_value in requested_values
+        for modified_file in modified_files
+    )
 
 
 def _normalize_filter_values(values: str | Sequence[str] | None) -> list[str]:

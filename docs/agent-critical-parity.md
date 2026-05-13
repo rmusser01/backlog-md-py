@@ -33,8 +33,8 @@ do not block the first local-file agent cutover candidate.
 | mcp:workflow-overview | implemented | backlog://workflow/overview | mcp:workflow-overview |
 | mcp:task-workflow-alias | implemented | backlog://docs/task-workflow | mcp:task-workflow-alias |
 | mcp:board | implemented | task_board(project) | mcp:board |
-| mcp:task-list | implemented | task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None) | mcp:task-list |
-| mcp:task-search | implemented | task_search(project, query, limit=10) | mcp:task-search |
+| mcp:task-list | implemented | task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, search=None) | mcp:task-list |
+| mcp:task-search | implemented | task_search(project, query='', limit=10, *, status=None, priority=None, modified_files=None) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
 | mcp:task-create | implemented | task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, **kwargs) | mcp:task-create |
 | mcp:task-edit | implemented | task_edit(project, task_id, milestone=None, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs) | mcp:task-edit |

@@ -66,9 +66,13 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-list",
             "MCP tools",
-            "task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None)",
+            "task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, search=None)",
         ),
-        _golden("mcp:task-search", "MCP tools", "task_search(project, query, limit=10)"),
+        _golden(
+            "mcp:task-search",
+            "MCP tools",
+            "task_search(project, query='', limit=10, *, status=None, priority=None, modified_files=None)",
+        ),
         _golden("mcp:task-view", "MCP tools", "task_view(project, task_id)"),
         _golden(
             "mcp:task-create",

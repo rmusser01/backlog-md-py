@@ -9,12 +9,30 @@ from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, Ta
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
 
 
-def task_search(project: BacklogProject, query: str, limit: int = 10) -> list[dict[str, Any]]:
+def task_search(
+    project: BacklogProject,
+    query: str = "",
+    limit: int = 10,
+    *,
+    status: str | None = None,
+    priority: str | None = None,
+    modified_files: str | list[str] | None = None,
+    modifiedFiles: str | list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Search tasks through the read-only repository and return JSON-safe rows."""
     if limit <= 0:
         return []
+    file_filters = modified_files if modified_files is not None else modifiedFiles
+    if not query.strip() and not _string_list(file_filters):
+        return []
     repository = ReadOnlyRepository(project)
-    return [_task_summary(project, task) for task in repository.search_tasks(query)[:limit]]
+    tasks = repository.search_tasks(
+        query,
+        status=status,
+        priority=priority,
+        modified_files=file_filters,
+    )
+    return [_task_summary(project, task) for task in tasks[:limit]]
 
 
 def task_list(
@@ -26,18 +44,29 @@ def task_list(
     labels: str | list[str] | None = None,
     priority: str | None = None,
     milestone: str | None = None,
+    search: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tasks through the read-only repository and return JSON-safe rows."""
     if limit <= 0:
         return []
     repository = ReadOnlyRepository(project)
-    tasks = repository.list_tasks(
-        status=status,
-        assignee=assignee,
-        labels=labels,
-        priority=priority,
-        milestone=milestone,
-    )
+    if search is None:
+        tasks = repository.list_tasks(
+            status=status,
+            assignee=assignee,
+            labels=labels,
+            priority=priority,
+            milestone=milestone,
+        )
+    else:
+        tasks = repository.search_tasks(
+            search,
+            status=status,
+            assignee=assignee,
+            labels=labels,
+            priority=priority,
+            milestone=milestone,
+        )
     return [_task_summary(project, task) for task in tasks[:limit]]
 
 

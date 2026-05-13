@@ -139,3 +139,26 @@ def test_repository_filters_tasks_by_frontmatter_metadata(tmp_path):
     assert [task.id for task in repository.list_tasks(priority="HIGH")] == ["TASK-1"]
     assert [task.id for task in repository.list_tasks(milestone="release 1")] == ["TASK-1"]
     assert repository.list_tasks(labels=["parser", "docs"]) == []
+
+
+def test_repository_search_filters_by_status_priority_and_modified_files(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    mutable_repository.edit_task(
+        "TASK-1",
+        priority="high",
+        modified_files=["src/components/Button.tsx"],
+    )
+    mutable_repository.create_task(
+        title="Server task",
+        task_id="TASK-2",
+        status="To Do",
+        priority="low",
+        modified_files=["src/server/index.py"],
+    )
+    repository = ReadOnlyRepository.from_path(repo)
+
+    assert [task.id for task in repository.search_tasks("task", status="to do")] == ["TASK-2"]
+    assert [task.id for task in repository.search_tasks("task", priority="HIGH")] == ["TASK-1"]
+    assert [task.id for task in repository.search_tasks(modified_files=["components/button"])] == ["TASK-1"]
+    assert [task.id for task in repository.search_tasks(modified_files=["SERVER"])] == ["TASK-2"]

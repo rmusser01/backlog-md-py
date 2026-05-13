@@ -85,6 +85,22 @@ def test_task_list_honors_frontmatter_metadata_filters(tmp_path):
     assert [task["id"] for task in mcp_tools.task_list(project, milestone="release 1")] == ["TASK-1"]
 
 
+def test_task_list_honors_search_filter(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MutableRepository(project).create_task(
+        title="Searchable MCP task",
+        task_id="TASK-2",
+        status="To Do",
+        description="Needle content",
+    )
+
+    results = mcp_tools.task_list(project, search="needle")
+
+    assert [task["id"] for task in results] == ["TASK-2"]
+
+
 def test_task_board_returns_status_grouped_fixture_rows():
     assert hasattr(mcp_tools, "task_board")
 
@@ -138,6 +154,30 @@ def test_task_search_returns_fixture_backed_readonly_dicts():
 
 def test_task_search_honors_limit():
     assert task_search(_project(), "", limit=0) == []
+
+
+def test_task_search_honors_status_priority_and_modified_file_filters(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.edit_task(
+        "TASK-1",
+        priority="high",
+        modified_files=["src/components/Button.tsx"],
+    )
+    repository.create_task(
+        title="Server task",
+        task_id="TASK-2",
+        status="To Do",
+        priority="low",
+        modified_files=["src/server/index.py"],
+    )
+
+    assert [task["id"] for task in task_search(project, "task", status="to do")] == ["TASK-2"]
+    assert [task["id"] for task in task_search(project, "task", priority="HIGH")] == ["TASK-1"]
+    assert [task["id"] for task in task_search(project, modified_files=["components/button"])] == ["TASK-1"]
+    assert [task["id"] for task in task_search(project, modifiedFiles=["SERVER"])] == ["TASK-2"]
 
 
 def test_task_view_returns_fixture_backed_readonly_dict():

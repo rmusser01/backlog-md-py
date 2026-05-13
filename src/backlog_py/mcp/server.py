@@ -64,6 +64,7 @@ def _register_tools(server: Any) -> None:
         labels: list[str] | None = None,
         priority: str | None = None,
         milestone: str | None = None,
+        search: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """List tasks in a Backlog.md project."""
@@ -74,13 +75,28 @@ def _register_tools(server: Any) -> None:
             labels=labels,
             priority=priority,
             milestone=milestone,
+            search=search,
             limit=limit,
         )
 
     @server.tool()
-    def task_search(project: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    def task_search(
+        project: str,
+        query: str = "",
+        status: str | None = None,
+        priority: str | None = None,
+        modified_files: list[str] | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
         """Search tasks in a Backlog.md project."""
-        return tool_registry.task_search(_project(project), query=query, limit=limit)
+        return tool_registry.task_search(
+            _project(project),
+            query=query,
+            status=status,
+            priority=priority,
+            modified_files=modified_files,
+            limit=limit,
+        )
 
     @server.tool()
     def task_view(project: str, task_id: str) -> dict[str, Any]:

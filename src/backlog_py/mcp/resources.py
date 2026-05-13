@@ -13,8 +13,8 @@ Supported resources:
 
 Supported tools:
 - task_board(project)
-- task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None)
-- task_search(project, query, limit=10)
+- task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, search=None)
+- task_search(project, query="", limit=10, *, status=None, priority=None, modified_files=None)
 - task_view(project, task_id)
 - task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, **kwargs)
 - task_edit(project, task_id, milestone=None, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs)
