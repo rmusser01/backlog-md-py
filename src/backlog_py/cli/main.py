@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from backlog_py import __version__
+from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
@@ -216,9 +217,41 @@ def search_command(ctx: click.Context, query: str, plain: bool, status: str | No
 
 
 @main.command("board")
+@click.argument("args", nargs=-1)
+@click.option("--force", is_flag=True, help="Overwrite an existing board export file.")
+@click.option("--readme", is_flag=True, help="Export the board into README.md markers.")
+@click.option("--export-version", default=None, help="Version string to include in README board exports.")
 @click.pass_context
-def board_command(ctx: click.Context) -> None:
+def board_command(
+    ctx: click.Context,
+    args: tuple[str, ...],
+    force: bool,
+    readme: bool,
+    export_version: str | None,
+) -> None:
     """Print task board grouped by status."""
+    if args and args[0] == "export":
+        if len(args) > 2:
+            raise click.UsageError("Usage: board export [filename]")
+        if readme:
+            update_readme_with_board(
+                _project(ctx),
+                _repository(ctx).list_tasks(),
+                version=export_version or __version__,
+            )
+            click.echo("Updated README.md with Kanban board.")
+            return
+        output_file = args[1] if len(args) == 2 else "Backlog.md"
+        output_path = _project(ctx).root / output_file
+        if output_path.exists() and not force:
+            if not click.confirm(f'File "{output_path}" already exists. Overwrite?', default=False):
+                click.echo("Export cancelled.")
+                return
+        target = export_board_to_file(_project(ctx), _repository(ctx).list_tasks(), output_file)
+        click.echo(f"Exported board to {target}")
+        return
+    if args and args != ("view",):
+        raise click.UsageError("Usage: board [view] | board export [filename]")
     for status, tasks in _repository(ctx).board().items():
         click.echo(f"{status}:")
         for task_record in tasks:

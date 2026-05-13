@@ -41,6 +41,8 @@ backlog-py --cwd /path/to/project task edit TASK-2 --plan "1. Patch focused scop
 backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project board
+backlog-py --cwd /path/to/project board export Backlog.md --force --export-version v1.45.1
+backlog-py --cwd /path/to/project board export --readme --export-version v1.45.1
 ```
 
 The module entry point is equivalent:

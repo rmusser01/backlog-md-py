@@ -37,6 +37,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog search <query> --status <status> --priority <priority> --plain",
         ),
         _golden("cli:board", "CLI-INSTRUCTIONS.md", "backlog board"),
+        _golden(
+            "cli:board-export",
+            "CLI-INSTRUCTIONS.md",
+            "backlog board export [file] --readme --force --export-version <version>",
+        ),
         _golden("cli:config-list", "ADVANCED-CONFIG.md", "backlog config list"),
         _golden(
             "cli:task-create",

@@ -13,6 +13,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:task-view-plain",
     "cli:search-plain",
     "cli:board",
+    "cli:board-export",
     "cli:config-list",
     "cli:task-create",
     "cli:task-edit",
