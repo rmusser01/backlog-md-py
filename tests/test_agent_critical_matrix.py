@@ -37,6 +37,7 @@ EXPECTED_AGENT_CRITICAL = {
     "mcp:task-create",
     "mcp:task-edit",
     "mcp:task-archive",
+    "mcp:task-complete",
     "mcp:document-list",
     "mcp:document-search",
     "mcp:document-view",

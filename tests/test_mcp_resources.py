@@ -215,6 +215,22 @@ def test_task_archive_moves_task_to_archive_through_mcp_tool(tmp_path):
     assert (repo / "backlog" / "archive" / "tasks" / "task-1 - Example-task.md").is_file()
 
 
+def test_task_complete_moves_done_task_to_completed_through_mcp_tool(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MutableRepository(project).edit_task("TASK-1", status="Done")
+
+    result = mcp_tools.task_complete(project, "TASK-1")
+
+    assert result["id"] == "TASK-1"
+    assert result["status"] == "Done"
+    assert result["path"] == "backlog/completed/task-1 - Example-task.md"
+    assert not (repo / "backlog" / "tasks" / "task-1 - Example-task.md").exists()
+    assert (repo / "backlog" / "completed" / "task-1 - Example-task.md").is_file()
+    assert [task["id"] for task in task_search(project, "fixture")] == ["TASK-1"]
+
+
 def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():
     fake_server = mcp_server.create_server(fastmcp_cls=FakeFastMCP)
 
@@ -223,6 +239,7 @@ def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():
     assert fake_server.resources["backlog://docs/task-workflow"]() == read_resource("backlog://docs/task-workflow")
     assert "task_board" in fake_server.tools
     assert "task_archive" in fake_server.tools
+    assert "task_complete" in fake_server.tools
     assert "task_list" in fake_server.tools
     assert "task_search" in fake_server.tools
     assert "definition_of_done_defaults_upsert" in fake_server.tools
@@ -250,6 +267,7 @@ def test_create_server_reports_missing_sdk_when_no_adapter_is_provided(monkeypat
 
 def test_mcp_package_exports_document_milestone_and_dod_tools():
     assert mcp.task_archive.__name__ == "task_archive"
+    assert mcp.task_complete.__name__ == "task_complete"
     assert mcp.task_board.__name__ == "task_board"
     assert mcp.task_list.__name__ == "task_list"
     assert mcp.document_create.__name__ == "document_create"

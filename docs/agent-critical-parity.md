@@ -39,6 +39,7 @@ do not block the first local-file agent cutover candidate.
 | mcp:task-create | implemented | task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, **kwargs) | mcp:task-create |
 | mcp:task-edit | implemented | task_edit(project, task_id, milestone=None, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs) | mcp:task-edit |
 | mcp:task-archive | implemented | task_archive(project, task_id) | mcp:task-archive |
+| mcp:task-complete | implemented | task_complete(project, task_id) | mcp:task-complete |
 | mcp:document-list | implemented | document_list(project, query=None, limit=100) | mcp:document-list |
 | mcp:document-search | implemented | document_list(project, query=<query>, limit=100) | mcp:document-search |
 | mcp:document-view | implemented | document_view(project, path_or_id) | mcp:document-view |

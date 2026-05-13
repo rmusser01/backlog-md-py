@@ -171,6 +171,12 @@ def task_archive(project: BacklogProject, task_id: str) -> dict[str, Any]:
     return _task_detail(project, task)
 
 
+def task_complete(project: BacklogProject, task_id: str) -> dict[str, Any]:
+    """Move one Done task to backlog/completed."""
+    task = MutableRepository(project).complete_task(task_id)
+    return _task_detail(project, task)
+
+
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """List or search documents through the safe document service."""
     if limit <= 0:

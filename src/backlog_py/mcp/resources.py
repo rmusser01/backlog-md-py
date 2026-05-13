@@ -19,6 +19,7 @@ Supported tools:
 - task_create(project, milestone=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, **kwargs)
 - task_edit(project, task_id, milestone=None, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs)
 - task_archive(project, task_id)
+- task_complete(project, task_id)
 - document_list(project, query=None, limit=100)
 - document_view(project, path_or_id)
 - document_create(project, **kwargs)

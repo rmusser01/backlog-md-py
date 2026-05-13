@@ -309,6 +309,50 @@ def test_archive_task_moves_active_file_to_archive_without_rewrite(tmp_path):
     assert _repository(repo).list_tasks() == []
 
 
+def test_complete_task_moves_active_file_to_completed_without_rewrite(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    task_path = _task_file(repo)
+    repository.edit_task("TASK-1", status="Done")
+    before_complete = task_path.read_text(encoding="utf-8")
+
+    completed = repository.complete_task("TASK-1")
+
+    completed_path = repo / "backlog" / "completed" / task_path.name
+    assert completed.id == "TASK-1"
+    assert completed.path == completed_path
+    assert not task_path.exists()
+    assert completed_path.read_text(encoding="utf-8") == before_complete
+    assert repository.list_tasks() == []
+    assert [task.id for task in repository.search_tasks("fixture")] == ["TASK-1"]
+
+
+def test_complete_task_rejects_non_done_task_before_move(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+
+    with pytest.raises(TaskMutationError, match='Set status to "Done"'):
+        _repository(repo).complete_task("TASK-1")
+
+    assert task_path.is_file()
+    assert not (repo / "backlog" / "completed" / task_path.name).exists()
+
+
+def test_complete_task_rejects_symlinked_completed_directory_escape(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _repository(repo).edit_task("TASK-1", status="Done")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    completed_root = repo / "backlog" / "completed"
+    completed_root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(TaskMutationError, match="outside allowed base"):
+        _repository(repo).complete_task("TASK-1")
+
+    assert _task_file(repo).is_file()
+    assert list(outside.iterdir()) == []
+
+
 def test_archive_task_rejects_symlinked_archive_directory_escape(tmp_path):
     repo = _copy_fixture(tmp_path)
     outside = tmp_path / "outside"

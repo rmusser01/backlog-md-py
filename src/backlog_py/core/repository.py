@@ -93,9 +93,12 @@ class ReadOnlyRepository:
         milestone: str | None = None,
         modified_files: str | Sequence[str] | None = None,
     ) -> list[TaskRecord]:
+        tasks = [*self.list_tasks(), *self._load_completed_tasks()]
         return [
             task
-            for task in self.list_tasks(
+            for task in tasks
+            if _task_matches_filters(
+                task,
                 status=status,
                 assignee=assignee,
                 labels=labels,
@@ -115,9 +118,17 @@ class ReadOnlyRepository:
 
     def _load_tasks(self) -> list[TaskRecord]:
         task_dir = self.project.backlog_dir / "tasks"
-        if not task_dir.is_dir():
-            return []
-        return [_load_task(path) for path in sorted(task_dir.glob("*.md"))]
+        return _load_tasks_from_dir(task_dir)
+
+    def _load_completed_tasks(self) -> list[TaskRecord]:
+        completed_dir = self.project.backlog_dir / "completed"
+        return _load_tasks_from_dir(completed_dir)
+
+
+def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
+    if not task_dir.is_dir():
+        return []
+    return [_load_task(path) for path in sorted(task_dir.glob("*.md"))]
 
 
 class TaskMutationError(ValueError):
@@ -380,6 +391,19 @@ class MutableRepository(ReadOnlyRepository):
         target_path = _mutation_path(archive_dir, archive_dir / task.path.name)
         if target_path.exists():
             raise TaskMutationError(f"Archived task path already exists: {target_path.name}")
+        os.replace(safe_current_path, target_path)
+        return _load_task(target_path)
+
+    def complete_task(self, task_id: str) -> TaskRecord:
+        task = self.get_task(task_id)
+        if not _is_done_status(task.status):
+            raise TaskMutationError(f'Task {task.id} is not Done. Set status to "Done" before completing it.')
+        safe_current_path = _mutation_path(task.path.parent, task.path)
+        completed_dir = _mutation_path(self.project.backlog_dir, self.project.backlog_dir / "completed")
+        completed_dir.mkdir(parents=True, exist_ok=True)
+        target_path = _mutation_path(completed_dir, completed_dir / task.path.name)
+        if target_path.exists():
+            raise TaskMutationError(f"Completed task path already exists: {target_path.name}")
         os.replace(safe_current_path, target_path)
         return _load_task(target_path)
 
@@ -936,6 +960,11 @@ def _reject_unknown_status(status: str, statuses: Sequence[str] | None) -> None:
 def _reject_on_status_change(on_status_change: bool | None) -> None:
     if on_status_change:
         raise TaskMutationError("onStatusChange is disabled by default and is not implemented")
+
+
+def _is_done_status(status: str) -> bool:
+    normalized_status = status.strip().casefold()
+    return "done" in normalized_status or "complete" in normalized_status
 
 
 def _slug_title(title: str) -> str:

@@ -237,6 +237,11 @@ def _register_tools(server: Any) -> None:
         return tool_registry.task_archive(_project(project), task_id=task_id)
 
     @server.tool()
+    def task_complete(project: str, task_id: str) -> dict[str, Any]:
+        """Move one Done task to backlog/completed."""
+        return tool_registry.task_complete(_project(project), task_id=task_id)
+
+    @server.tool()
     def document_list(project: str, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         """List or search documents in a Backlog.md project."""
         return tool_registry.document_list(_project(project), query=query, limit=limit)

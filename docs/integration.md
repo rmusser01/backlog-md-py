@@ -61,7 +61,7 @@ a Python process:
 ```python
 from pathlib import Path
 
-from backlog_py.mcp import read_resource, task_archive, task_board, task_edit, task_list, task_search, task_view
+from backlog_py.mcp import read_resource, task_archive, task_board, task_complete, task_edit, task_list, task_search, task_view
 from backlog_py.storage.project import discover_project
 
 project = discover_project(Path("/path/to/copied/project"))
@@ -71,6 +71,7 @@ print(task_list(project, status="In Progress", assignee="codex", labels=["implem
 print(task_search(project, "release", status="In Progress", priority="high", modified_files=["src/api.py"], limit=5))
 print(task_view(project, "task-1"))
 print(task_edit(project, "task-1", milestone="Release 2", planSet="1. Patch focused scope.", planAppend=["2. Verify behavior."], addReferences=["src/api.py"], addDocumentation=["docs/verification.md"], modifiedFiles=["src/api.py", "tests/test_api.py"], assignee=["reviewer"], labels=["ready"], priority="medium", notes="Implementation details.", finalSummaryAppend=["Ready for review."]))
+print(task_complete(project, "task-1"))
 print(task_archive(project, "task-1"))
 ```
 

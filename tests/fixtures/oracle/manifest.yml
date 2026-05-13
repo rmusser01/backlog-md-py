@@ -91,6 +91,9 @@ fixtures:
   - name: "mcp:task-archive"
     tool: "task_archive"
     agent_critical: true
+  - name: "mcp:task-complete"
+    tool: "task_complete"
+    agent_critical: true
   - name: "mcp:document-list"
     tool: "document_list"
     agent_critical: true
