@@ -6,9 +6,11 @@ This repository was split out from the `tools/backlog-py` implementation
 incubated in `tldw_server` so it can be used by other projects without taking a
 dependency on that monorepo.
 
-This package is experimental. Do not put it on PATH as `backlog` and do not use
-it to mutate live repository data until the cutover gates in the design spec
-pass.
+This package is experimental, but the first agent-critical local-file cutover
+gate has passed for the documented CLI, Python helper, and MCP workflows. Keep
+live-repository mutation behind copied-repository smoke tests and review, and
+do not alias this command to `backlog` unless that is an explicit project-level
+cutover decision.
 
 The Python import package remains `backlog_py`, and the experimental CLI command
 is still `backlog-py`.
@@ -69,8 +71,9 @@ python -m pytest tests -v
 ```
 
 See `CONTRIBUTING.md` for the full local validation gate.
-See `docs/cutover-validation.md` for a copied-repository validation checklist
-before using the tool against another project's live Backlog.md files.
+See `docs/cutover-validation.md` for the reusable validation checklist and
+`docs/cutover-validation-results-2026-05-13.md` for the first completed
+agent-critical cutover validation record.
 
 ## Agent Cutover Gate
 
@@ -88,9 +91,9 @@ with:
 python -m pytest tests/test_agent_critical_matrix.py -v
 ```
 
-Before cutover, also run the full local validation and copied-repo mutation
-smoke documented in `docs/cutover-validation.md`. Mutation smoke commands must
-use a temporary copy, not the live repository backlog.
+Before enabling this in another project, also run the full local validation and
+copied-repo mutation smoke documented in `docs/cutover-validation.md`. Mutation
+smoke commands must use a temporary copy, not the live repository backlog.
 
 Browser and interactive behavior is tracked separately from the first agent
 cutover candidate:

@@ -4,8 +4,9 @@
 projects that need local-file Backlog.md compatibility without a Node or Bun
 runtime dependency.
 
-The project is still experimental. Keep live-repository mutation behind review
-until the agent-critical cutover matrix is complete for your workflow.
+The project is still experimental, but the first agent-critical local-file
+cutover validation passed on 2026-05-13. Keep live-repository mutation behind
+copied-repository smoke tests and review for each consuming project.
 
 ## Install From GitHub
 
@@ -52,7 +53,7 @@ python -m backlog_py --cwd /path/to/project task list --plain
 ```
 
 Do not alias this command to `backlog` for production use until the cutover gate
-for your workflow is satisfied.
+for your target project is satisfied and the aliasing decision is explicit.
 
 ## Python API Use
 
@@ -113,4 +114,5 @@ python -m bandit -r src
 
 Then run your own mutation smoke test against a copied repository, not against
 the live project backlog. See `docs/cutover-validation.md` for a concrete
-cutover checklist.
+cutover checklist and `docs/cutover-validation-results-2026-05-13.md` for the
+first completed validation record.

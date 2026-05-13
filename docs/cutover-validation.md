@@ -4,6 +4,11 @@ Use this checklist before replacing a Node/Bun Backlog.md integration with
 `backlog-md-py` in another repository. The goal is to prove the local-file,
 agent-facing workflow without mutating live project data.
 
+The first completed agent-critical validation record is
+`docs/cutover-validation-results-2026-05-13.md`. Use that result as baseline
+evidence, but rerun this checklist against any target project before live
+cutover.
+
 ## Package Gate
 
 Run the package validation gate from a clean checkout:
