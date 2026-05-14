@@ -67,6 +67,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "CLI-INSTRUCTIONS.md",
             "backlog doc update <path-or-id> --title <title> -p <path> -t <type> --tags <tags> --content <body>",
         ),
+        _golden(
+            "cli:decision-create",
+            "CLI-INSTRUCTIONS.md",
+            'backlog decision create "Title" -s <status>',
+        ),
         _golden("cli:milestone-list", "CLI-INSTRUCTIONS.md", "backlog milestone list"),
         _golden("cli:milestone-add", "CLI-INSTRUCTIONS.md", "backlog milestone add <name>"),
         _golden("cli:milestone-rename", "CLI-INSTRUCTIONS.md", "backlog milestone rename <old> <new>"),

@@ -45,6 +45,7 @@ backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project cleanup
 backlog-py --cwd /path/to/project doc create "Setup Guide" --path guides --type guide --tags setup,runbook --content "Install and smoke-test the integration."
 backlog-py --cwd /path/to/project doc update doc-1 --title "Setup Handbook" --path runbooks --type runbook --tags setup,verified --content "Updated runbook body."
+backlog-py --cwd /path/to/project decision create "Use PostgreSQL for primary database" -s accepted
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project search "query" --modified-file "src/api.py" --limit 5 --plain
 backlog-py --cwd /path/to/project board

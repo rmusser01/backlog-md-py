@@ -9,6 +9,7 @@ from backlog_py import __version__
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
+from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
@@ -249,6 +250,10 @@ def search_command(
             _format_document_line(document)
             for document in _document_service(ctx).search_documents(query)
         )
+        lines.extend(
+            _format_decision_line(decision)
+            for decision in _decision_service(ctx).search_decisions(query)
+        )
     if limit is not None:
         lines = lines[: max(limit, 0)]
     for line in lines:
@@ -474,6 +479,21 @@ def document_update_command(
     click.echo(_format_document_line(document))
 
 
+@main.group("decision")
+def decision_group() -> None:
+    """Create and inspect Backlog.md decisions."""
+
+
+@decision_group.command("create")
+@click.argument("title")
+@click.option("-s", "--status", default="proposed", help="Decision status.")
+@click.pass_context
+def decision_create_command(ctx: click.Context, title: str, status: str) -> None:
+    """Create an architectural decision record."""
+    decision = _decision_service(ctx).create_decision(title, status=status)
+    click.echo(f"Created decision {decision.id}")
+
+
 @main.group("milestone")
 def milestone_group() -> None:
     """Create and inspect milestone files."""
@@ -544,6 +564,10 @@ def _document_service(ctx: click.Context) -> DocumentService:
     return DocumentService(_project(ctx))
 
 
+def _decision_service(ctx: click.Context) -> DecisionService:
+    return DecisionService(_project(ctx))
+
+
 def _milestone_service(ctx: click.Context) -> MilestoneService:
     return MilestoneService(_project(ctx))
 
@@ -569,6 +593,10 @@ def _format_task_detail(task_record: TaskRecord, *, plain: bool) -> str:
 
 def _format_document_line(document: DocumentRecord) -> str:
     return f"{document.path_relative} {document.title}".rstrip()
+
+
+def _format_decision_line(decision: DecisionRecord) -> str:
+    return f"{decision.id} [{decision.status}] {decision.title}".rstrip()
 
 
 def _format_milestone_line(milestone: MilestoneRecord) -> str:

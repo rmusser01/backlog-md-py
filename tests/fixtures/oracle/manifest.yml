@@ -49,6 +49,9 @@ fixtures:
   - name: "cli:doc-update"
     command: ["backlog", "doc", "update", "doc-1", "--title", "Updated Setup", "--path", "runbooks", "--type", "runbook", "--tags", "setup,verified", "--content", "Updated body"]
     agent_critical: true
+  - name: "cli:decision-create"
+    command: ["backlog", "decision", "create", "Use PostgreSQL for primary database", "-s", "accepted"]
+    agent_critical: true
   - name: "cli:milestone-list"
     command: ["backlog", "milestone", "list"]
     agent_critical: true

@@ -23,6 +23,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:doc-view",
     "cli:doc-create",
     "cli:doc-update",
+    "cli:decision-create",
     "cli:milestone-list",
     "cli:milestone-add",
     "cli:milestone-rename",
@@ -130,6 +131,14 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
     assert "-d <text>" in by_name["cli:task-create"].expected
     assert "-s <status>" in by_name["cli:task-create"].expected
     assert "--no-dod-defaults" in by_name["cli:task-create"].expected
+
+
+def test_agent_critical_inventory_tracks_decision_create_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert 'decision create "Title"' in by_name["cli:decision-create"].expected
+    assert "-s <status>" in by_name["cli:decision-create"].expected
 
 
 def test_agent_critical_inventory_has_fixture_coverage():
