@@ -20,6 +20,7 @@ do not block the first local-file agent cutover candidate.
 | cli:task-create | implemented | backlog task create <title> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --dep <id> --plain | cli:task-create |
 | cli:task-edit | implemented | backlog task edit <id> --plan <text> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
+| cli:cleanup | implemented | backlog cleanup | cli:cleanup |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
 | cli:doc-create | implemented | backlog doc create <path> --title <title> --content <body> | cli:doc-create |

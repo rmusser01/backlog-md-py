@@ -18,6 +18,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:task-create",
     "cli:task-edit",
     "cli:task-archive",
+    "cli:cleanup",
     "cli:doc-list",
     "cli:doc-view",
     "cli:doc-create",

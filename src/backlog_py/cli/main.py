@@ -282,6 +282,19 @@ def board_command(
             click.echo(f"  {_format_task_line(task_record, plain=True)}")
 
 
+@main.command("cleanup")
+@click.pass_context
+def cleanup_command(ctx: click.Context) -> None:
+    """Move active Done tasks into backlog/completed."""
+    repository = _mutable_repository(ctx)
+    done_tasks = [task for task in repository.list_tasks() if _is_completed_status(task.status)]
+    for task in done_tasks:
+        repository.complete_task(task.id)
+    count = len(done_tasks)
+    noun = "task" if count == 1 else "tasks"
+    click.echo(f"Moved {count} completed {noun} to backlog/completed.")
+
+
 @main.group("config")
 def config_group() -> None:
     """Inspect Backlog.md configuration."""
@@ -526,6 +539,11 @@ def _parse_ordinal(ordinal: str | None) -> int | float | None:
         return normalize_ordinal_value(ordinal)
     except TaskMutationError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+def _is_completed_status(status: str) -> bool:
+    normalized = status.casefold()
+    return "done" in normalized or "complete" in normalized
 
 
 def _bool_text(value: bool) -> str:

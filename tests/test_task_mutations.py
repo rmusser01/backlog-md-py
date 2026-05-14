@@ -803,6 +803,23 @@ def test_cli_task_archive_uses_safe_core(tmp_path):
     assert (repo / "backlog" / "archive" / "tasks" / "task-1 - Example-task.md").is_file()
 
 
+def test_cli_cleanup_moves_done_tasks_to_completed(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    repository = _repository(repo)
+    repository.create_task(title="Done cleanup task", task_id="TASK-2", status="Done")
+    repository.create_task(title="Active task", task_id="TASK-3", status="To Do")
+
+    cleanup = runner.invoke(main, ["--cwd", str(repo), "cleanup"])
+
+    assert cleanup.exit_code == 0
+    assert "Moved 1 completed task to backlog/completed." in cleanup.output
+    assert not (repo / "backlog" / "tasks" / "task-2 - Done-cleanup-task.md").exists()
+    assert (repo / "backlog" / "completed" / "task-2 - Done-cleanup-task.md").is_file()
+    assert (repo / "backlog" / "tasks" / "task-1 - Example-task.md").is_file()
+    assert (repo / "backlog" / "tasks" / "task-3 - Active-task.md").is_file()
+
+
 def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)

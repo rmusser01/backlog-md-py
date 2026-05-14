@@ -34,6 +34,9 @@ fixtures:
   - name: "cli:task-archive"
     command: ["backlog", "task", "archive", "TASK-1", "--plain"]
     agent_critical: true
+  - name: "cli:cleanup"
+    command: ["backlog", "cleanup"]
+    agent_critical: true
   - name: "cli:doc-list"
     command: ["backlog", "doc", "list"]
     agent_critical: true

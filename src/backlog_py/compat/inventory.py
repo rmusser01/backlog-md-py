@@ -54,6 +54,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog task edit <id> --plan <text> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain",
         ),
         _golden("cli:task-archive", "CLI-INSTRUCTIONS.md", "backlog task archive <id> --plain"),
+        _golden("cli:cleanup", "CLI-INSTRUCTIONS.md", "backlog cleanup"),
         _golden("cli:doc-list", "CLI-INSTRUCTIONS.md", "backlog doc list"),
         _golden("cli:doc-view", "CLI-INSTRUCTIONS.md", "backlog doc view <path-or-id>"),
         _golden("cli:doc-create", "CLI-INSTRUCTIONS.md", "backlog doc create <path> --title <title> --content <body>"),
