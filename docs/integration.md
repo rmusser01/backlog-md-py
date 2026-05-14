@@ -25,7 +25,9 @@ python -m pip install "backlog-md-py[mcp] @ git+https://github.com/rmusser01/bac
 For local development against a checkout:
 
 ```bash
-python -m pip install -e ".[dev]"
+uv venv --python 3.13 .venv
+source .venv/bin/activate
+uv pip install -e ".[dev,mcp]"
 ```
 
 ## CLI Entry Points
@@ -121,9 +123,9 @@ backlog-py compat status --json
 Before switching a project to `backlog-md-py`, run at least:
 
 ```bash
-python -m pytest tests/test_agent_critical_matrix.py -v
-python -m pytest tests -v
-python -m bandit -r src
+uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
+uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m bandit -r src
 ```
 
 Then run your own mutation smoke test against a copied repository, not against

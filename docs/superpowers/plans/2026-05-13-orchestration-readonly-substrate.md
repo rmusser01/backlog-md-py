@@ -6,7 +6,7 @@
 
 **Architecture:** Add a focused `backlog_py.orchestration` package that depends on existing parsed task records but does not alter task mutation behavior. Keep all write helpers out of scope; the package only interprets frontmatter, validates known fields, applies a default workflow policy, and reports eligible tasks, active claims, stale leases, and status summaries.
 
-**Tech Stack:** Python 3.10 dataclasses, `datetime`, existing `PyYAML`, existing `ReadOnlyRepository`/`TaskRecord`, pytest.
+**Tech Stack:** Python 3.11+ dataclasses, `datetime`, existing `PyYAML`, existing `ReadOnlyRepository`/`TaskRecord`, pytest.
 
 ---
 

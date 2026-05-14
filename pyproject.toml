@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "backlog-md-py"
 description = "Standalone Python compatibility implementation of Backlog.md"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 dynamic = ["version"]
@@ -19,9 +19,9 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Utilities",
 ]
@@ -41,7 +41,6 @@ dev = [
   "bandit>=1.7.0",
   "build>=1.2.0",
   "pytest>=8.0.0",
-  "tomli>=2.0.0; python_version < '3.11'",
   "twine>=5.0.0",
 ]
 mcp = [
