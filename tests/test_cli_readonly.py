@@ -5,7 +5,9 @@ from click.testing import CliRunner
 
 from backlog_py import __version__
 from backlog_py.cli.main import main
+from backlog_py.core.documents import DocumentService
 from backlog_py.core.repository import MutableRepository
+from backlog_py.storage.project import discover_project
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
@@ -85,6 +87,22 @@ def test_search_plain_outputs_matching_task():
     assert result.exit_code == 0
     assert "TASK-1" in result.output
     assert "Example task" in result.output
+
+
+def test_search_plain_outputs_matching_documents_when_unfiltered(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    DocumentService(project).create_document(
+        "guides/search.md",
+        title="Search Guide",
+        content="Unique document lookup body.",
+    )
+
+    result = _invoke_repo(repo, "search", "lookup body", "--plain")
+
+    assert result.exit_code == 0
+    assert "guides/search.md Search Guide" in result.output
 
 
 def test_search_plain_filters_by_status_and_priority(tmp_path):

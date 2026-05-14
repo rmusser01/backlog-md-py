@@ -236,17 +236,23 @@ def search_command(
     modified_files: tuple[str, ...],
     limit: int | None,
 ) -> None:
-    """Search active tasks."""
-    results = _repository(ctx).search_tasks(
+    """Search active tasks and, when unfiltered, documents."""
+    task_results = _repository(ctx).search_tasks(
         query,
         status=status,
         priority=_priority_filter(priority),
         modified_files=modified_files,
     )
+    lines = [_format_task_line(task_record, plain=plain) for task_record in task_results]
+    if status is None and priority is None and not modified_files:
+        lines.extend(
+            _format_document_line(document)
+            for document in _document_service(ctx).search_documents(query)
+        )
     if limit is not None:
-        results = results[:max(limit, 0)]
-    for task_record in results:
-        click.echo(_format_task_line(task_record, plain=plain))
+        lines = lines[: max(limit, 0)]
+    for line in lines:
+        click.echo(line)
 
 
 @main.command("board")
