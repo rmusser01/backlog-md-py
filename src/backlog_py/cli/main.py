@@ -215,14 +215,28 @@ def task_command(
 @click.option("--plain", is_flag=True, help="Print plain text output.")
 @click.option("--status", default=None, help="Filter matching tasks by status.")
 @click.option("--priority", default=None, help="Filter matching tasks by priority.")
+@click.option("--modified-file", "modified_files", multiple=True, help="Filter by modified file path substring.")
+@click.option("--limit", type=int, default=None, help="Limit the number of search results.")
 @click.pass_context
-def search_command(ctx: click.Context, query: str, plain: bool, status: str | None, priority: str | None) -> None:
+def search_command(
+    ctx: click.Context,
+    query: str,
+    plain: bool,
+    status: str | None,
+    priority: str | None,
+    modified_files: tuple[str, ...],
+    limit: int | None,
+) -> None:
     """Search active tasks."""
-    for task_record in _repository(ctx).search_tasks(
+    results = _repository(ctx).search_tasks(
         query,
         status=status,
         priority=_priority_filter(priority),
-    ):
+        modified_files=modified_files,
+    )
+    if limit is not None:
+        results = results[:max(limit, 0)]
+    for task_record in results:
         click.echo(_format_task_line(task_record, plain=plain))
 
 

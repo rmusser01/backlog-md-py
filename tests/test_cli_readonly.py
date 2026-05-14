@@ -29,6 +29,7 @@ def _metadata_filter_repo(tmp_path: Path) -> Path:
         labels=["Parser", "UI"],
         priority="high",
         milestone="Release 1",
+        modified_files=["src/components/Button.tsx"],
     )
     repository.create_task(
         title="Documentation task",
@@ -38,6 +39,7 @@ def _metadata_filter_repo(tmp_path: Path) -> Path:
         labels=["docs"],
         priority="low",
         milestone="Release 2",
+        modified_files=["src/server/index.py"],
     )
     return repo
 
@@ -93,6 +95,22 @@ def test_search_plain_filters_by_status_and_priority(tmp_path):
     assert "TASK-2" in result.output
     assert "Documentation task" in result.output
     assert "TASK-1" not in result.output
+
+
+def test_search_plain_filters_by_modified_file_and_limit(tmp_path):
+    repo = _metadata_filter_repo(tmp_path)
+
+    modified_file = _invoke_repo(repo, "search", "task", "--modified-file", "server", "--plain")
+    limited = _invoke_repo(repo, "search", "task", "--limit", "1", "--plain")
+
+    assert modified_file.exit_code == 0
+    assert "TASK-2" in modified_file.output
+    assert "Documentation task" in modified_file.output
+    assert "TASK-1" not in modified_file.output
+
+    assert limited.exit_code == 0
+    assert "TASK-1" in limited.output
+    assert "TASK-2" not in limited.output
 
 
 def test_board_outputs_status_grouping():

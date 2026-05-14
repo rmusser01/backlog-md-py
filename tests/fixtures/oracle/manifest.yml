@@ -14,7 +14,7 @@ fixtures:
     command: ["backlog", "task", "1", "--plain"]
     agent_critical: true
   - name: "cli:search-plain"
-    command: ["backlog", "search", "Backlog.md", "--status", "To Do", "--priority", "medium", "--plain"]
+    command: ["backlog", "search", "Backlog.md", "--status", "To Do", "--priority", "medium", "--modified-file", "src", "--limit", "5", "--plain"]
     agent_critical: true
   - name: "cli:config-list"
     command: ["backlog", "config", "list"]

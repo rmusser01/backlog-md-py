@@ -101,6 +101,14 @@ def test_agent_critical_inventory_tracks_task_ordinal_mutation_surface():
     assert "ordinal=None" in by_name["mcp:task-edit"].expected
 
 
+def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "--modified-file <path>" in by_name["cli:search-plain"].expected
+    assert "--limit <number>" in by_name["cli:search-plain"].expected
+
+
 def test_agent_critical_inventory_has_fixture_coverage():
     inventory = load_builtin_inventory()
     manifest = load_oracle_manifest(MANIFEST_PATH)
