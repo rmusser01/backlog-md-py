@@ -13,7 +13,7 @@ do not block the first local-file agent cutover candidate.
 | cli:help | implemented | backlog --help | cli:help |
 | cli:task-list-plain | implemented | backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --parent <taskId> --plain | cli:task-list-plain |
 | cli:task-view-plain | implemented | backlog task <id> --plain | cli:task-view-plain |
-| cli:search-plain | implemented | backlog search <query> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered search returns tasks and documents | cli:search-plain |
+| cli:search-plain | implemented | backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered search returns tasks, documents, and decisions | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |
 | cli:config-list | implemented | backlog config list | cli:config-list |

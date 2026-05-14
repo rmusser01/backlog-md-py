@@ -109,7 +109,8 @@ def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():
 
     assert "--modified-file <path>" in by_name["cli:search-plain"].expected
     assert "--limit <number>" in by_name["cli:search-plain"].expected
-    assert "tasks and documents" in by_name["cli:search-plain"].expected
+    assert "--type <type>" in by_name["cli:search-plain"].expected
+    assert "tasks, documents, and decisions" in by_name["cli:search-plain"].expected
 
 
 def test_agent_critical_inventory_tracks_document_path_type_and_tags_surface():

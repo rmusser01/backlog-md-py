@@ -47,6 +47,7 @@ backlog-py --cwd /path/to/project doc create "Setup Guide" --path guides --type 
 backlog-py --cwd /path/to/project doc update doc-1 --title "Setup Handbook" --path runbooks --type runbook --tags setup,verified --content "Updated runbook body."
 backlog-py --cwd /path/to/project decision create "Use PostgreSQL for primary database" -s accepted
 backlog-py --cwd /path/to/project search "query" --plain
+backlog-py --cwd /path/to/project search "query" --type document --plain
 backlog-py --cwd /path/to/project search "query" --modified-file "src/api.py" --limit 5 --plain
 backlog-py --cwd /path/to/project board
 backlog-py --cwd /path/to/project board export Backlog.md --force --export-version v1.45.1
@@ -60,9 +61,10 @@ backlog-py compat status
 backlog-py compat status --json
 ```
 
-Unfiltered `search` output includes matching tasks and documents. Task-specific
-filters such as `--status`, `--priority`, and `--modified-file` keep the search
-restricted to tasks.
+Unfiltered `search` output includes matching tasks, documents, and decisions.
+Use `--type task`, `--type document`, or `--type decision` to narrow result
+classes. Task-specific filters such as `--status`, `--priority`, and
+`--modified-file` keep default search restricted to tasks.
 
 The module entry point is equivalent:
 

@@ -226,6 +226,7 @@ def task_command(
 @click.option("--status", default=None, help="Filter matching tasks by status.")
 @click.option("--priority", default=None, help="Filter matching tasks by priority.")
 @click.option("--modified-file", "modified_files", multiple=True, help="Filter by modified file path substring.")
+@click.option("--type", "result_types", multiple=True, help="Limit results to type: task, document, decision.")
 @click.option("--limit", type=int, default=None, help="Limit the number of search results.")
 @click.pass_context
 def search_command(
@@ -235,21 +236,30 @@ def search_command(
     status: str | None,
     priority: str | None,
     modified_files: tuple[str, ...],
+    result_types: tuple[str, ...],
     limit: int | None,
 ) -> None:
-    """Search active tasks and, when unfiltered, documents."""
-    task_results = _repository(ctx).search_tasks(
-        query,
-        status=status,
-        priority=_priority_filter(priority),
-        modified_files=modified_files,
-    )
-    lines = [_format_task_line(task_record, plain=plain) for task_record in task_results]
-    if status is None and priority is None and not modified_files:
+    """Search tasks, documents, and decisions."""
+    selected_types = _search_result_types(result_types)
+    task_filters_present = status is not None or priority is not None or bool(modified_files)
+    if selected_types is None:
+        selected_types = {"task"} if task_filters_present else {"task", "document", "decision"}
+
+    lines: list[str] = []
+    if "task" in selected_types:
+        task_results = _repository(ctx).search_tasks(
+            query,
+            status=status,
+            priority=_priority_filter(priority),
+            modified_files=modified_files,
+        )
+        lines.extend(_format_task_line(task_record, plain=plain) for task_record in task_results)
+    if "document" in selected_types:
         lines.extend(
             _format_document_line(document)
             for document in _document_service(ctx).search_documents(query)
         )
+    if "decision" in selected_types:
         lines.extend(
             _format_decision_line(decision)
             for decision in _decision_service(ctx).search_decisions(query)
@@ -647,6 +657,21 @@ def _split_csv_values(values: tuple[str, ...]) -> list[str]:
             if item:
                 normalized.append(item)
     return normalized
+
+
+def _search_result_types(values: tuple[str, ...]) -> set[str] | None:
+    if not values:
+        return None
+    allowed_types = {"task", "document", "decision"}
+    selected: set[str] = set()
+    for value in _split_csv_values(values):
+        normalized = value.casefold()
+        if normalized not in allowed_types:
+            supported = ", ".join(sorted(allowed_types))
+            click.echo(f"Ignoring unsupported type '{value}'. Supported: {supported}", err=True)
+            continue
+        selected.add(normalized)
+    return selected
 
 
 def _priority_filter(priority: str | None) -> str | None:

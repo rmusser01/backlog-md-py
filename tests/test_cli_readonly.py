@@ -5,6 +5,7 @@ from click.testing import CliRunner
 
 from backlog_py import __version__
 from backlog_py.cli.main import main
+from backlog_py.core.decisions import DecisionService
 from backlog_py.core.documents import DocumentService
 from backlog_py.core.repository import MutableRepository
 from backlog_py.storage.project import discover_project
@@ -103,6 +104,44 @@ def test_search_plain_outputs_matching_documents_when_unfiltered(tmp_path):
 
     assert result.exit_code == 0
     assert "guides/search.md Search Guide" in result.output
+
+
+def test_search_plain_filters_by_result_type(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MutableRepository.from_path(repo).create_task(title="Shared needle task", task_id="TASK-2")
+    DocumentService(project).create_document(
+        "guides/shared.md",
+        title="Shared needle document",
+        content="Shared needle body.",
+    )
+    DecisionService(project).create_decision("Shared needle decision")
+
+    task = _invoke_repo(repo, "search", "shared needle", "--type", "task", "--plain")
+    document = _invoke_repo(repo, "search", "shared needle", "--type", "document", "--plain")
+    decision = _invoke_repo(repo, "search", "shared needle", "--type", "decision", "--plain")
+    combined = _invoke_repo(repo, "search", "shared needle", "--type", "document,decision", "--plain")
+
+    assert task.exit_code == 0
+    assert "TASK-2 [To Do] Shared needle task" in task.output
+    assert "guides/shared.md Shared needle document" not in task.output
+    assert "decision-1 [proposed] Shared needle decision" not in task.output
+
+    assert document.exit_code == 0
+    assert "guides/shared.md Shared needle document" in document.output
+    assert "TASK-2 [To Do] Shared needle task" not in document.output
+    assert "decision-1 [proposed] Shared needle decision" not in document.output
+
+    assert decision.exit_code == 0
+    assert "decision-1 [proposed] Shared needle decision" in decision.output
+    assert "TASK-2 [To Do] Shared needle task" not in decision.output
+    assert "guides/shared.md Shared needle document" not in decision.output
+
+    assert combined.exit_code == 0
+    assert "guides/shared.md Shared needle document" in combined.output
+    assert "decision-1 [proposed] Shared needle decision" in combined.output
+    assert "TASK-2 [To Do] Shared needle task" not in combined.output
 
 
 def test_search_plain_filters_by_status_and_priority(tmp_path):
