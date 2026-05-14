@@ -43,6 +43,8 @@ backlog-py --cwd /path/to/project task create "Implementation task" --plan "1. I
 backlog-py --cwd /path/to/project task edit TASK-2 --plan "1. Patch focused scope." --append-plan "2. Verify behavior." --milestone "Release 2" --ordinal 2000 --ref "src/api.py,tests/test_api.py" --doc "docs/verification.md" --modified-file "src/api.py,tests/test_api.py" -a reviewer -l ready --priority medium --notes "Implementation details." --ac "Regression covered" --dod "Package check passes" --remove-ac 1 --append-final-summary "Ready for review." --plain
 backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project cleanup
+backlog-py --cwd /path/to/project doc create "Setup Guide" --path guides --type guide --tags setup,runbook --content "Install and smoke-test the integration."
+backlog-py --cwd /path/to/project doc update doc-1 --title "Setup Handbook" --path runbooks --type runbook --tags setup,verified --content "Updated runbook body."
 backlog-py --cwd /path/to/project search "query" --modified-file "src/api.py" --limit 5 --plain
 backlog-py --cwd /path/to/project board
 backlog-py --cwd /path/to/project board export Backlog.md --force --export-version v1.45.1

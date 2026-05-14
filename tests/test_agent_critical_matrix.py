@@ -110,6 +110,18 @@ def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():
     assert "--limit <number>" in by_name["cli:search-plain"].expected
 
 
+def test_agent_critical_inventory_tracks_document_path_type_and_tags_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "-p <path>" in by_name["cli:doc-create"].expected
+    assert "-t <type>" in by_name["cli:doc-create"].expected
+    assert "--tags <tags>" in by_name["cli:doc-create"].expected
+    assert "-p <path>" in by_name["cli:doc-update"].expected
+    assert "-t <type>" in by_name["cli:doc-update"].expected
+    assert "--tags <tags>" in by_name["cli:doc-update"].expected
+
+
 def test_agent_critical_inventory_has_fixture_coverage():
     inventory = load_builtin_inventory()
     manifest = load_oracle_manifest(MANIFEST_PATH)

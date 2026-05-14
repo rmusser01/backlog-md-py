@@ -401,13 +401,36 @@ def document_view_command(ctx: click.Context, path_or_id: str) -> None:
 
 
 @document_group.command("create")
-@click.argument("path")
-@click.option("--title", required=True, help="Document title.")
-@click.option("--content", required=True, help="Document body content.")
+@click.argument("path_or_title")
+@click.option("--title", default=None, help="Document title for explicit-path create.")
+@click.option("-p", "--path", "document_path", default=None, help="Docs-relative directory for title-based create.")
+@click.option("--content", default="", help="Document body content.")
+@click.option("-t", "--type", "document_type", default=None, help="Document type metadata.")
+@click.option("--tags", multiple=True, help="Comma-separated document tags metadata.")
 @click.pass_context
-def document_create_command(ctx: click.Context, path: str, title: str, content: str) -> None:
+def document_create_command(
+    ctx: click.Context,
+    path_or_title: str,
+    title: str | None,
+    document_path: str | None,
+    content: str,
+    document_type: str | None,
+    tags: tuple[str, ...],
+) -> None:
     """Create a document under backlog/docs."""
-    document = _document_service(ctx).create_document(path, title=title, content=content)
+    service = _document_service(ctx)
+    metadata = _document_metadata(document_type, tags)
+    if title is None:
+        document = service.create_document_from_title(
+            path_or_title,
+            directory=document_path,
+            content=content,
+            metadata=metadata,
+        )
+    else:
+        if document_path is not None:
+            raise click.UsageError("Use --path only with title-based document create.")
+        document = service.create_document(path_or_title, title=title, content=content, metadata=metadata)
     click.echo(_format_document_line(document))
 
 
@@ -415,15 +438,27 @@ def document_create_command(ctx: click.Context, path: str, title: str, content: 
 @click.argument("path_or_id")
 @click.option("--title", default=None, help="Replacement document title.")
 @click.option("--content", default=None, help="Replacement document body content.")
+@click.option("-p", "--path", "document_path", default=None, help="Move document to a docs-relative directory.")
+@click.option("-t", "--type", "document_type", default=None, help="Replacement document type metadata.")
+@click.option("--tags", multiple=True, help="Comma-separated replacement document tags metadata.")
 @click.pass_context
 def document_update_command(
     ctx: click.Context,
     path_or_id: str,
     title: str | None,
     content: str | None,
+    document_path: str | None,
+    document_type: str | None,
+    tags: tuple[str, ...],
 ) -> None:
     """Update a document while preserving omitted metadata."""
-    document = _document_service(ctx).update_document(path_or_id, title=title, content=content)
+    document = _document_service(ctx).update_document(
+        path_or_id,
+        title=title,
+        content=content,
+        directory=document_path,
+        metadata=_document_metadata(document_type, tags),
+    )
     click.echo(_format_document_line(document))
 
 
@@ -552,6 +587,26 @@ def _frontmatter_string_list(task_record: TaskRecord, key: str) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def _document_metadata(document_type: str | None, tags: tuple[str, ...]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    if document_type is not None:
+        metadata["type"] = document_type
+    normalized_tags = _split_csv_values(tags)
+    if normalized_tags:
+        metadata["tags"] = normalized_tags
+    return metadata
+
+
+def _split_csv_values(values: tuple[str, ...]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        for item in value.split(","):
+            item = item.strip()
+            if item:
+                normalized.append(item)
+    return normalized
 
 
 def _priority_filter(priority: str | None) -> str | None:

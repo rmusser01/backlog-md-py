@@ -44,10 +44,10 @@ fixtures:
     command: ["backlog", "doc", "view", "guides/setup.md"]
     agent_critical: true
   - name: "cli:doc-create"
-    command: ["backlog", "doc", "create", "guides/setup.md", "--title", "Setup Guide", "--content", "Fixture body"]
+    command: ["backlog", "doc", "create", "Setup Guide", "--path", "guides", "--type", "guide", "--tags", "setup,runbook", "--content", "Fixture body"]
     agent_critical: true
   - name: "cli:doc-update"
-    command: ["backlog", "doc", "update", "guides/setup.md", "--title", "Updated Setup"]
+    command: ["backlog", "doc", "update", "doc-1", "--title", "Updated Setup", "--path", "runbooks", "--type", "runbook", "--tags", "setup,verified", "--content", "Updated body"]
     agent_critical: true
   - name: "cli:milestone-list"
     command: ["backlog", "milestone", "list"]

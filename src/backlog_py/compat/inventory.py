@@ -57,8 +57,16 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden("cli:cleanup", "CLI-INSTRUCTIONS.md", "backlog cleanup"),
         _golden("cli:doc-list", "CLI-INSTRUCTIONS.md", "backlog doc list"),
         _golden("cli:doc-view", "CLI-INSTRUCTIONS.md", "backlog doc view <path-or-id>"),
-        _golden("cli:doc-create", "CLI-INSTRUCTIONS.md", "backlog doc create <path> --title <title> --content <body>"),
-        _golden("cli:doc-update", "CLI-INSTRUCTIONS.md", "backlog doc update <path-or-id> --title <title>"),
+        _golden(
+            "cli:doc-create",
+            "CLI-INSTRUCTIONS.md",
+            "backlog doc create <title> -p <path> -t <type> --tags <tags> --content <body>",
+        ),
+        _golden(
+            "cli:doc-update",
+            "CLI-INSTRUCTIONS.md",
+            "backlog doc update <path-or-id> --title <title> -p <path> -t <type> --tags <tags> --content <body>",
+        ),
         _golden("cli:milestone-list", "CLI-INSTRUCTIONS.md", "backlog milestone list"),
         _golden("cli:milestone-add", "CLI-INSTRUCTIONS.md", "backlog milestone add <name>"),
         _golden("cli:milestone-rename", "CLI-INSTRUCTIONS.md", "backlog milestone rename <old> <new>"),

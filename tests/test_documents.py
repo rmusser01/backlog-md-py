@@ -87,6 +87,24 @@ def test_create_document_allocates_ids_globally_under_docs(tmp_path):
     assert service.view_document("DOC-2").path_relative == "notes/next.md"
 
 
+def test_create_document_from_title_uses_upstream_style_path_and_metadata(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    created = _service(repo).create_document_from_title(
+        "Setup Guide",
+        directory="guides",
+        content="Body.",
+        metadata={"type": "guide", "tags": ["setup", "runbook"]},
+    )
+
+    assert created.id == "DOC-1"
+    assert created.path_relative == "guides/doc-1 - Setup-Guide.md"
+    document_path = repo / "backlog" / "docs" / "guides" / "doc-1 - Setup-Guide.md"
+    frontmatter = _frontmatter(document_path)
+    assert frontmatter["type"] == "guide"
+    assert frontmatter["tags"] == ["setup", "runbook"]
+
+
 def test_update_document_preserves_omitted_metadata_and_content(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -122,6 +140,36 @@ def test_update_document_preserves_omitted_body_source(tmp_path):
 
     after_body = document_path.read_text(encoding="utf-8").split("---\n", 2)[2]
     assert after_body == before_body
+
+
+def test_update_document_can_move_and_update_metadata(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.create_document(
+        "notes/setup.md",
+        title="Setup Guide",
+        content="Original body.",
+        metadata={"id": "DOC-SETUP", "type": "note", "tags": ["old"]},
+    )
+
+    updated = service.update_document(
+        "doc-setup",
+        title="Setup Handbook",
+        content="Updated body.",
+        directory="guides",
+        metadata={"type": "guide", "tags": ["setup", "runbook"]},
+    )
+
+    assert updated.path_relative == "guides/setup.md"
+    assert updated.title == "Setup Handbook"
+    assert updated.content == "Updated body."
+    assert not (repo / "backlog" / "docs" / "notes" / "setup.md").exists()
+    document_path = repo / "backlog" / "docs" / "guides" / "setup.md"
+    frontmatter = _frontmatter(document_path)
+    assert frontmatter["id"] == "DOC-SETUP"
+    assert frontmatter["title"] == "Setup Handbook"
+    assert frontmatter["type"] == "guide"
+    assert frontmatter["tags"] == ["setup", "runbook"]
 
 
 def test_document_path_traversal_is_rejected_before_write(tmp_path):
@@ -216,6 +264,62 @@ def test_cli_document_commands_use_safe_service(tmp_path):
     listed = runner.invoke(main, ["--cwd", str(repo), "doc", "list", "updated"])
     assert listed.exit_code == 0
     assert "guides/setup.md Updated Setup" in listed.output
+
+
+def test_cli_document_commands_support_upstream_title_path_type_and_tags(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    create = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "doc",
+            "create",
+            "Setup Guide",
+            "--path",
+            "guides",
+            "--content",
+            "Created from modern CLI.",
+            "--type",
+            "guide",
+            "--tags",
+            "setup,runbook",
+        ],
+    )
+
+    assert create.exit_code == 0
+    assert "guides/doc-1 - Setup-Guide.md Setup Guide" in create.output
+
+    update = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "doc",
+            "update",
+            "doc-1",
+            "--title",
+            "Setup Handbook",
+            "--content",
+            "Updated from modern CLI.",
+            "--path",
+            "runbooks",
+            "--type",
+            "runbook",
+            "--tags",
+            "setup,verified",
+        ],
+    )
+
+    assert update.exit_code == 0
+    assert "runbooks/doc-1 - Setup-Guide.md Setup Handbook" in update.output
+    document_path = repo / "backlog" / "docs" / "runbooks" / "doc-1 - Setup-Guide.md"
+    frontmatter = _frontmatter(document_path)
+    assert frontmatter["type"] == "runbook"
+    assert frontmatter["tags"] == ["setup", "verified"]
+    assert "Updated from modern CLI." in document_path.read_text(encoding="utf-8")
 
 
 def test_mcp_document_tools_use_safe_service(tmp_path):

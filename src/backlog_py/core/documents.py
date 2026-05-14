@@ -58,6 +58,20 @@ class DocumentService:
         _atomic_write_text(target, source)
         return _load_document(self.docs_dir, target)
 
+    def create_document_from_title(
+        self,
+        title: str,
+        *,
+        directory: str | None = None,
+        content: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> DocumentRecord:
+        frontmatter = dict(metadata or {})
+        document_id = str(frontmatter.get("id") or self._next_document_id())
+        frontmatter["id"] = document_id
+        path = self._generated_document_path(document_id, title, directory)
+        return self.create_document(path, title=title, content=content, metadata=frontmatter)
+
     def list_documents(self) -> list[DocumentRecord]:
         if not self.docs_dir.is_dir():
             return []
@@ -87,19 +101,32 @@ class DocumentService:
         *,
         title: str | None = None,
         content: str | None = None,
+        directory: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> DocumentRecord:
         document = self.view_document(path_or_id)
         frontmatter = dict(document.frontmatter)
         if title is not None:
             frontmatter["title"] = title
+        for key, value in (metadata or {}).items():
+            if value is None:
+                frontmatter.pop(key, None)
+            else:
+                frontmatter[key] = value
         source = (
             _render_document_body(frontmatter, document.body_source)
             if content is None
             else _render_document(frontmatter, content)
         )
         parse_task_markdown(source)
-        _atomic_write_text(document.path, source)
-        return _load_document(self.docs_dir, document.path)
+        target = document.path if directory is None else self._moved_document_path(document, directory)
+        if target != document.path and target.exists():
+            raise DocumentMutationError(f"Document already exists: {target.relative_to(self.docs_dir).as_posix()}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(target, source)
+        if target != document.path:
+            document.path.unlink()
+        return _load_document(self.docs_dir, target)
 
     def _try_view_by_path(self, path_or_id: str) -> DocumentRecord | None:
         path = self._document_path(path_or_id)
@@ -124,6 +151,33 @@ class DocumentService:
             return assert_path_within_base(self.docs_dir, self.docs_dir / relative)
         except PathContainmentError as exc:
             raise DocumentMutationError(f"Invalid document path: {path}") from exc
+
+    def _generated_document_path(self, document_id: str, title: str, directory: str | None) -> str:
+        relative_directory = self._document_directory(directory)
+        filename = f"{document_id.lower()} - {_slug_title(title)}.md"
+        if str(relative_directory) == ".":
+            return filename
+        return (relative_directory / filename).as_posix()
+
+    def _moved_document_path(self, document: DocumentRecord, directory: str) -> Path:
+        relative_directory = self._document_directory(directory)
+        target = self.docs_dir / relative_directory / document.path.name
+        try:
+            return assert_path_within_base(self.docs_dir, target)
+        except PathContainmentError as exc:
+            raise DocumentMutationError(f"Invalid document path: {directory}") from exc
+
+    def _document_directory(self, directory: str | None) -> Path:
+        if directory is None or not directory.strip():
+            return Path(".")
+        relative = Path(directory)
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix == ".md":
+            raise DocumentMutationError(f"Invalid document path: {directory}")
+        try:
+            assert_path_within_base(self.docs_dir, self.docs_dir / relative / ".keep")
+        except PathContainmentError as exc:
+            raise DocumentMutationError(f"Invalid document path: {directory}") from exc
+        return relative
 
     def _next_document_id(self) -> str:
         max_id = 0
@@ -166,6 +220,11 @@ def _render_document(frontmatter: dict[str, Any], content: str) -> str:
 def _render_document_body(frontmatter: dict[str, Any], body_source: str) -> str:
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
     return f"---\n{yaml_text}\n---\n{body_source}"
+
+
+def _slug_title(title: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9.-]+", "-", title.strip()).strip("-")
+    return slug or "Document"
 
 
 def _document_search_text(document: DocumentRecord) -> str:
