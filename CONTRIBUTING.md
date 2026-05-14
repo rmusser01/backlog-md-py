@@ -6,13 +6,13 @@ Backlog.md tooling is only for fixture refresh or parity-generation work.
 
 ## Local Setup
 
-Use Python 3.10 or newer:
+Use Python 3.11, 3.12, or 3.13. The canonical local setup uses `uv` to create
+and populate a project-local virtual environment:
 
 ```bash
-python -m venv .venv
+uv venv --python 3.13 .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+uv pip install -e ".[dev,mcp]"
 ```
 
 ## Validation
@@ -20,16 +20,16 @@ python -m pip install -e ".[dev]"
 Run the full local gate before opening a pull request:
 
 ```bash
-python -m pytest tests -v
-python -m bandit -r src
-python -m build
-python -m twine check dist/*
+uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m bandit -r src
+uv run --extra dev python -m build
+uv run --extra dev python -m twine check dist/*
 ```
 
 For focused agent-cutover work, also run:
 
 ```bash
-python -m pytest tests/test_agent_critical_matrix.py -v
+uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
 ```
 
 For consuming-project cutovers, follow `docs/cutover-validation.md` so mutation

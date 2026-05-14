@@ -2,10 +2,9 @@ from importlib.metadata import metadata
 from importlib.resources import files
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
-    import tomli as tomllib
+import tomllib
+
+import yaml
 
 from backlog_py import __version__
 
@@ -34,3 +33,20 @@ def test_pyproject_exposes_mcp_server_extra_and_script():
     assert "mcp" in pyproject["project"]["optional-dependencies"]
     assert any(dependency.startswith("mcp>=") for dependency in pyproject["project"]["optional-dependencies"]["mcp"])
     assert pyproject["project"]["scripts"]["backlog-py-mcp"] == "backlog_py.mcp.server:main"
+
+
+def test_python_support_range_is_311_through_313():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
+
+    assert pyproject["project"]["requires-python"] == ">=3.11"
+    assert "Programming Language :: Python :: 3.10" not in pyproject["project"]["classifiers"]
+    assert "Programming Language :: Python :: 3.11" in pyproject["project"]["classifiers"]
+    assert "Programming Language :: Python :: 3.12" in pyproject["project"]["classifiers"]
+    assert "Programming Language :: Python :: 3.13" in pyproject["project"]["classifiers"]
+    assert "tomli>=2.0.0; python_version < '3.11'" not in pyproject["project"]["optional-dependencies"]["dev"]
+    assert workflow["jobs"]["tests"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12", "3.13"]
+    package_python_step = next(
+        step for step in workflow["jobs"]["package"]["steps"] if step["name"] == "Set up Python"
+    )
+    assert package_python_step["with"]["python-version"] == "3.13"

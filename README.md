@@ -63,18 +63,20 @@ future repository cutover paths must remain Node/Bun-free.
 
 ## Development
 
-Install the package in editable mode with test dependencies available:
+Use Python 3.11, 3.12, or 3.13. Create a local virtual environment with `uv`
+and install editable development dependencies:
 
 ```bash
-python -m pip install -e .
-python -m pip install -e ".[dev]"
+uv venv --python 3.13 .venv
+source .venv/bin/activate
+uv pip install -e ".[dev,mcp]"
 ```
 
 Then run the focused or full test suite:
 
 ```bash
-python -m pytest tests/test_agent_critical_matrix.py -v
-python -m pytest tests -v
+uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
+uv run --extra dev --extra mcp python -m pytest tests -v
 ```
 
 See `CONTRIBUTING.md` for the full local validation gate.

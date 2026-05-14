@@ -73,16 +73,14 @@ do not block the first local-file agent cutover candidate.
 Run the matrix test with:
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests/test_agent_critical_matrix.py -v
+uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
 ```
 
 Run the full local cutover validation with:
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests -v
-python -m bandit -r src -f json -o /tmp/bandit_backlog_py.json
+uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m bandit -r src -f json -o /tmp/bandit_backlog_py.json
 git diff --check
 ```
 
