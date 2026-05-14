@@ -959,6 +959,43 @@ def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     assert "Project default" not in disabled_written
 
 
+def test_cli_task_create_accepts_upstream_short_aliases(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    runner = CliRunner()
+
+    replace_definition_of_done_defaults(project, ["Project default"])
+
+    create = runner.invoke(
+        main,
+        [
+            "--cwd",
+            str(repo),
+            "task",
+            "create",
+            "CLI alias task",
+            "--id",
+            "TASK-2",
+            "-d",
+            "Created with upstream aliases.",
+            "-s",
+            "In Progress",
+            "--no-dod-defaults",
+            "--dod",
+            "Alias-specific DoD",
+            "--plain",
+        ],
+    )
+
+    assert create.exit_code == 0
+    assert "TASK-2 [In Progress] CLI alias task" in create.output
+    written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "Created with upstream aliases." in written
+    assert "status: In Progress" in written
+    assert "- [ ] #1 Alias-specific DoD" in written
+    assert "Project default" not in written
+
+
 def test_cli_task_create_and_edit_reject_invalid_ordinal(tmp_path):
     repo = _copy_fixture(tmp_path)
     runner = CliRunner()

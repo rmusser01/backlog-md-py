@@ -37,8 +37,8 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--plain", is_flag=True, help="Print plain text output.")
 @click.option("--id", "task_id", default=None, help="Task id for task creation.")
 @click.option("--title", default=None, help="Replacement task title for task edit.")
-@click.option("--status", default=None, help="Task status for create/edit/list.")
-@click.option("--description", default=None, help="Description for task creation.")
+@click.option("-s", "--status", default=None, help="Task status for create/edit/list.")
+@click.option("-d", "--desc", "--description", "description", default=None, help="Description for task creation.")
 @click.option("--plan", default=None, help="Implementation plan for task create/edit.")
 @click.option("--append-plan", multiple=True, help="Append text to the implementation plan.")
 @click.option("--clear-plan", is_flag=True, help="Clear the implementation plan section.")
@@ -58,7 +58,13 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
     multiple=True,
     help="Additional Definition of Done item for task creation.",
 )
-@click.option("--disable-definition-of-done-defaults", is_flag=True, help="Do not inherit project Definition of Done defaults.")
+@click.option(
+    "--disable-definition-of-done-defaults",
+    "--no-dod-defaults",
+    "disable_definition_of_done_defaults",
+    is_flag=True,
+    help="Do not inherit project Definition of Done defaults.",
+)
 @click.option("--dep", "--dependency", "dependencies", multiple=True, help="Task dependency id for task create/edit.")
 @click.option("-a", "--assignee", "assignees", multiple=True, help="Task assignee for create/edit/list.")
 @click.option("-l", "--label", "labels", multiple=True, help="Task label for create/edit/list.")

@@ -122,6 +122,15 @@ def test_agent_critical_inventory_tracks_document_path_type_and_tags_surface():
     assert "--tags <tags>" in by_name["cli:doc-update"].expected
 
 
+def test_agent_critical_inventory_tracks_task_cli_alias_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "-d <text>" in by_name["cli:task-create"].expected
+    assert "-s <status>" in by_name["cli:task-create"].expected
+    assert "--no-dod-defaults" in by_name["cli:task-create"].expected
+
+
 def test_agent_critical_inventory_has_fixture_coverage():
     inventory = load_builtin_inventory()
     manifest = load_oracle_manifest(MANIFEST_PATH)
