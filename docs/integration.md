@@ -47,6 +47,13 @@ backlog-py --cwd /path/to/project board export Backlog.md --force --export-versi
 backlog-py --cwd /path/to/project board export --readme --export-version v1.45.1
 ```
 
+The compatibility report is read-only and does not need a project path:
+
+```bash
+backlog-py compat status
+backlog-py compat status --json
+```
+
 The module entry point is equivalent:
 
 ```bash
@@ -104,6 +111,12 @@ project or a directory inside it. This keeps the server stateless and avoids a
 global mutable working directory.
 
 ## Validation For Consumers
+
+For a quick machine-readable inventory check before deeper validation:
+
+```bash
+backlog-py compat status --json
+```
 
 Before switching a project to `backlog-md-py`, run at least:
 
