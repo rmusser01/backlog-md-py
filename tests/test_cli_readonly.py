@@ -49,6 +49,7 @@ def test_top_level_help_includes_readonly_commands():
 
     assert result.exit_code == 0
     assert "--cwd" in result.output
+    assert "compat" in result.output
     assert "task" in result.output
     assert "search" in result.output
     assert "board" in result.output
@@ -184,6 +185,27 @@ def test_config_list_outputs_safe_defaults():
     assert "projectName: basic-fixture" in result.output
     assert "autoCommit: false" in result.output
     assert "remoteOperations: false" in result.output
+
+
+def test_compat_status_outputs_cutover_summary():
+    result = _invoke("compat", "status")
+
+    assert result.exit_code == 0
+    assert "agentCutoverReady: true" in result.output
+    assert "implemented: 44" in result.output
+    assert "deferred: 8" in result.output
+    assert "total: 52" in result.output
+    assert "browser: 0 implemented, 1 deferred, 1 total" in result.output
+    assert "git: 0 implemented, 3 deferred, 3 total" in result.output
+
+
+def test_compat_status_json_outputs_deferred_items():
+    result = _invoke("compat", "status", "--json")
+
+    assert result.exit_code == 0
+    assert '"agent_cutover_ready": true' in result.output
+    assert '"browser:kanban-drag-drop"' in result.output
+    assert '"reason": "Browser UI parity is tracked in the browser deferral milestone."' in result.output
 
 
 def test_task_list_plain_filters_by_metadata(tmp_path):

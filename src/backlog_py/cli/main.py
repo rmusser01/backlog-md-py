@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
 
 from backlog_py import __version__
+from backlog_py.compat.inventory import load_builtin_inventory
+from backlog_py.compat.report import build_compatibility_report
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
@@ -293,6 +296,37 @@ def cleanup_command(ctx: click.Context) -> None:
     count = len(done_tasks)
     noun = "task" if count == 1 else "tasks"
     click.echo(f"Moved {count} completed {noun} to backlog/completed.")
+
+
+@main.group("compat")
+def compat_group() -> None:
+    """Inspect Backlog.md compatibility coverage."""
+
+
+@compat_group.command("status")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+def compat_status_command(as_json: bool) -> None:
+    """Print implemented and deferred compatibility coverage."""
+    report = build_compatibility_report(load_builtin_inventory())
+    if as_json:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+        return
+
+    summary = report["summary"]
+    click.echo(f"agentCutoverReady: {_bool_text(report['agent_cutover_ready'])}")
+    click.echo(f"implemented: {summary['implemented']}")
+    click.echo(f"deferred: {summary['deferred']}")
+    click.echo(f"total: {summary['total']}")
+    click.echo("categories:")
+    for category, counts in report["categories"].items():
+        click.echo(
+            f"  {category}: {counts['implemented']} implemented, "
+            f"{counts['deferred']} deferred, {counts['total']} total"
+        )
+    if report["deferred_items"]:
+        click.echo("deferredItems:")
+        for item in report["deferred_items"]:
+            click.echo(f"  - {item['name']}: {item['reason']}")
 
 
 @main.group("config")

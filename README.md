@@ -33,6 +33,13 @@ backlog-py --cwd /path/to/project task list --priority high -a codex -l implemen
 python -m backlog_py --cwd /path/to/project board
 ```
 
+Check the built-in cutover inventory without mutating a project:
+
+```bash
+backlog-py compat status
+backlog-py compat status --json
+```
+
 See `docs/integration.md` for CLI, Python helper, and MCP integration notes.
 
 ## Optional Orchestration Metadata
