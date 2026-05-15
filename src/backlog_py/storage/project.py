@@ -63,9 +63,11 @@ def _backlog_dir_for_root_config(root: Path, config_path: Path) -> Path:
     if not isinstance(raw, dict):
         raise ValueError(f"Backlog config must contain a mapping: {config_path}")
 
-    configured = raw.get("backlogDirectory", raw.get("backlog_directory", "backlog"))
-    if not isinstance(configured, str):
-        raise ValueError(f"Backlog config value backlogDirectory must be a string: {config_path}")
+    configured = raw.get("backlogDirectory", raw.get("backlog_directory"))
+    if configured is None:
+        return root / "backlog"
+    if not isinstance(configured, str) or not configured.strip():
+        raise ValueError(f"Backlog config value backlogDirectory must be a non-empty string: {config_path}")
 
     relative_path = Path(configured)
     if relative_path.is_absolute():

@@ -49,6 +49,51 @@ def test_discovers_root_config_file(tmp_path):
     assert project.config.project_name == "root-demo"
 
 
+def test_discovers_custom_backlog_directory_from_root_config(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text(
+        "projectName: custom-demo\nbacklogDirectory: work/backlog\n",
+        encoding="utf-8",
+    )
+
+    project = discover_project(tmp_path)
+
+    assert project.root == tmp_path
+    assert project.backlog_dir == tmp_path / "work" / "backlog"
+    assert project.config_path == tmp_path / "backlog.config.yml"
+    assert project.config.project_name == "custom-demo"
+
+
+def test_discovers_custom_backlog_directory_from_snake_case_root_config(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text(
+        "project_name: custom-demo\nbacklog_directory: work/backlog\n",
+        encoding="utf-8",
+    )
+
+    project = discover_project(tmp_path)
+
+    assert project.backlog_dir == tmp_path / "work" / "backlog"
+
+
+def test_rejects_absolute_backlog_directory_in_root_config(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text(
+        "projectName: custom-demo\nbacklogDirectory: /tmp/backlog\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="project-relative"):
+        discover_project(tmp_path)
+
+
+def test_rejects_empty_backlog_directory_in_root_config(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text(
+        "projectName: custom-demo\nbacklogDirectory: ''\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="non-empty string"):
+        discover_project(tmp_path)
+
+
 def test_discovers_dot_backlog_config(tmp_path):
     (tmp_path / ".backlog").mkdir()
     (tmp_path / ".backlog" / "config.yml").write_text(
