@@ -46,8 +46,15 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> -d <text> -s <status> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain",
+            "backlog task create <title> --draft -d <text> -s <status> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain",
         ),
+        _golden(
+            "cli:draft-create",
+            "CLI-INSTRUCTIONS.md",
+            "backlog draft create <title> -d <text> -a <assignee> -l <label>",
+        ),
+        _golden("cli:draft-list", "CLI-INSTRUCTIONS.md", "backlog draft list --plain"),
+        _golden("cli:draft-view", "CLI-INSTRUCTIONS.md", "backlog draft view <id> --plain"),
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",

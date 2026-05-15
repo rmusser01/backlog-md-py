@@ -28,6 +28,15 @@ fixtures:
   - name: "cli:task-create"
     command: ["backlog", "task", "create", "Temporary smoke task", "-d", "Created through task aliases", "-s", "To Do", "--parent", "1", "--ordinal", "1000", "--final-summary", "Created summary", "--no-dod-defaults", "--plain"]
     agent_critical: true
+  - name: "cli:draft-create"
+    command: ["backlog", "draft", "create", "Spike GraphQL", "-d", "Explore schema.", "-l", "research"]
+    agent_critical: true
+  - name: "cli:draft-list"
+    command: ["backlog", "draft", "list", "--plain"]
+    agent_critical: true
+  - name: "cli:draft-view"
+    command: ["backlog", "draft", "view", "draft-1", "--plain"]
+    agent_critical: true
   - name: "cli:task-edit"
     command: ["backlog", "task", "edit", "TASK-1", "--ordinal", "2000", "--append-notes", "Updated from fixture", "--plain"]
     agent_critical: true

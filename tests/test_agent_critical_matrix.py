@@ -16,6 +16,9 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:board-export",
     "cli:config-list",
     "cli:task-create",
+    "cli:draft-create",
+    "cli:draft-list",
+    "cli:draft-view",
     "cli:task-edit",
     "cli:task-archive",
     "cli:cleanup",
@@ -131,7 +134,17 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
 
     assert "-d <text>" in by_name["cli:task-create"].expected
     assert "-s <status>" in by_name["cli:task-create"].expected
+    assert "--draft" in by_name["cli:task-create"].expected
     assert "--no-dod-defaults" in by_name["cli:task-create"].expected
+
+
+def test_agent_critical_inventory_tracks_draft_cli_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "draft create <title>" in by_name["cli:draft-create"].expected
+    assert "draft list --plain" in by_name["cli:draft-list"].expected
+    assert "draft view <id> --plain" in by_name["cli:draft-view"].expected
 
 
 def test_agent_critical_inventory_tracks_decision_create_surface():

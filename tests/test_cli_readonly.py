@@ -249,9 +249,9 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 45" in result.output
+    assert "implemented: 48" in result.output
     assert "deferred: 8" in result.output
-    assert "total: 53" in result.output
+    assert "total: 56" in result.output
     assert "browser: 0 implemented, 1 deferred, 1 total" in result.output
     assert "git: 0 implemented, 3 deferred, 3 total" in result.output
 

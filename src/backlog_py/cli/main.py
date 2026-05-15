@@ -11,6 +11,7 @@ from backlog_py.compat.report import build_compatibility_report
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentRecord, DocumentService
+from backlog_py.core.drafts import DraftService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
@@ -37,6 +38,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.argument("args", nargs=-1)
 @click.option("--plain", is_flag=True, help="Print plain text output.")
 @click.option("--id", "task_id", default=None, help="Task id for task creation.")
+@click.option("--draft", is_flag=True, help="Create the task as a draft.")
 @click.option("--title", default=None, help="Replacement task title for task edit.")
 @click.option("-s", "--status", default=None, help="Task status for create/edit/list.")
 @click.option("-d", "--desc", "--description", "description", default=None, help="Description for task creation.")
@@ -93,6 +95,7 @@ def task_command(
     args: tuple[str, ...],
     plain: bool,
     task_id: str | None,
+    draft: bool,
     title: str | None,
     status: str | None,
     description: str | None,
@@ -138,6 +141,31 @@ def task_command(
             raise click.UsageError("Usage: task create TITLE")
         if clear_milestone:
             raise click.UsageError("Cannot use --clear-milestone with task create.")
+        if draft:
+            task_record = _draft_service(ctx).create_draft(
+                title=args[1],
+                draft_id=task_id,
+                description=description or "",
+                plan=plan or "",
+                notes=notes or "",
+                final_summary=final_summary or "",
+                acceptance_criteria=acceptance_criteria,
+                definition_of_done=definition_of_done or None,
+                definition_of_done_add=definition_of_done_add,
+                disable_definition_of_done_defaults=disable_definition_of_done_defaults,
+                dependencies=dependencies,
+                assignees=assignees,
+                labels=labels,
+                priority=priority,
+                milestone=milestone,
+                ordinal=_parse_ordinal(ordinal),
+                parent_task_id=parent_task_id,
+                references=references,
+                documentation=documentation,
+                modified_files=modified_files,
+            )
+            click.echo(_format_task_line(task_record, plain=plain))
+            return
         task_record = _mutable_repository(ctx).create_task(
             title=args[1],
             task_id=task_id,
@@ -489,6 +517,66 @@ def document_update_command(
     click.echo(_format_document_line(document))
 
 
+@main.group("draft")
+def draft_group() -> None:
+    """Create and inspect Backlog.md drafts."""
+
+
+@draft_group.command("list")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def draft_list_command(ctx: click.Context, plain: bool) -> None:
+    """List draft tasks."""
+    drafts = _draft_service(ctx).list_drafts()
+    if not drafts:
+        click.echo("No drafts found.")
+        return
+    if plain:
+        click.echo("Drafts:")
+        for draft in drafts:
+            click.echo(f"  {draft.id} - {draft.title}")
+        return
+    for draft in drafts:
+        click.echo(_format_task_line(draft, plain=False))
+
+
+@draft_group.command("create")
+@click.argument("title")
+@click.option("-d", "--desc", "--description", "description", default="", help="Description for draft creation.")
+@click.option("-a", "--assignee", "assignees", multiple=True, help="Draft assignee.")
+@click.option("-l", "--label", "labels", multiple=True, help="Draft label.")
+@click.option("-s", "--status", default=None, help="Accepted for upstream CLI compatibility; drafts remain Draft.")
+@click.pass_context
+def draft_create_command(
+    ctx: click.Context,
+    title: str,
+    description: str,
+    assignees: tuple[str, ...],
+    labels: tuple[str, ...],
+    status: str | None,
+) -> None:
+    """Create a draft task."""
+    _ = status
+    draft = _draft_service(ctx).create_draft(
+        title=title,
+        description=description,
+        assignees=assignees,
+        labels=labels,
+    )
+    click.echo(f"Created draft {draft.id}")
+    click.echo(f"File: {draft.path}")
+
+
+@draft_group.command("view")
+@click.argument("draft_id")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def draft_view_command(ctx: click.Context, draft_id: str, plain: bool) -> None:
+    """Print a draft by id."""
+    draft = _draft_service(ctx).view_draft(draft_id)
+    click.echo(_format_task_detail(draft, plain=plain))
+
+
 @main.group("decision")
 def decision_group() -> None:
     """Create and inspect Backlog.md decisions."""
@@ -572,6 +660,10 @@ def _mutable_repository(ctx: click.Context) -> MutableRepository:
 
 def _document_service(ctx: click.Context) -> DocumentService:
     return DocumentService(_project(ctx))
+
+
+def _draft_service(ctx: click.Context) -> DraftService:
+    return DraftService(_project(ctx))
 
 
 def _decision_service(ctx: click.Context) -> DecisionService:
