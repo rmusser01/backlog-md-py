@@ -85,6 +85,9 @@ class ReadOnlyRepository:
                 return task
         raise KeyError(f"Task not found: {task_id}")
 
+    def list_completed_tasks(self) -> list[TaskRecord]:
+        return sorted(self._load_completed_tasks(), key=_task_record_sort_key)
+
     def search_tasks(
         self,
         query: str = "",
@@ -97,7 +100,7 @@ class ReadOnlyRepository:
         parent_task_id: str | None = None,
         modified_files: str | Sequence[str] | None = None,
     ) -> list[TaskRecord]:
-        tasks = [*self.list_tasks(), *self._load_completed_tasks()]
+        tasks = [*self.list_tasks(), *self.list_completed_tasks()]
         return [
             task
             for task in tasks

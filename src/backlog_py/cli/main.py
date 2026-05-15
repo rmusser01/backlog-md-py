@@ -349,6 +349,26 @@ def board_command(
             click.echo(f"  {_format_task_line(task_record, plain=True)}")
 
 
+@main.command("overview")
+@click.pass_context
+def overview_command(ctx: click.Context) -> None:
+    """Print a deterministic project summary."""
+    project = _project(ctx)
+    repository = _repository(ctx)
+    board = repository.board()
+    active_count = sum(len(tasks) for tasks in board.values())
+    completed_count = len(repository.list_completed_tasks())
+
+    click.echo(f"Project: {project.config.project_name}")
+    click.echo(f"Active tasks: {active_count}")
+    click.echo(f"Completed tasks: {completed_count}")
+    click.echo(f"Total tasks: {active_count + completed_count}")
+    click.echo("")
+    click.echo("Statuses:")
+    for status, tasks in board.items():
+        click.echo(f"  {status}: {len(tasks)}")
+
+
 @main.command("cleanup")
 @click.pass_context
 def cleanup_command(ctx: click.Context) -> None:

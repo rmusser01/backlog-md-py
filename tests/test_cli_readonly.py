@@ -56,6 +56,7 @@ def test_top_level_help_includes_readonly_commands():
     assert "task" in result.output
     assert "search" in result.output
     assert "board" in result.output
+    assert "overview" in result.output
     assert "config" in result.output
 
 
@@ -181,6 +182,20 @@ def test_board_outputs_status_grouping():
     assert "Done" in result.output
 
 
+def test_overview_outputs_plain_project_summary():
+    result = _invoke("overview")
+
+    assert result.exit_code == 0
+    assert "Project: basic-fixture" in result.output
+    assert "Active tasks: 1" in result.output
+    assert "Completed tasks: 0" in result.output
+    assert "Total tasks: 1" in result.output
+    assert "Statuses:" in result.output
+    assert "  To Do: 0" in result.output
+    assert "  In Progress: 1" in result.output
+    assert "  Done: 0" in result.output
+
+
 def test_board_export_writes_markdown_report(tmp_path):
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
@@ -249,9 +264,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 51" in result.output
+    assert "implemented: 52" in result.output
     assert "deferred: 8" in result.output
-    assert "total: 59" in result.output
+    assert "total: 60" in result.output
+    assert "cli: 30 implemented, 3 deferred, 33 total" in result.output
     assert "browser: 0 implemented, 1 deferred, 1 total" in result.output
     assert "git: 0 implemented, 3 deferred, 3 total" in result.output
 

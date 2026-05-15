@@ -13,6 +13,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:task-view-plain",
     "cli:search-plain",
     "cli:board",
+    "cli:overview",
     "cli:board-export",
     "cli:config-list",
     "cli:task-create",
@@ -117,6 +118,13 @@ def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():
     assert "--limit <number>" in by_name["cli:search-plain"].expected
     assert "--type <type>" in by_name["cli:search-plain"].expected
     assert "tasks, documents, and decisions" in by_name["cli:search-plain"].expected
+
+
+def test_agent_critical_inventory_tracks_overview_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert by_name["cli:overview"].expected == "backlog overview"
 
 
 def test_agent_critical_inventory_tracks_document_path_type_and_tags_surface():

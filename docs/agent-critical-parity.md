@@ -15,6 +15,7 @@ do not block the first local-file agent cutover candidate.
 | cli:task-view-plain | implemented | backlog task <id> --plain | cli:task-view-plain |
 | cli:search-plain | implemented | backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered search returns tasks, documents, and decisions | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
+| cli:overview | implemented | backlog overview | cli:overview |
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |
 | cli:config-list | implemented | backlog config list | cli:config-list |
 | cli:task-create | implemented | backlog task create <title> --draft -d <text> -s <status> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain | cli:task-create |

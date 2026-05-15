@@ -22,6 +22,9 @@ fixtures:
   - name: "cli:board"
     command: ["backlog", "board"]
     agent_critical: true
+  - name: "cli:overview"
+    command: ["backlog", "overview"]
+    agent_critical: true
   - name: "cli:board-export"
     command: ["backlog", "board", "export", "status.md", "--force", "--export-version", "v1.45.1"]
     agent_critical: true
