@@ -40,6 +40,13 @@ places where the design needed to be stricter before implementation:
 - Persistent caching and SQLite are not required for the first process-count
   fix. v1 should keep read caching minimal or disabled, and SQLite should remain
   a later derived index.
+- The repo has write paths outside the MCP tool registry, including drafts,
+  decisions, cleanup, board export, init, and agent-instruction updates. The
+  lock design must cover those paths explicitly rather than assuming MCP-only
+  coverage is enough.
+- Some existing write paths still use direct `Path.write_text`. The singleton
+  work should convert project mutation writes to the existing atomic-write style
+  where practical, not rely on daemon serialization alone.
 
 ## Goals
 
@@ -99,6 +106,10 @@ The existing `backlog-py-mcp` stdio server remains for compatibility and for
 clients that cannot connect to a shared endpoint. It should be documented as a
 compatibility mode, not as the recommended multi-agent path.
 
+Add `backlog-py daemon run --foreground` for development and tests. `daemon
+start` should be the background process manager; `daemon run --foreground` should
+run the same service without forking so tests can control lifecycle directly.
+
 ## Transport Compatibility Gate
 
 The transport is the riskiest assumption and should be proven before broader
@@ -152,6 +163,39 @@ The lock wrapper should sit above the mutation registry where possible. If a
 mutation is only exposed through CLI code today, implementation should extract a
 shared service boundary instead of reimplementing the command in the daemon.
 
+## Mutation Lock Coverage
+
+Before implementation, maintain a checked inventory of project write surfaces and
+make every entry either lock-covered or explicitly out of scope.
+
+Known project mutation surfaces in the current codebase:
+
+- `init_project`: creates project/backlog directories and config. This runs
+  before normal project discovery, so it needs a root-path init lock derived from
+  the target directory rather than the discovered project lock.
+- `MutableRepository`: task create, edit, archive, complete, and cleanup's
+  complete-Done loop.
+- `DraftService`: draft create, promote, demote, and archive.
+- `DocumentService`: document create/update, including moves.
+- `DecisionService`: decision create.
+- `MilestoneService`: add, rename, remove, archive, and task-reference rewrites
+  from `--update-tasks` or `--clear-tasks`.
+- Config writers: `config set` and Definition of Done defaults upsert.
+- Agent instruction writer: updates `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and
+  GitHub Copilot instructions.
+- Board export writers: generated `Backlog.md` exports and README board marker
+  updates.
+
+MCP currently exposes only a subset of those writes. That is acceptable for v1
+singleton MCP behavior, but the shared lock must still wrap the CLI paths because
+agents and humans can keep using `backlog-py` directly while the daemon is
+running.
+
+Any write path that currently uses direct `Path.write_text` should either move to
+the existing atomic write helper or document why atomic replacement is not safe
+for that target. The first implementation plan should include board export and
+README board updates in this audit.
+
 ## Locking
 
 Use one cross-process filesystem lock per resolved project root. The lock key is
@@ -168,6 +212,9 @@ Recommended shape:
 - The implementation uses a small cross-platform file-lock abstraction. On macOS
   and Linux this can use `fcntl`; on Windows it should use an equivalent tested
   mechanism or a minimal dependency with clear justification.
+- The lock file is advisory coordination state. If the process crashes, OS-level
+  lock release is authoritative; leftover metadata must be treated as diagnostic
+  information, not as proof that the project is still locked.
 
 Behavior:
 
@@ -190,6 +237,31 @@ need.
 The official Node/native Backlog.md binary will not honor this Python lock. The
 local migration must stop the official MCP server before relying on singleton
 write safety.
+
+## State Directory and Runtime Files
+
+Do not leave state-directory selection open during implementation. Use a small
+stdlib helper with an override instead of adding a dependency only for platform
+paths.
+
+Resolution order:
+
+1. `BACKLOG_PY_STATE_DIR`, if set.
+2. macOS: `~/Library/Application Support/backlog-md-py`.
+3. Linux and other XDG environments: `$XDG_STATE_HOME/backlog-md-py` or
+   `~/.local/state/backlog-md-py`.
+4. Windows: `%LOCALAPPDATA%\backlog-md-py` if available, otherwise
+   `~/AppData/Local/backlog-md-py`.
+
+Keep separate subdirectories for:
+
+- `runtime/`: daemon PID, endpoint, token, and health files.
+- `locks/`: daemon-level and per-project lock files.
+- `logs/`: daemon stdout/stderr logs.
+
+Runtime files containing token material must be created with user-only
+permissions where the platform supports it. State directory paths should be
+shown in `daemon status` so users can inspect and clean them without searching.
 
 ## Caching
 
@@ -269,6 +341,8 @@ The daemon should be easy to inspect and safe to recover:
 - Daemon stdout/stderr should be captured in a log file shown by `daemon status`.
 - `daemon stop` should attempt graceful shutdown first, wait for active writes
   unless forced, then report if the process is still alive.
+- `daemon status --json` should exist for tests and future config helpers; human
+  status output can stay concise.
 
 Startup should use a daemon-level lock around runtime-file creation so two
 simultaneous `daemon start` calls cannot both win.
@@ -307,17 +381,27 @@ Add tests before implementation code for each layer:
   path and does not start a second Backlog service process.
 - Runtime-file tests for healthy daemon discovery and stale PID cleanup.
 - Daemon start tests for duplicate start prevention and occupied-port failure.
+- State-directory tests for env override, macOS/Linux/Windows fallback behavior,
+  and restrictive runtime-file permissions where supported.
 - Filesystem lock tests for same-project serialization and independent-project
   concurrency.
+- Crash/stale-metadata tests proving leftover lock metadata does not block new
+  writes after the OS lock is released.
 - Cross-entrypoint lock tests proving daemon writes and direct `backlog-py` CLI
   writes serialize against each other.
+- Mutation-inventory tests or static checks ensuring new CLI/MCP write surfaces
+  are categorized as lock-covered or deliberately out of scope.
 - CLI tests for `daemon status`, `daemon start`, `daemon ensure`, and
   `daemon stop` using a fake service runner where possible.
+- Foreground daemon tests using `backlog-py daemon run --foreground` to avoid
+  brittle background-process control in most tests.
 - MCP registration tests for the endpoint-backed server path.
 - Integration smoke that starts one daemon and runs multiple simulated clients
   against the same project.
 - Regression tests proving concurrent writes serialize and produce valid
   Backlog.md files.
+- Regression tests proving board export/README updates are lock-covered and use
+  safe write behavior.
 - Security tests for loopback binding, runtime-file permissions, and token
   enforcement where the chosen transport supports it.
 
@@ -340,8 +424,12 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 - Same-project writes serialize across daemon-mediated MCP calls.
 - Same-project writes serialize across daemon-mediated MCP calls and direct
   `backlog-py` CLI mutations.
+- Every current project write surface is categorized as lock-covered or
+  explicitly out of scope with rationale.
 - Different-project writes can proceed concurrently.
 - The daemon can be inspected and stopped with clear status output.
+- `daemon status --json` reports endpoint, PID, log path, state directory, and
+  active lock metadata without leaking token material.
 - Markdown remains the only canonical project state in v1.
 - SQLite, if added later, is a disposable derived index with rebuild semantics.
 
@@ -350,16 +438,20 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 1. Land this reviewed design and get user approval.
 2. Write a staged implementation plan.
 3. Run the transport compatibility spike and record the chosen transport.
-4. Implement the shared project filesystem lock and wrap CLI mutation paths.
-5. Implement daemon lifecycle, runtime state, logs, and status commands.
-6. Add the endpoint-backed MCP server or stdio compatibility shim based on the
+4. Add the state-directory helper, runtime-file model, and foreground daemon run
+   mode.
+5. Implement the shared project filesystem lock and wrap CLI mutation paths.
+6. Audit project write paths and convert direct project writes to atomic helpers
+   where practical.
+7. Implement daemon lifecycle, runtime state, logs, and status commands.
+8. Add the endpoint-backed MCP server or stdio compatibility shim based on the
    transport spike.
-7. Wrap daemon mutation dispatch with the shared lock.
-8. Add local Codex migration documentation and an explicit config helper.
-9. Validate with multi-client smoke and process-count checks.
-10. Switch the local Codex config from the Node/native Backlog MCP command to the
+9. Wrap daemon mutation dispatch with the shared lock.
+10. Add local Codex migration documentation and an explicit config helper.
+11. Validate with multi-client smoke and process-count checks.
+12. Switch the local Codex config from the Node/native Backlog MCP command to the
     singleton path only after validation.
-11. Verify one Python daemon process and no official Backlog.md binary children.
+13. Verify one Python daemon process and no official Backlog.md binary children.
 
 ## Open Questions
 
@@ -368,6 +460,5 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 - If direct URL configuration works, what default loopback port should be used?
 - If direct URL configuration does not work, what is the thinnest acceptable
   stdio compatibility shim?
-- What exact state directory should be used on macOS, Linux, and Windows?
 - Should read calls ever block behind active writes in v1, or should that remain
   an opt-in after profiling?
