@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import yaml
+
 from backlog_py.core.models import BacklogProject
+from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 from backlog_py.storage.config import load_config
 
 
@@ -42,7 +45,7 @@ def _find_project_paths(start: Path) -> tuple[Path, Path, Path]:
 def _config_for_root(root: Path) -> tuple[Path, Path, Path] | None:
     root_config = root / "backlog.config.yml"
     if root_config.is_file():
-        return root, root / "backlog", root_config
+        return root, _backlog_dir_for_root_config(root, root_config), root_config
 
     backlog_config = root / "backlog" / "config.yml"
     if backlog_config.is_file():
@@ -53,3 +56,21 @@ def _config_for_root(root: Path) -> tuple[Path, Path, Path] | None:
         return root, root / ".backlog", dot_backlog_config
 
     return None
+
+
+def _backlog_dir_for_root_config(root: Path, config_path: Path) -> Path:
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Backlog config must contain a mapping: {config_path}")
+
+    configured = raw.get("backlogDirectory", raw.get("backlog_directory", "backlog"))
+    if not isinstance(configured, str):
+        raise ValueError(f"Backlog config value backlogDirectory must be a string: {config_path}")
+
+    relative_path = Path(configured)
+    if relative_path.is_absolute():
+        raise ValueError(f"Backlog config value backlogDirectory must be project-relative: {config_path}")
+    try:
+        return assert_path_within_base(root, root / relative_path)
+    except PathContainmentError as exc:
+        raise ValueError(str(exc)) from exc

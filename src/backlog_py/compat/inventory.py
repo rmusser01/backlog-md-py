@@ -25,6 +25,7 @@ class CompatibilityInventory:
 def load_builtin_inventory() -> CompatibilityInventory:
     items = (
         _golden("cli:help", "CLI-INSTRUCTIONS.md", "backlog --help"),
+        _golden("cli:init", "CLI-INSTRUCTIONS.md", "backlog init [project-name] --defaults"),
         _golden(
             "cli:task-list-plain",
             "CLI-INSTRUCTIONS.md",

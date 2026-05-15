@@ -7,6 +7,9 @@ fixtures:
   - name: "cli:help"
     command: ["backlog", "--help"]
     agent_critical: true
+  - name: "cli:init"
+    command: ["backlog", "init", "Demo Project", "--defaults"]
+    agent_critical: true
   - name: "cli:task-list-plain"
     command: ["backlog", "task", "list", "--parent", "1", "--plain"]
     agent_critical: true
