@@ -40,6 +40,9 @@ places where the design needed to be stricter before implementation:
 - Persistent caching and SQLite are not required for the first process-count
   fix. v1 should keep read caching minimal or disabled, and SQLite should remain
   a later derived index.
+- The singleton transport must not use an MCP SDK. Implement the needed MCP
+  JSON-RPC surface directly, using `tldw_server2`'s custom MCP implementation as
+  a reference for protocol shape where useful.
 - The repo has write paths outside the MCP tool registry, including drafts,
   decisions, cleanup, board export, init, and agent-instruction updates. The
   lock design must cover those paths explicitly rather than assuming MCP-only
@@ -57,6 +60,8 @@ places where the design needed to be stricter before implementation:
 - Serialize mutations per Backlog project while allowing concurrent reads.
 - Use the same project-scoped write lock for daemon requests and direct
   `backlog-py` CLI mutations.
+- Avoid an MCP SDK dependency in the daemon and in the final recommended MCP
+  entry point.
 - Keep the existing CLI and stdio MCP entry point available for compatibility.
 - Provide operational commands to inspect, start, stop, and troubleshoot the
   singleton.
@@ -96,34 +101,63 @@ Core components:
 - `backlog-py daemon stop`: shut down the singleton cleanly.
 - Runtime state file: store PID, endpoint, startup token id, start time, package
   version, and log path under a user cache/state directory.
-- MCP endpoint: expose existing resources and tools over a shared local transport.
+- SDK-free MCP endpoint: expose existing resources and tools through a small
+  local JSON-RPC protocol adapter.
 - Project lock manager: coordinate writes per resolved Backlog project root using
   a cross-process filesystem lock.
 - In-memory cache: optional project-scoped read cache with conservative
   invalidation after daemon-mediated writes.
 
-The existing `backlog-py-mcp` stdio server remains for compatibility and for
-clients that cannot connect to a shared endpoint. It should be documented as a
-compatibility mode, not as the recommended multi-agent path.
+The existing `backlog-py-mcp` command name remains for compatibility, but its
+implementation should be replaced with an SDK-free stdio adapter or daemon shim.
+The final recommended path must not require the Python `mcp` package.
 
 Add `backlog-py daemon run --foreground` for development and tests. `daemon
 start` should be the background process manager; `daemon run --foreground` should
 run the same service without forking so tests can control lifecycle directly.
 
-## Transport Compatibility Gate
+## SDK-Free MCP Protocol Adapter
 
-The transport is the riskiest assumption and should be proven before broader
-implementation.
+The transport is the riskiest assumption and must be implemented without an MCP
+SDK.
+
+Use `tldw_server2/tldw_Server_API/app/core/MCP_unified/protocol.py`,
+`server.py`, and `api/v1/endpoints/mcp_unified_endpoint.py` as reference
+material, not as a direct dependency. The useful pieces to adapt are:
+
+- JSON-RPC 2.0 request and response envelopes,
+- method routing for `initialize`, `ping`, `tools/list`, `tools/call`,
+  `resources/list`, and `resources/read`,
+- batch request handling,
+- session id handling for HTTP-style clients,
+- consistent error objects for parse errors, invalid requests, missing methods,
+  invalid params, and internal errors.
+
+Avoid copying tldw_server's AuthNZ, RBAC, Redis idempotency, module registry,
+metrics, governance, and database integrations. This project needs a small local
+protocol layer over the existing `backlog_py.mcp.tools` and resource registry.
+
+Suggested backlog-md-py modules:
+
+- `backlog_py.mcp.protocol`: plain-Python JSON-RPC request parsing, response
+  rendering, method dispatch, and batch handling.
+- `backlog_py.mcp.catalog`: SDK-free resource/tool metadata built from the
+  existing registry.
+- `backlog_py.mcp.stdio_server`: newline-delimited stdio JSON-RPC server for
+  compatibility and optional daemon shim mode.
+- `backlog_py.mcp.http_server`: loopback HTTP JSON-RPC endpoint for the singleton
+  daemon, using stdlib or a small existing dependency only if justified.
 
 The first implementation stage should answer these questions with a small spike:
 
-- Can Codex connect to a loopback MCP endpoint served by the installed Python MCP
-  SDK using HTTP/SSE or streamable HTTP?
+- Can Codex connect to a loopback SDK-free HTTP JSON-RPC endpoint?
 - Can the configured endpoint be static enough for Codex configuration, or does
   it need a local discovery shim?
 - Does a second Codex session connect to the same daemon without starting a new
   Backlog server process?
 - Can the endpoint require a local token without breaking MCP negotiation?
+- If direct HTTP does not work, can an SDK-free `backlog-py-mcp` stdio shim
+  forward each request to the singleton daemon while preserving MCP behavior?
 
 Preferred result: a loopback-only MCP endpoint on a stable configured host/port,
 for example `127.0.0.1:<configured-port>`, that Codex can reference directly.
@@ -138,7 +172,8 @@ the singleton daemon and must not instantiate repositories, parse projects, or
 perform writes locally. That still preserves one Backlog service process and one
 write-coordination point.
 
-Do not build the full daemon around an unproven transport assumption.
+Do not build the full daemon around an unproven transport assumption, and do not
+use the Python MCP SDK as a shortcut.
 
 ## Request Flow
 
@@ -378,7 +413,12 @@ rollback path, but it should not run at the same time as the singleton.
 Add tests before implementation code for each layer:
 
 - Transport spike proving the selected MCP endpoint works with the local client
-  path and does not start a second Backlog service process.
+  path without an MCP SDK and does not start a second Backlog service process.
+- Protocol tests for `initialize`, `ping`, `tools/list`, `tools/call`,
+  `resources/list`, `resources/read`, notifications, parse errors, invalid
+  params, missing methods, and batch requests.
+- Stdio tests proving `backlog-py-mcp` no longer imports or requires the Python
+  `mcp` package.
 - Runtime-file tests for healthy daemon discovery and stale PID cleanup.
 - Daemon start tests for duplicate start prevention and occupied-port failure.
 - State-directory tests for env override, macOS/Linux/Windows fallback behavior,
@@ -395,7 +435,7 @@ Add tests before implementation code for each layer:
   `daemon stop` using a fake service runner where possible.
 - Foreground daemon tests using `backlog-py daemon run --foreground` to avoid
   brittle background-process control in most tests.
-- MCP registration tests for the endpoint-backed server path.
+- MCP protocol/catalog tests for the endpoint-backed server path.
 - Integration smoke that starts one daemon and runs multiple simulated clients
   against the same project.
 - Regression tests proving concurrent writes serialize and produce valid
@@ -408,7 +448,7 @@ Add tests before implementation code for each layer:
 The final verification gate should include the existing package baseline:
 
 ```bash
-uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src -f json -o /tmp/bandit_backlog_py_daemon.json
 uv build --out-dir /tmp/backlog-md-py-daemon-dist
 uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
@@ -418,7 +458,9 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 
 - Starting the daemon twice returns the same healthy daemon instead of creating a
   duplicate service.
-- Multiple clients can call MCP tools through the singleton path.
+- Multiple clients can call MCP tools through the singleton path without the
+  Python MCP SDK.
+- `backlog-py-mcp` remains available as an SDK-free compatibility command.
 - Multiple Codex sessions no longer spawn additional
   `backlog.md-darwin-arm64/backlog mcp start` children after migration.
 - Same-project writes serialize across daemon-mediated MCP calls.
@@ -437,15 +479,16 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 
 1. Land this reviewed design and get user approval.
 2. Write a staged implementation plan.
-3. Run the transport compatibility spike and record the chosen transport.
+3. Run the SDK-free transport compatibility spike and record the chosen
+   transport.
 4. Add the state-directory helper, runtime-file model, and foreground daemon run
    mode.
 5. Implement the shared project filesystem lock and wrap CLI mutation paths.
 6. Audit project write paths and convert direct project writes to atomic helpers
    where practical.
 7. Implement daemon lifecycle, runtime state, logs, and status commands.
-8. Add the endpoint-backed MCP server or stdio compatibility shim based on the
-   transport spike.
+8. Add the SDK-free endpoint-backed MCP server or stdio compatibility shim based
+   on the transport spike.
 9. Wrap daemon mutation dispatch with the shared lock.
 10. Add local Codex migration documentation and an explicit config helper.
 11. Validate with multi-client smoke and process-count checks.
@@ -455,10 +498,10 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 
 ## Open Questions
 
-- Which MCP endpoint transport is best supported by the currently installed MCP
-  SDK version and Codex client path?
+- Which SDK-free MCP endpoint transport is best supported by the Codex client
+  path?
 - If direct URL configuration works, what default loopback port should be used?
 - If direct URL configuration does not work, what is the thinnest acceptable
-  stdio compatibility shim?
+  SDK-free stdio compatibility shim?
 - Should read calls ever block behind active writes in v1, or should that remain
   an opt-in after profiling?
