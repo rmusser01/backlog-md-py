@@ -8,6 +8,7 @@ import click
 from backlog_py import __version__
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
+from backlog_py.core.agents import AgentInstructionError, update_agent_instruction_files
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentRecord, DocumentService
@@ -385,6 +386,21 @@ def cleanup_command(ctx: click.Context) -> None:
     count = len(done_tasks)
     noun = "task" if count == 1 else "tasks"
     click.echo(f"Moved {count} completed {noun} to backlog/completed.")
+
+
+@main.command("agents")
+@click.option("--update-instructions", is_flag=True, help="Update common agent instruction files.")
+@click.pass_context
+def agents_command(ctx: click.Context, update_instructions: bool) -> None:
+    """Update agent instruction files with Backlog.md workflow guidance."""
+    if not update_instructions:
+        raise click.UsageError("Usage: agents --update-instructions")
+    try:
+        updates = update_agent_instruction_files(_project(ctx))
+    except AgentInstructionError as exc:
+        raise click.ClickException(str(exc)) from exc
+    for update in updates:
+        click.echo(f"Updated {update.path_relative}")
 
 
 @main.group("compat")

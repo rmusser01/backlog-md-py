@@ -7,14 +7,14 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 54,
+        "implemented": 55,
         "deferred": 8,
-        "total": 62,
+        "total": 63,
     }
     assert report["categories"]["cli"] == {
-        "implemented": 32,
+        "implemented": 33,
         "deferred": 3,
-        "total": 35,
+        "total": 36,
     }
     assert report["categories"]["mcp"] == {
         "implemented": 22,

@@ -96,6 +96,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "ADVANCED-CONFIG.md",
             "backlog config dod-defaults-upsert [item...]",
         ),
+        _golden("cli:agents-update-instructions", "CLI-INSTRUCTIONS.md", "backlog agents --update-instructions"),
         _golden("mcp:workflow-overview", "agent-nudge.md", "backlog://workflow/overview"),
         _golden("mcp:task-workflow-alias", "agent-nudge.md", "backlog://docs/task-workflow"),
         _golden("mcp:board", "MCP tools", "task_board(project)"),

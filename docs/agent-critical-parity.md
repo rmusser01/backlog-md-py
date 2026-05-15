@@ -42,6 +42,7 @@ do not block the first local-file agent cutover candidate.
 | cli:config-set | implemented | backlog config set <key> <value> | cli:config-set |
 | cli:config-dod-defaults-get | implemented | backlog config dod-defaults-get | cli:config-dod-defaults-get |
 | cli:config-dod-defaults-upsert | implemented | backlog config dod-defaults-upsert [item...] | cli:config-dod-defaults-upsert |
+| cli:agents-update-instructions | implemented | backlog agents --update-instructions | cli:agents-update-instructions |
 | mcp:workflow-overview | implemented | backlog://workflow/overview | mcp:workflow-overview |
 | mcp:task-workflow-alias | implemented | backlog://docs/task-workflow | mcp:task-workflow-alias |
 | mcp:board | implemented | task_board(project) | mcp:board |

@@ -100,6 +100,9 @@ fixtures:
   - name: "cli:config-dod-defaults-upsert"
     command: ["backlog", "config", "dod-defaults-upsert", "Tests pass"]
     agent_critical: true
+  - name: "cli:agents-update-instructions"
+    command: ["backlog", "agents", "--update-instructions"]
+    agent_critical: true
   - name: "mcp:workflow-overview"
     resource: "backlog://workflow/overview"
     agent_critical: true

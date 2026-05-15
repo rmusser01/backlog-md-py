@@ -40,6 +40,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:config-set",
     "cli:config-dod-defaults-get",
     "cli:config-dod-defaults-upsert",
+    "cli:agents-update-instructions",
     "mcp:workflow-overview",
     "mcp:task-workflow-alias",
     "mcp:board",
@@ -169,6 +170,13 @@ def test_agent_critical_inventory_tracks_config_get_set_surface():
 
     assert by_name["cli:config-get"].expected == "backlog config get <key>"
     assert by_name["cli:config-set"].expected == "backlog config set <key> <value>"
+
+
+def test_agent_critical_inventory_tracks_agent_instruction_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert by_name["cli:agents-update-instructions"].expected == "backlog agents --update-instructions"
 
 
 def test_agent_critical_inventory_tracks_decision_create_surface():
