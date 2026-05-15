@@ -11,6 +11,7 @@ do not block the first local-file agent cutover candidate.
 | Inventory item | Status | Expected command, resource, or tool | Fixture |
 | --- | --- | --- | --- |
 | cli:help | implemented | backlog --help | cli:help |
+| cli:init | implemented | backlog init [project-name] --defaults | cli:init |
 | cli:task-list-plain | implemented | backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --parent <taskId> --plain | cli:task-list-plain |
 | cli:task-view-plain | implemented | backlog task <id> --plain | cli:task-view-plain |
 | cli:search-plain | implemented | backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered search returns tasks, documents, and decisions | cli:search-plain |

@@ -9,6 +9,7 @@ MANIFEST_PATH = Path(__file__).parent / "fixtures" / "oracle" / "manifest.yml"
 
 EXPECTED_AGENT_CRITICAL = {
     "cli:help",
+    "cli:init",
     "cli:task-list-plain",
     "cli:task-view-plain",
     "cli:search-plain",
@@ -111,6 +112,13 @@ def test_agent_critical_inventory_tracks_task_ordinal_mutation_surface():
     assert "--ordinal <number>" in by_name["cli:task-edit"].expected
     assert "ordinal=None" in by_name["mcp:task-create"].expected
     assert "ordinal=None" in by_name["mcp:task-edit"].expected
+
+
+def test_agent_critical_inventory_tracks_init_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert by_name["cli:init"].expected == "backlog init [project-name] --defaults"
 
 
 def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():

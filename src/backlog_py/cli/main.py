@@ -13,6 +13,7 @@ from backlog_py.core.board_export import export_board_to_file, update_readme_wit
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.drafts import DraftService
+from backlog_py.core.init import InitProjectError, init_project
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
@@ -38,6 +39,45 @@ from backlog_py.storage.project import discover_project
 def main(ctx: click.Context, cwd: Path | None) -> None:
     """Python compatibility clone of Backlog.md."""
     ctx.obj = {"cwd": cwd}
+
+
+@main.command("init")
+@click.argument("project_name", required=False)
+@click.option("--defaults", is_flag=True, help="Use non-interactive default settings.")
+@click.option("--backlog-dir", default="backlog", help="Project-relative backlog directory.")
+@click.option(
+    "--config-location",
+    type=click.Choice(["local", "root"], case_sensitive=False),
+    default="local",
+    help="Write config under the backlog folder or project root.",
+)
+@click.option("--agent-instructions", is_flag=True, help="Create common agent instruction files.")
+@click.pass_context
+def init_command(
+    ctx: click.Context,
+    project_name: str | None,
+    defaults: bool,
+    backlog_dir: str,
+    config_location: str,
+    agent_instructions: bool,
+) -> None:
+    """Initialize a Backlog.md project with non-interactive defaults."""
+    try:
+        result = init_project(
+            _cwd(ctx),
+            project_name=project_name,
+            backlog_dir=backlog_dir,
+            config_location=config_location,
+        )
+    except InitProjectError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Initialized Backlog.md project at {result.project.backlog_dir}")
+    if not result.config_created:
+        click.echo(f"Preserved existing config at {result.project.config_path}")
+    if agent_instructions:
+        for update in update_agent_instruction_files(result.project):
+            click.echo(f"Updated {update.path_relative}")
 
 
 @main.command("task")
@@ -739,8 +779,15 @@ def milestone_archive_command(ctx: click.Context, name: str) -> None:
 
 
 def _project(ctx: click.Context) -> BacklogProject:
-    cwd = ctx.obj.get("cwd") if ctx.obj else None
-    return discover_project(Path.cwd(), explicit_cwd=cwd)
+    return discover_project(Path.cwd(), explicit_cwd=_explicit_cwd(ctx))
+
+
+def _cwd(ctx: click.Context) -> Path:
+    return _explicit_cwd(ctx) or Path.cwd()
+
+
+def _explicit_cwd(ctx: click.Context) -> Path | None:
+    return ctx.obj.get("cwd") if ctx.obj else None
 
 
 def _repository(ctx: click.Context) -> ReadOnlyRepository:

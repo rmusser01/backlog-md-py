@@ -5,8 +5,9 @@ def test_inventory_starts_with_agent_critical_commands():
     inventory = load_builtin_inventory()
     names = [item.name for item in inventory.items]
 
-    assert names[:5] == [
+    assert names[:6] == [
         "cli:help",
+        "cli:init",
         "cli:task-list-plain",
         "cli:task-view-plain",
         "cli:search-plain",

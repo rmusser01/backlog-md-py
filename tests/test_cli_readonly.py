@@ -52,6 +52,7 @@ def test_top_level_help_includes_readonly_commands():
 
     assert result.exit_code == 0
     assert "--cwd" in result.output
+    assert "init" in result.output
     assert "compat" in result.output
     assert "task" in result.output
     assert "search" in result.output
@@ -264,10 +265,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 55" in result.output
+    assert "implemented: 56" in result.output
     assert "deferred: 8" in result.output
-    assert "total: 63" in result.output
-    assert "cli: 33 implemented, 3 deferred, 36 total" in result.output
+    assert "total: 64" in result.output
+    assert "cli: 34 implemented, 3 deferred, 37 total" in result.output
     assert "browser: 0 implemented, 1 deferred, 1 total" in result.output
     assert "git: 0 implemented, 3 deferred, 3 total" in result.output
 
