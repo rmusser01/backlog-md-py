@@ -21,6 +21,9 @@ do not block the first local-file agent cutover candidate.
 | cli:draft-create | implemented | backlog draft create <title> -d <text> -a <assignee> -l <label> | cli:draft-create |
 | cli:draft-list | implemented | backlog draft list --plain | cli:draft-list |
 | cli:draft-view | implemented | backlog draft view <id> --plain | cli:draft-view |
+| cli:draft-promote | implemented | backlog draft promote <id> | cli:draft-promote |
+| cli:task-demote | implemented | backlog task demote <id> | cli:task-demote |
+| cli:draft-archive | implemented | backlog draft archive <id> | cli:draft-archive |
 | cli:task-edit | implemented | backlog task edit <id> --plan <text> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
 | cli:cleanup | implemented | backlog cleanup | cli:cleanup |

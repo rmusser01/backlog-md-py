@@ -37,6 +37,15 @@ fixtures:
   - name: "cli:draft-view"
     command: ["backlog", "draft", "view", "draft-1", "--plain"]
     agent_critical: true
+  - name: "cli:draft-promote"
+    command: ["backlog", "draft", "promote", "draft-1"]
+    agent_critical: true
+  - name: "cli:task-demote"
+    command: ["backlog", "task", "demote", "TASK-1"]
+    agent_critical: true
+  - name: "cli:draft-archive"
+    command: ["backlog", "draft", "archive", "draft-1"]
+    agent_critical: true
   - name: "cli:task-edit"
     command: ["backlog", "task", "edit", "TASK-1", "--ordinal", "2000", "--append-notes", "Updated from fixture", "--plain"]
     agent_critical: true

@@ -19,6 +19,9 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:draft-create",
     "cli:draft-list",
     "cli:draft-view",
+    "cli:draft-promote",
+    "cli:task-demote",
+    "cli:draft-archive",
     "cli:task-edit",
     "cli:task-archive",
     "cli:cleanup",
@@ -145,6 +148,9 @@ def test_agent_critical_inventory_tracks_draft_cli_surface():
     assert "draft create <title>" in by_name["cli:draft-create"].expected
     assert "draft list --plain" in by_name["cli:draft-list"].expected
     assert "draft view <id> --plain" in by_name["cli:draft-view"].expected
+    assert "draft promote <id>" in by_name["cli:draft-promote"].expected
+    assert "task demote <id>" in by_name["cli:task-demote"].expected
+    assert "draft archive <id>" in by_name["cli:draft-archive"].expected
 
 
 def test_agent_critical_inventory_tracks_decision_create_surface():

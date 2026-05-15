@@ -136,6 +136,15 @@ def task_command(
         task_record = _mutable_repository(ctx).archive_task(args[1])
         click.echo(f"{_format_task_line(task_record, plain=plain)} archived")
         return
+    if args and args[0] == "demote":
+        if len(args) != 2:
+            raise click.UsageError("Usage: task demote TASK_ID")
+        draft_record = _draft_service(ctx).demote_task(args[1])
+        if plain:
+            click.echo(_format_task_line(draft_record, plain=True))
+        else:
+            click.echo(f"Demoted task {args[1]} to {draft_record.id}")
+        return
     if args and args[0] == "create":
         if len(args) != 2:
             raise click.UsageError("Usage: task create TITLE")
@@ -565,6 +574,24 @@ def draft_create_command(
     )
     click.echo(f"Created draft {draft.id}")
     click.echo(f"File: {draft.path}")
+
+
+@draft_group.command("promote")
+@click.argument("draft_id")
+@click.pass_context
+def draft_promote_command(ctx: click.Context, draft_id: str) -> None:
+    """Promote a draft task to an active task."""
+    task = _draft_service(ctx).promote_draft(draft_id)
+    click.echo(f"Promoted draft {draft_id} to {task.id}")
+
+
+@draft_group.command("archive")
+@click.argument("draft_id")
+@click.pass_context
+def draft_archive_command(ctx: click.Context, draft_id: str) -> None:
+    """Archive a draft task."""
+    draft = _draft_service(ctx).archive_draft(draft_id)
+    click.echo(f"Archived draft {draft.id}")
 
 
 @draft_group.command("view")

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Sequence
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
+    MutableRepository,
     ReadOnlyRepository,
     TaskMutationError,
     TaskRecord,
@@ -19,6 +21,7 @@ from backlog_py.core.repository import (
     _normalize_optional_string,
     _normalize_parent_task_id,
     _reject_missing_dependencies,
+    _replace_frontmatter_values,
     _slug_title,
     normalize_ordinal_value,
 )
@@ -114,6 +117,52 @@ class DraftService:
             if draft.id.casefold() == normalized_id.casefold():
                 return draft
         raise KeyError(f"Draft not found: {draft_id}")
+
+    def promote_draft(self, draft_id: str) -> TaskRecord:
+        draft = self.view_draft(draft_id)
+        repository = MutableRepository(self.project)
+        task_id = repository._next_task_id()
+        target = repository._task_path(task_id, draft.title)
+        if target.exists():
+            raise TaskMutationError(f"Task path already exists: {target.name}")
+        current_config = load_config(self.project.config_path)
+        source = _replace_frontmatter_values(
+            draft.raw_source,
+            draft.parsed,
+            {"id": task_id, "status": current_config.default_status},
+        )
+        parse_task_markdown(source)
+        _atomic_write_text(target, source)
+        _mutation_path(self.drafts_dir, draft.path).unlink()
+        return _load_task(target)
+
+    def demote_task(self, task_id: str) -> TaskRecord:
+        task = ReadOnlyRepository(self.project).get_task(task_id)
+        draft_id = self._next_draft_id()
+        target = self._draft_path(draft_id, task.title)
+        if target.exists():
+            raise TaskMutationError(f"Draft path already exists: {target.name}")
+        source = _replace_frontmatter_values(
+            task.raw_source,
+            task.parsed,
+            {"id": draft_id, "status": "Draft"},
+        )
+        parse_task_markdown(source)
+        _atomic_write_text(target, source)
+        _mutation_path(task.path.parent, task.path).unlink()
+        return _load_task(target)
+
+    def archive_draft(self, draft_id: str) -> TaskRecord:
+        draft = self.view_draft(draft_id)
+        safe_current_path = _mutation_path(self.drafts_dir, draft.path)
+        archive_root = _mutation_path(self.project.backlog_dir, self.project.backlog_dir / "archive")
+        archive_dir = _mutation_path(archive_root, archive_root / "drafts")
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        target_path = _mutation_path(archive_dir, archive_dir / draft.path.name)
+        if target_path.exists():
+            raise TaskMutationError(f"Archived draft path already exists: {target_path.name}")
+        os.replace(safe_current_path, target_path)
+        return _load_task(target_path)
 
     def _next_draft_id(self) -> str:
         max_id = 0

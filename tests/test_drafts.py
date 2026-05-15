@@ -30,6 +30,18 @@ def _draft_file(repo: Path, draft_id: str = "draft-1") -> Path:
     return matches[0]
 
 
+def _task_file(repo: Path, task_id: str = "task-1") -> Path:
+    matches = sorted((repo / "backlog" / "tasks").glob(f"{task_id} -*.md"))
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _archived_draft_file(repo: Path, draft_id: str = "draft-1") -> Path:
+    matches = sorted((repo / "backlog" / "archive" / "drafts").glob(f"{draft_id} -*.md"))
+    assert len(matches) == 1
+    return matches[0]
+
+
 def test_create_list_and_view_draft(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = DraftService(_project(repo))
@@ -75,6 +87,54 @@ def test_create_draft_inherits_definition_of_done_defaults(tmp_path):
     assert "Default review" not in disabled.raw_source
     assert "- [ ] #1 Explicit review" in explicit.raw_source
     assert "Default review" not in explicit.raw_source
+
+
+def test_promote_draft_moves_to_tasks_with_new_id_and_default_status(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = DraftService(_project(repo))
+    draft = service.create_draft(title="Promotable draft", description="Promote me.")
+
+    promoted = service.promote_draft(draft.id)
+
+    assert promoted.id == "TASK-2"
+    assert promoted.status == "To Do"
+    assert promoted.title == "Promotable draft"
+    assert promoted.description == "Promote me."
+    assert not draft.path.exists()
+    written = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "id: TASK-2" in written
+    assert "status: To Do" in written
+    assert "Promote me." in written
+
+
+def test_demote_task_moves_to_drafts_with_new_draft_id_and_status(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = DraftService(_project(repo))
+    task_path = _task_file(repo)
+
+    draft = service.demote_task("TASK-1")
+
+    assert draft.id == "draft-1"
+    assert draft.status == "Draft"
+    assert draft.title == "Example task"
+    assert not task_path.exists()
+    written = _draft_file(repo).read_text(encoding="utf-8")
+    assert "id: draft-1" in written
+    assert "status: Draft" in written
+    assert "Unowned body content before acceptance criteria must be preserved." in written
+
+
+def test_archive_draft_moves_to_archive_drafts(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = DraftService(_project(repo))
+    draft = service.create_draft(title="Archived draft")
+
+    archived = service.archive_draft(draft.id)
+
+    assert archived.id == "draft-1"
+    assert archived.status == "Draft"
+    assert not draft.path.exists()
+    assert _archived_draft_file(repo).read_text(encoding="utf-8") == archived.raw_source
 
 
 def test_cli_task_create_draft_writes_to_drafts(tmp_path):
@@ -169,3 +229,28 @@ def test_cli_draft_create_list_and_view_plain(tmp_path):
     assert view.exit_code == 0, view.output
     assert "draft-1 [Draft] Spike GraphQL" in view.output
     assert "Explore schema." in view.output
+
+
+def test_cli_draft_lifecycle_commands_use_safe_service(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    service = DraftService(_project(repo))
+    service.create_draft(title="Lifecycle draft", description="Move me.")
+
+    promote = runner.invoke(main, ["--cwd", str(repo), "draft", "promote", "draft-1"])
+    assert promote.exit_code == 0, promote.output
+    assert "Promoted draft draft-1 to TASK-2" in promote.output
+    assert _task_file(repo, "task-2").is_file()
+    assert not list((repo / "backlog" / "drafts").glob("draft-1 -*.md"))
+
+    demote = runner.invoke(main, ["--cwd", str(repo), "task", "demote", "TASK-1"])
+    assert demote.exit_code == 0, demote.output
+    assert "Demoted task TASK-1 to draft-1" in demote.output
+    assert _draft_file(repo).is_file()
+    assert not list((repo / "backlog" / "tasks").glob("task-1 -*.md"))
+
+    archive = runner.invoke(main, ["--cwd", str(repo), "draft", "archive", "draft-1"])
+    assert archive.exit_code == 0, archive.output
+    assert "Archived draft draft-1" in archive.output
+    assert _archived_draft_file(repo).is_file()
+    assert not list((repo / "backlog" / "drafts").glob("draft-1 -*.md"))
