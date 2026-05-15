@@ -36,6 +36,8 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:milestone-rename",
     "cli:milestone-remove",
     "cli:milestone-archive",
+    "cli:config-get",
+    "cli:config-set",
     "cli:config-dod-defaults-get",
     "cli:config-dod-defaults-upsert",
     "mcp:workflow-overview",
@@ -159,6 +161,14 @@ def test_agent_critical_inventory_tracks_draft_cli_surface():
     assert "draft promote <id>" in by_name["cli:draft-promote"].expected
     assert "task demote <id>" in by_name["cli:task-demote"].expected
     assert "draft archive <id>" in by_name["cli:draft-archive"].expected
+
+
+def test_agent_critical_inventory_tracks_config_get_set_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert by_name["cli:config-get"].expected == "backlog config get <key>"
+    assert by_name["cli:config-set"].expected == "backlog config set <key> <value>"
 
 
 def test_agent_critical_inventory_tracks_decision_create_surface():

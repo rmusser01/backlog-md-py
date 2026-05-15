@@ -88,6 +88,12 @@ fixtures:
   - name: "cli:milestone-archive"
     command: ["backlog", "milestone", "archive", "Release 1"]
     agent_critical: true
+  - name: "cli:config-get"
+    command: ["backlog", "config", "get", "defaultEditor"]
+    agent_critical: true
+  - name: "cli:config-set"
+    command: ["backlog", "config", "set", "defaultEditor", "code --wait"]
+    agent_critical: true
   - name: "cli:config-dod-defaults-get"
     command: ["backlog", "config", "dod-defaults-get"]
     agent_critical: true

@@ -38,6 +38,8 @@ do not block the first local-file agent cutover candidate.
 | cli:milestone-rename | implemented | backlog milestone rename <old> <new> | cli:milestone-rename |
 | cli:milestone-remove | implemented | backlog milestone remove <name> | cli:milestone-remove |
 | cli:milestone-archive | implemented | backlog milestone archive <name> | cli:milestone-archive |
+| cli:config-get | implemented | backlog config get <key> | cli:config-get |
+| cli:config-set | implemented | backlog config set <key> <value> | cli:config-set |
 | cli:config-dod-defaults-get | implemented | backlog config dod-defaults-get | cli:config-dod-defaults-get |
 | cli:config-dod-defaults-upsert | implemented | backlog config dod-defaults-upsert [item...] | cli:config-dod-defaults-upsert |
 | mcp:workflow-overview | implemented | backlog://workflow/overview | mcp:workflow-overview |

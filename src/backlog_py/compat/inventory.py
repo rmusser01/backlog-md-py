@@ -88,6 +88,8 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden("cli:milestone-rename", "CLI-INSTRUCTIONS.md", "backlog milestone rename <old> <new>"),
         _golden("cli:milestone-remove", "CLI-INSTRUCTIONS.md", "backlog milestone remove <name>"),
         _golden("cli:milestone-archive", "CLI-INSTRUCTIONS.md", "backlog milestone archive <name>"),
+        _golden("cli:config-get", "CLI-INSTRUCTIONS.md", "backlog config get <key>"),
+        _golden("cli:config-set", "CLI-INSTRUCTIONS.md", "backlog config set <key> <value>"),
         _golden("cli:config-dod-defaults-get", "ADVANCED-CONFIG.md", "backlog config dod-defaults-get"),
         _golden(
             "cli:config-dod-defaults-upsert",

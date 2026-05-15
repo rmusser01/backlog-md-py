@@ -22,6 +22,19 @@ _KEY_ALIASES = {
     "active_branch_days": ("active_branch_days", "activeBranchDays"),
     "definition_of_done": ("definition_of_done", "definitionOfDone"),
 }
+_NORMALIZED_KEY_BY_ALIAS = {
+    alias.casefold(): normalized_key
+    for normalized_key, aliases in _KEY_ALIASES.items()
+    for alias in aliases
+}
+_BOOLEAN_CONFIG_KEYS = {
+    "remote_operations",
+    "auto_commit",
+    "bypass_git_hooks",
+    "check_active_branches",
+}
+_INTEGER_CONFIG_KEYS = {"active_branch_days"}
+_LIST_CONFIG_KEYS = {"statuses", "definition_of_done"}
 
 
 def load_config(path: Path) -> BacklogConfig:
@@ -57,6 +70,31 @@ def replace_definition_of_done_defaults(project: BacklogProject, items: list[str
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n")
     return load_config(project.config_path)
+
+
+def get_config_value(project: BacklogProject, key: str) -> Any:
+    """Return a raw config value or known effective default by CLI key."""
+    raw = _load_raw_config(project.config_path)
+    raw_key = _find_existing_config_key(raw, key)
+    if raw_key is not None:
+        return raw[raw_key]
+
+    normalized_key = _normalized_config_key(key)
+    if normalized_key is None:
+        raise KeyError(f"Unknown config key: {key}")
+    return getattr(load_config(project.config_path), normalized_key)
+
+
+def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str, Any]:
+    """Persist one config value from CLI text and return the written key/value."""
+    raw = _load_raw_config(project.config_path)
+    normalized_key = _normalized_config_key(key)
+    parsed_value = _parse_config_value(normalized_key, value)
+    raw_key = _target_config_key(raw, key, normalized_key)
+    raw[raw_key] = parsed_value
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
+    _atomic_write_text(project.config_path, f"{yaml_text}\n")
+    return raw_key, parsed_value
 
 
 def _get(raw: dict[Any, Any], normalized_key: str, default: Any) -> Any:
@@ -126,6 +164,69 @@ def _int_value(raw: dict[Any, Any], normalized_key: str, default: int) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"Backlog config value {normalized_key} must be an integer")
     return value
+
+
+def _find_existing_config_key(raw: dict[Any, Any], key: str) -> Any | None:
+    if key in raw:
+        return key
+    normalized_key = _normalized_config_key(key)
+    if normalized_key is None:
+        return None
+    for alias in _KEY_ALIASES[normalized_key]:
+        if alias in raw:
+            return alias
+    return None
+
+
+def _target_config_key(raw: dict[Any, Any], key: str, normalized_key: str | None) -> str:
+    existing = _find_existing_config_key(raw, key)
+    if existing is not None:
+        return str(existing)
+    if normalized_key is None:
+        return key
+    return _KEY_ALIASES[normalized_key][-1]
+
+
+def _normalized_config_key(key: str) -> str | None:
+    return _NORMALIZED_KEY_BY_ALIAS.get(key.casefold())
+
+
+def _parse_config_value(normalized_key: str | None, value: str) -> Any:
+    if normalized_key in _BOOLEAN_CONFIG_KEYS:
+        return _parse_bool_config_value(normalized_key, value)
+    if normalized_key in _INTEGER_CONFIG_KEYS:
+        return _parse_int_config_value(normalized_key, value)
+    if normalized_key in _LIST_CONFIG_KEYS:
+        return _parse_list_config_value(value)
+    return value
+
+
+def _parse_bool_config_value(normalized_key: str | None, value: str) -> bool:
+    normalized = value.strip().casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise ValueError(f"Backlog config value {normalized_key} must be a boolean")
+
+
+def _parse_int_config_value(normalized_key: str | None, value: str) -> int:
+    try:
+        parsed = int(value, 10)
+    except ValueError as exc:
+        raise ValueError(f"Backlog config value {normalized_key} must be an integer") from exc
+    return parsed
+
+
+def _parse_list_config_value(value: str) -> list[str]:
+    parsed = yaml.safe_load(value)
+    if parsed is None:
+        return []
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    if isinstance(parsed, str):
+        return [item.strip() for item in parsed.split(",") if item.strip()]
+    raise ValueError("Backlog config list values must be lists")
 
 
 def _default_project_name(path: Path) -> str:

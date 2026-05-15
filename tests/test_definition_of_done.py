@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import yaml
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
@@ -131,6 +132,62 @@ def test_cli_definition_of_done_default_commands_use_config_writer(tmp_path):
     assert clear.exit_code == 0
     assert clear.output == ""
     assert get_definition_of_done_defaults(_project(repo)) == []
+
+
+def test_cli_config_get_outputs_effective_values(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    default_status = runner.invoke(main, ["--cwd", str(repo), "config", "get", "defaultStatus"])
+    remote_operations = runner.invoke(main, ["--cwd", str(repo), "config", "get", "remoteOperations"])
+
+    assert default_status.exit_code == 0
+    assert default_status.output == "To Do\n"
+    assert remote_operations.exit_code == 0
+    assert remote_operations.output == "false\n"
+
+
+def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    auto_commit = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoCommit", "true"])
+    active_days = runner.invoke(main, ["--cwd", str(repo), "config", "set", "activeBranchDays", "45"])
+    default_editor = runner.invoke(
+        main,
+        ["--cwd", str(repo), "config", "set", "defaultEditor", "code --wait"],
+    )
+    get_default_editor = runner.invoke(main, ["--cwd", str(repo), "config", "get", "defaultEditor"])
+
+    assert auto_commit.exit_code == 0
+    assert auto_commit.output == "autoCommit: true\n"
+    assert active_days.exit_code == 0
+    assert active_days.output == "activeBranchDays: 45\n"
+    assert default_editor.exit_code == 0
+    assert default_editor.output == "defaultEditor: code --wait\n"
+    assert get_default_editor.exit_code == 0
+    assert get_default_editor.output == "code --wait\n"
+
+    config = _project(repo).config
+    assert config.auto_commit is True
+    assert config.active_branch_days == 45
+    raw_config = yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))
+    assert raw_config["autoCommit"] is True
+    assert raw_config["activeBranchDays"] == 45
+    assert raw_config["defaultEditor"] == "code --wait"
+
+
+def test_cli_config_set_rejects_invalid_typed_values_without_writing(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    config_path = repo / "backlog" / "config.yml"
+    before = config_path.read_text(encoding="utf-8")
+
+    result = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoCommit", "sometimes"])
+
+    assert result.exit_code != 0
+    assert "boolean" in result.output
+    assert config_path.read_text(encoding="utf-8") == before
 
 
 def test_mcp_definition_of_done_defaults_and_task_create_use_safe_core(tmp_path):

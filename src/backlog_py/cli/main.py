@@ -21,7 +21,12 @@ from backlog_py.core.repository import (
     TaskRecord,
     normalize_ordinal_value,
 )
-from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
+from backlog_py.storage.config import (
+    get_config_value,
+    get_definition_of_done_defaults,
+    replace_definition_of_done_defaults,
+    set_config_value,
+)
 from backlog_py.storage.project import discover_project
 
 
@@ -441,6 +446,31 @@ def config_list(ctx: click.Context) -> None:
             click.echo(f"  - {item}")
 
 
+@config_group.command("get")
+@click.argument("key")
+@click.pass_context
+def config_get(ctx: click.Context, key: str) -> None:
+    """Print one effective config value."""
+    try:
+        value = get_config_value(_project(ctx), key)
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_format_config_value(value))
+
+
+@config_group.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.pass_context
+def config_set(ctx: click.Context, key: str, value: str) -> None:
+    """Persist one project config value."""
+    try:
+        raw_key, parsed_value = set_config_value(_project(ctx), key, value)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"{raw_key}: {_format_config_value(parsed_value)}")
+
+
 @config_group.command("dod-defaults-get")
 @click.pass_context
 def config_dod_defaults_get(ctx: click.Context) -> None:
@@ -750,6 +780,16 @@ def _format_decision_line(decision: DecisionRecord) -> str:
 
 def _format_milestone_line(milestone: MilestoneRecord) -> str:
     return f"{milestone.name} {milestone.path_relative}".rstrip()
+
+
+def _format_config_value(value: object) -> str:
+    if isinstance(value, bool):
+        return _bool_text(value)
+    if isinstance(value, list):
+        return "\n".join(f"- {item}" for item in value)
+    if value is None:
+        return "null"
+    return str(value)
 
 
 def _format_task_metadata_lines(task_record: TaskRecord) -> list[str]:
