@@ -40,6 +40,7 @@ def init_project(
     project_name: str | None = None,
     backlog_dir: str = "backlog",
     config_location: str = "local",
+    task_prefix: str = "task",
 ) -> InitProjectResult:
     """Create a non-interactive Backlog.md project skeleton."""
     root_path = root.resolve()
@@ -58,7 +59,11 @@ def init_project(
         root_config_backlog_dir = backlog_directory if config_path.name == "backlog.config.yml" else None
         _atomic_write_text(
             config_path,
-            _default_config_source(project_name or root_path.name, backlog_directory=root_config_backlog_dir),
+            _default_config_source(
+                project_name or root_path.name,
+                backlog_directory=root_config_backlog_dir,
+                task_prefix=task_prefix,
+            ),
         )
 
     return InitProjectResult(
@@ -93,7 +98,13 @@ def _config_path(root: Path, backlog_path: Path, config_location: str) -> Path:
     raise InitProjectError("config-location must be 'local' or 'root'")
 
 
-def _default_config_source(project_name: str, *, backlog_directory: str | None = None) -> str:
+def _default_config_source(
+    project_name: str,
+    *,
+    backlog_directory: str | None = None,
+    task_prefix: str = "task",
+) -> str:
+    normalized_task_prefix = _normalize_task_prefix(task_prefix)
     raw = {
         "projectName": project_name,
         "statuses": ["To Do", "In Progress", "Done"],
@@ -107,8 +118,18 @@ def _default_config_source(project_name: str, *, backlog_directory: str | None =
         "bypassGitHooks": False,
         "checkActiveBranches": False,
         "activeBranchDays": 30,
+        "prefixes": {"task": normalized_task_prefix},
     }
     if backlog_directory is not None:
         raw["backlogDirectory"] = backlog_directory
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
     return f"{yaml_text}\n"
+
+
+def _normalize_task_prefix(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise InitProjectError("task-prefix must be non-empty")
+    if not normalized.isalpha():
+        raise InitProjectError("task-prefix must contain only letters")
+    return normalized

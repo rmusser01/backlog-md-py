@@ -12,7 +12,7 @@ from typing import Iterable, Sequence
 import yaml
 
 from backlog_py.core.ids import format_child_task_id, format_numbered_id
-from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
+from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.search.simple import contains_query
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
@@ -70,6 +70,7 @@ class ReadOnlyRepository:
             for task in tasks
             if _task_matches_filters(
                 task,
+                task_prefix=self.project.config.task_prefix,
                 status=status,
                 assignee=assignee,
                 labels=labels,
@@ -81,8 +82,12 @@ class ReadOnlyRepository:
 
     def get_task(self, task_id: str) -> TaskRecord:
         normalized_id = task_id.casefold()
+        try:
+            normalized_lookup_id = _normalize_dependency_id(task_id, self.project.config.task_prefix).casefold()
+        except TaskMutationError:
+            normalized_lookup_id = normalized_id
         for task in self.list_tasks():
-            if task.id.casefold() == normalized_id:
+            if task.id.casefold() in {normalized_id, normalized_lookup_id}:
                 return task
         raise KeyError(f"Task not found: {task_id}")
 
@@ -107,6 +112,7 @@ class ReadOnlyRepository:
             for task in tasks
             if _task_matches_filters(
                 task,
+                task_prefix=self.project.config.task_prefix,
                 status=status,
                 assignee=assignee,
                 labels=labels,
@@ -176,21 +182,22 @@ class MutableRepository(ReadOnlyRepository):
         on_status_change: bool | None = None,
     ) -> TaskRecord:
         _reject_on_status_change(on_status_change)
+        current_config = load_config(self.project.config_path)
         tasks = self.list_tasks()
-        normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks)
+        normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
         normalized_id = _normalize_task_id(
             task_id or (
                 self._next_child_task_id(normalized_parent_task_id)
                 if normalized_parent_task_id is not None
-                else self._next_task_id()
-            )
+                else self._next_task_id(current_config)
+            ),
+            current_config.task_prefix,
         )
         if _task_exists(tasks, normalized_id):
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
-        normalized_dependencies = _normalize_dependency_ids(dependencies)
+        normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
         _reject_missing_dependencies(normalized_dependencies, tasks)
         _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
-        current_config = load_config(self.project.config_path)
         task_status = status or current_config.default_status
         _reject_unknown_status(task_status, current_config.statuses)
         target = self._task_path(normalized_id, title)
@@ -279,7 +286,7 @@ class MutableRepository(ReadOnlyRepository):
         normalized_dependencies = None
         if dependencies is not None:
             tasks = self.list_tasks()
-            normalized_dependencies = _normalize_dependency_ids(dependencies)
+            normalized_dependencies = _normalize_dependency_ids(dependencies, self.project.config.task_prefix)
             _reject_missing_dependencies(normalized_dependencies, tasks)
             _reject_circular_dependencies(task.id, normalized_dependencies, tasks)
         source = task.raw_source
@@ -434,13 +441,16 @@ class MutableRepository(ReadOnlyRepository):
         os.replace(safe_current_path, target_path)
         return _load_task(target_path)
 
-    def _next_task_id(self) -> str:
+    def _next_task_id(self, config: BacklogConfig | None = None) -> str:
+        current_config = config or self.project.config
         max_id = 0
+        prefix = current_config.task_prefix.upper()
+        pattern = re.compile(rf"{re.escape(prefix)}-(\d+)", re.IGNORECASE)
         for task in self.list_tasks():
-            match = re.fullmatch(r"TASK-(\d+)", task.id.upper())
+            match = pattern.fullmatch(task.id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
-        return format_numbered_id("TASK-", max_id + 1, self.project.config.zero_padded_ids)
+        return format_numbered_id(f"{prefix}-", max_id + 1, current_config.zero_padded_ids)
 
     def _next_child_task_id(self, parent_task_id: str) -> str:
         max_id = 0
@@ -478,6 +488,7 @@ def _load_task(path: Path) -> TaskRecord:
 def _task_matches_filters(
     task: TaskRecord,
     *,
+    task_prefix: str,
     status: str | None,
     assignee: str | Sequence[str] | None,
     labels: str | Sequence[str] | None,
@@ -491,7 +502,7 @@ def _task_matches_filters(
         and _matches_frontmatter_values(task, "labels", labels)
         and _matches_frontmatter_text(task, "priority", priority)
         and _matches_frontmatter_text(task, "milestone", milestone)
-        and _matches_parent_task_id(task, parent_task_id)
+        and _matches_parent_task_id(task, parent_task_id, task_prefix)
     )
 
 
@@ -500,11 +511,11 @@ def _matches_frontmatter_text(task: TaskRecord, key: str, requested: str | None)
     return _matches_text(None if value is None else str(value), requested)
 
 
-def _matches_parent_task_id(task: TaskRecord, requested: str | None) -> bool:
+def _matches_parent_task_id(task: TaskRecord, requested: str | None, task_prefix: str) -> bool:
     if requested is None:
         return True
     parent = task.parsed.frontmatter.get("parent_task_id")
-    return parent is not None and _task_ids_equal(str(parent), requested)
+    return parent is not None and _task_ids_equal(str(parent), requested, task_prefix)
 
 
 def _matches_text(actual: str | None, requested: str | None) -> bool:
@@ -892,20 +903,23 @@ def _normalize_block(content: str) -> str:
     return content.strip()
 
 
-def _normalize_task_id(task_id: str) -> str:
-    normalized = task_id.strip().upper()
+def _normalize_task_id(task_id: str, task_prefix: str = "task") -> str:
+    candidate = task_id.strip()
+    if re.fullmatch(r"\d+(?:\.\d+)*", candidate):
+        candidate = f"{task_prefix.upper()}-{candidate}"
+    normalized = candidate.upper()
     if _TASK_ID_RE.fullmatch(normalized) is None:
         raise TaskMutationError(f"Invalid task id: {task_id}")
     return normalized
 
 
-def _normalize_dependency_ids(dependencies: Sequence[str] | None) -> list[str]:
+def _normalize_dependency_ids(dependencies: Sequence[str] | None, task_prefix: str = "task") -> list[str]:
     normalized: list[str] = []
     for raw_dependency in dependencies or ():
         for dependency in str(raw_dependency).split(","):
             trimmed = dependency.strip()
             if trimmed:
-                normalized.append(_normalize_dependency_id(trimmed))
+                normalized.append(_normalize_dependency_id(trimmed, task_prefix))
     return normalized
 
 
@@ -981,26 +995,32 @@ def normalize_ordinal_value(value: int | float | str | None) -> int | float | No
     return number
 
 
-def _normalize_dependency_id(task_id: str) -> str:
+def _normalize_dependency_id(task_id: str, task_prefix: str = "task") -> str:
     candidate = task_id.strip()
     if re.fullmatch(r"\d+(?:\.\d+)*", candidate):
-        candidate = f"TASK-{candidate}"
-    return _normalize_task_id(candidate)
+        candidate = f"{task_prefix.upper()}-{candidate}"
+    return _normalize_task_id(candidate, task_prefix)
 
 
-def _normalize_parent_task_id(parent_task_id: str | None, tasks: Sequence[TaskRecord]) -> str | None:
+def _normalize_parent_task_id(
+    parent_task_id: str | None,
+    tasks: Sequence[TaskRecord],
+    task_prefix: str = "task",
+) -> str | None:
     if parent_task_id is None:
         return None
-    normalized = _normalize_dependency_id(parent_task_id)
+    normalized = _normalize_dependency_id(parent_task_id, task_prefix)
     for task in tasks:
-        if _task_ids_equal(task.id, normalized):
+        if _task_ids_equal(task.id, normalized, task_prefix):
             return normalized
     raise TaskMutationError(f"Parent task not found: {normalized}")
 
 
-def _task_ids_equal(left: str, right: str) -> bool:
+def _task_ids_equal(left: str, right: str, task_prefix: str = "task") -> bool:
     try:
-        return _normalize_dependency_id(left).casefold() == _normalize_dependency_id(right).casefold()
+        return _normalize_dependency_id(left, task_prefix).casefold() == _normalize_dependency_id(
+            right, task_prefix
+        ).casefold()
     except TaskMutationError:
         return left.strip().casefold() == right.strip().casefold()
 

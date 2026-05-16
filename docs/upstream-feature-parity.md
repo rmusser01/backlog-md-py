@@ -30,6 +30,8 @@ larger task commands:
   `autoOpenBrowser`, and `zeroPaddedIds`.
 - `zeroPaddedIds` generation for top-level task, child task, draft, document,
   and decision IDs.
+- Init-time `--task-prefix`, read-only `taskPrefix` config listing, and
+  generated task/subtask IDs that respect `prefixes.task`.
 
 ## Remaining Full-Parity Work
 

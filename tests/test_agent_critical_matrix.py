@@ -208,6 +208,9 @@ def test_agent_critical_inventory_tracks_config_get_set_surface():
     assert by_name["config:extended-options"].status == "implemented"
     assert "defaultAssignee" in by_name["config:extended-options"].expected
     assert "zeroPaddedIds" in by_name["config:extended-options"].expected
+    assert by_name["config:task-prefix"].status == "implemented"
+    assert "taskPrefix" in by_name["config:task-prefix"].expected
+    assert "prefixes.task" in by_name["config:task-prefix"].expected
 
 
 def test_agent_critical_inventory_tracks_agent_instruction_surface():

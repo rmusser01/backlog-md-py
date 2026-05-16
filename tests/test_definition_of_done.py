@@ -267,6 +267,39 @@ def test_cli_config_set_accepts_upstream_boolean_aliases(tmp_path):
     assert config.remote_operations is True
 
 
+def test_task_prefix_config_is_read_only_and_drives_generated_task_ids(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw_config["prefixes"] = {"task": "JIRA"}
+    config_path.write_text(yaml.safe_dump(raw_config, sort_keys=False), encoding="utf-8")
+    runner = CliRunner()
+
+    config_list = runner.invoke(main, ["--cwd", str(repo), "config", "list"])
+    set_task_prefix = runner.invoke(main, ["--cwd", str(repo), "config", "set", "taskPrefix", "BUG"])
+    set_prefixes = runner.invoke(main, ["--cwd", str(repo), "config", "set", "prefixes", "BUG"])
+
+    assert config_list.exit_code == 0
+    assert "taskPrefix: JIRA (read-only)" in config_list.output
+    assert set_task_prefix.exit_code != 0
+    assert "Task prefix cannot be changed after initialization" in set_task_prefix.output
+    assert set_prefixes.exit_code != 0
+    assert "Task prefix cannot be changed after initialization" in set_prefixes.output
+
+    created = MutableRepository(_project(repo)).create_task(title="Prefixed task")
+    child = MutableRepository(_project(repo)).create_task(title="Prefixed child", parent_task_id="1")
+    dependent = MutableRepository(_project(repo)).create_task(title="Prefixed dependency", dependencies=["1"])
+
+    assert created.id == "JIRA-1"
+    assert child.id == "JIRA-1.1"
+    assert child.parsed.frontmatter["parent_task_id"] == "JIRA-1"
+    assert dependent.id == "JIRA-2"
+    assert dependent.parsed.frontmatter["dependencies"] == ["JIRA-1"]
+    assert (repo / "backlog" / "tasks" / "jira-1 - Prefixed-task.md").exists()
+    assert MutableRepository(_project(repo)).get_task("1").id == "JIRA-1"
+    assert _project(repo).config.task_prefix == "JIRA"
+
+
 def test_zero_padded_ids_apply_to_generated_item_ids(tmp_path):
     repo = _copy_fixture(tmp_path)
     runner = CliRunner()

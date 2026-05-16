@@ -126,6 +126,7 @@ def test_load_config_accepts_snake_case_keys(tmp_path):
                 "auto_commit: true",
                 "bypass_git_hooks: true",
                 "zero_padded_ids: 4",
+                "task_prefix: issue",
                 "check_active_branches: false",
                 "active_branch_days: 14",
                 "definition_of_done:",
@@ -149,6 +150,7 @@ def test_load_config_accepts_snake_case_keys(tmp_path):
     assert config.auto_commit is True
     assert config.bypass_git_hooks is True
     assert config.zero_padded_ids == 4
+    assert config.task_prefix == "issue"
     assert config.check_active_branches is False
     assert config.active_branch_days == 14
     assert config.definition_of_done == ["Tests pass"]
@@ -171,6 +173,8 @@ def test_load_config_accepts_camel_case_keys(tmp_path):
                 "autoCommit: true",
                 "bypassGitHooks: true",
                 "zeroPaddedIds: 3",
+                "prefixes:",
+                "  task: JIRA",
                 "checkActiveBranches: false",
                 "activeBranchDays: 7",
                 "definitionOfDone:",
@@ -194,6 +198,7 @@ def test_load_config_accepts_camel_case_keys(tmp_path):
     assert config.auto_commit is True
     assert config.bypass_git_hooks is True
     assert config.zero_padded_ids == 3
+    assert config.task_prefix == "JIRA"
     assert config.check_active_branches is False
     assert config.active_branch_days == 7
     assert config.definition_of_done == ["Review complete"]

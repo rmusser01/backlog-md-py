@@ -68,10 +68,10 @@ class DraftService:
         if self._draft_exists(normalized_id):
             raise TaskMutationError(f"Draft id already exists: {normalized_id}")
         tasks = ReadOnlyRepository(self.project).list_tasks()
-        normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks)
-        normalized_dependencies = _normalize_dependency_ids(dependencies)
-        _reject_missing_dependencies(normalized_dependencies, tasks)
         current_config = load_config(self.project.config_path)
+        normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
+        normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
+        _reject_missing_dependencies(normalized_dependencies, tasks)
         task_definition_of_done = _definition_of_done_for_create(
             explicit=definition_of_done,
             additions=definition_of_done_add,

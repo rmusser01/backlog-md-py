@@ -3,6 +3,7 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
+from backlog_py.core.repository import MutableRepository
 from backlog_py.storage.project import discover_project
 
 
@@ -52,6 +53,23 @@ def test_cli_init_custom_backlog_dir_uses_discoverable_root_config(tmp_path):
     project = discover_project(tmp_path)
     assert project.backlog_dir == tmp_path / "work" / "backlog"
     assert project.config.project_name == "Custom Project"
+
+
+def test_cli_init_task_prefix_sets_permanent_task_prefix(tmp_path):
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init", "Prefix Project", "--defaults", "--task-prefix", "JIRA"],
+    )
+
+    assert result.exit_code == 0
+
+    project = discover_project(tmp_path)
+    assert project.config.task_prefix == "JIRA"
+
+    created = MutableRepository(project).create_task(title="Prefixed init task")
+
+    assert created.id == "JIRA-1"
+    assert (tmp_path / "backlog" / "tasks" / "jira-1 - Prefixed-init-task.md").exists()
 
 
 def test_cli_init_preserves_existing_config(tmp_path):

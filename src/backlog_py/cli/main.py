@@ -60,6 +60,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.argument("project_name", required=False)
 @click.option("--defaults", is_flag=True, help="Use non-interactive default settings.")
 @click.option("--backlog-dir", default="backlog", help="Project-relative backlog directory.")
+@click.option("--task-prefix", default="task", help="Task ID prefix to set during first initialization.")
 @click.option(
     "--config-location",
     type=click.Choice(["local", "root"], case_sensitive=False),
@@ -73,6 +74,7 @@ def init_command(
     project_name: str | None,
     defaults: bool,
     backlog_dir: str,
+    task_prefix: str,
     config_location: str,
     agent_instructions: bool,
 ) -> None:
@@ -85,6 +87,7 @@ def init_command(
                 ctx,
                 project_name=project_name,
                 backlog_dir=backlog_dir,
+                task_prefix=task_prefix,
                 config_location=config_location,
                 agent_instructions=agent_instructions,
             ),
@@ -619,6 +622,7 @@ def config_list(ctx: click.Context) -> None:
     click.echo(f"autoCommit: {_bool_text(config.auto_commit)}")
     click.echo(f"bypassGitHooks: {_bool_text(config.bypass_git_hooks)}")
     click.echo(f"zeroPaddedIds: {config.zero_padded_ids if config.zero_padded_ids is not None else '(disabled)'}")
+    click.echo(f"taskPrefix: {config.task_prefix} (read-only)")
     click.echo(f"checkActiveBranches: {_bool_text(config.check_active_branches)}")
     click.echo(f"activeBranchDays: {config.active_branch_days}")
     if config.statuses is not None:
@@ -1005,6 +1009,7 @@ def _initialize_project(
     *,
     project_name: str | None,
     backlog_dir: str,
+    task_prefix: str,
     config_location: str,
     agent_instructions: bool,
 ) -> tuple[InitProjectResult, list[AgentInstructionUpdate]]:
@@ -1012,6 +1017,7 @@ def _initialize_project(
         _cwd(ctx),
         project_name=project_name,
         backlog_dir=backlog_dir,
+        task_prefix=task_prefix,
         config_location=config_location,
     )
     instruction_updates = update_agent_instruction_files(result.project) if agent_instructions else []

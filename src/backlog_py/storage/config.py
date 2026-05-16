@@ -30,6 +30,7 @@ _KEY_ALIASES = {
     "auto_commit": ("auto_commit", "autoCommit"),
     "bypass_git_hooks": ("bypass_git_hooks", "bypassGitHooks"),
     "zero_padded_ids": ("zero_padded_ids", "zeroPaddedIds"),
+    "task_prefix": ("task_prefix", "taskPrefix"),
     "check_active_branches": ("check_active_branches", "checkActiveBranches"),
     "active_branch_days": ("active_branch_days", "activeBranchDays"),
     "definition_of_done": ("definition_of_done", "definitionOfDone"),
@@ -51,6 +52,8 @@ _INTEGER_CONFIG_KEYS = {"active_branch_days"}
 _PORT_CONFIG_KEYS = {"default_port"}
 _OPTIONAL_PADDING_KEYS = {"zero_padded_ids"}
 _LIST_CONFIG_KEYS = {"statuses", "definition_of_done"}
+_READ_ONLY_CONFIG_KEYS = {"task_prefix"}
+_READ_ONLY_CONFIG_ALIASES = {"prefixes"}
 
 
 def load_config(path: Path) -> BacklogConfig:
@@ -73,6 +76,7 @@ def load_config(path: Path) -> BacklogConfig:
         auto_commit=_bool_value(raw, "auto_commit", False),
         bypass_git_hooks=_bool_value(raw, "bypass_git_hooks", False),
         zero_padded_ids=_optional_positive_int(raw, "zero_padded_ids"),
+        task_prefix=_task_prefix_value(raw),
         check_active_branches=_bool_value(raw, "check_active_branches", True),
         active_branch_days=_int_value(raw, "active_branch_days", 30),
         definition_of_done=_optional_string_list(_get(raw, "definition_of_done", None)),
@@ -117,6 +121,11 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
     """Persist one config value from CLI text and return the written key/value."""
     raw = _load_raw_config(project.config_path)
     normalized_key = _normalized_config_key(key)
+    if normalized_key in _READ_ONLY_CONFIG_KEYS or key.casefold() in _READ_ONLY_CONFIG_ALIASES:
+        raise ValueError(
+            "Task prefix cannot be changed after initialization. "
+            "The prefix is set during 'backlog init' and is permanent to avoid breaking existing task IDs."
+        )
     parsed_value = _parse_config_value(normalized_key, value)
     raw_key = _target_config_key(raw, key, normalized_key)
     if normalized_key == "zero_padded_ids" and parsed_value is None:
@@ -212,6 +221,29 @@ def _optional_positive_int(raw: dict[Any, Any], normalized_key: str) -> int | No
     if value <= 0:
         return None
     return value
+
+
+def _task_prefix_value(raw: dict[Any, Any]) -> str:
+    for direct_key in _KEY_ALIASES["task_prefix"]:
+        if direct_key in raw:
+            return _normalize_task_prefix(raw[direct_key])
+    prefixes = raw.get("prefixes")
+    if prefixes is None:
+        return "task"
+    if not isinstance(prefixes, dict):
+        raise ValueError("Backlog config value prefixes must be a mapping")
+    return _normalize_task_prefix(prefixes.get("task", "task"))
+
+
+def _normalize_task_prefix(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Backlog config value task_prefix must be a string")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("Backlog config value task_prefix must be non-empty")
+    if not normalized.isalpha():
+        raise ValueError("Backlog config value task_prefix must contain only letters")
+    return normalized
 
 
 def _int_value(raw: dict[Any, Any], normalized_key: str, default: int) -> int:
