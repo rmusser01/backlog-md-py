@@ -236,12 +236,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "remote git operations",
             "Remote git behavior is outside the first local-file compatibility gate.",
         ),
-        _deferred(
+        _implemented(
             "git:auto-commit",
-            "git-deferred",
+            "git-implemented",
             "ADVANCED-CONFIG.md",
             "autoCommit",
-            "Automatic commits are deferred to keep mutation review explicit.",
         ),
         _deferred(
             "git:hook-bypass",

@@ -75,7 +75,6 @@ EXPECTED_DEFERRED = {
     "cli:interactive-search-filters",
     "browser:custom-port-service",
     "git:remote-operations",
-    "git:auto-commit",
     "git:hook-bypass",
 }
 
@@ -134,6 +133,16 @@ def test_agent_critical_inventory_tracks_interactive_config_wizard_surface():
     assert item.status == "implemented"
     assert item.classification == "interactive-implemented"
     assert item.expected == "backlog config interactive advanced wizard"
+
+
+def test_agent_critical_inventory_tracks_auto_commit_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["git:auto-commit"]
+    assert item.status == "implemented"
+    assert item.classification == "git-implemented"
+    assert item.expected == "autoCommit"
 
 
 def test_agent_critical_inventory_tracks_init_surface():

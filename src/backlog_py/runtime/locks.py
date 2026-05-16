@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, TextIO, TypeVar
 
 from backlog_py.core.models import BacklogProject
+from backlog_py.runtime.git import maybe_auto_commit, prepare_auto_commit
 from backlog_py.runtime.state import ensure_state_layout
 
 T = TypeVar("T")
@@ -77,7 +78,10 @@ def init_lock_key(target_root: Path) -> str:
 def with_project_write_lock(project: BacklogProject, operation: str, fn: Callable[[], T]) -> T:
     """Run a callback while holding the project write lock."""
     with ProjectWriteLock(project.root, operation=operation).acquire():
-        return fn()
+        auto_commit_context = prepare_auto_commit(project)
+        result = fn()
+        maybe_auto_commit(project, operation, auto_commit_context)
+        return result
 
 
 def with_init_lock(target_root: Path, operation: str, fn: Callable[[], T]) -> T:
