@@ -8,17 +8,18 @@ from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from backlog_py.core.models import BacklogProject
-from backlog_py.core.repository import ReadOnlyRepository, TaskRecord
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
+from backlog_py.runtime.locks import with_project_write_lock
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
 
 
 @dataclass(frozen=True)
 class BrowserService:
-    """Background read-only browser service used by tests."""
+    """Background browser service used by tests."""
 
     server: "BrowserThreadingHTTPServer"
     thread: threading.Thread
@@ -40,7 +41,7 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
 
 
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
-    """Create a read-only browser HTTP server without starting it."""
+    """Create a loopback browser HTTP server without starting it."""
     if host not in _LOOPBACK_HOSTS:
         raise ValueError("Browser service only supports loopback hosts")
     server = BrowserThreadingHTTPServer((host, port), _BrowserHttpHandler)
@@ -49,7 +50,7 @@ def create_browser_server(*, project: BacklogProject, host: str, port: int) -> B
 
 
 def start_browser_service(project: BacklogProject, *, host: str = "127.0.0.1", port: int) -> BrowserService:
-    """Start a background read-only browser service."""
+    """Start a background browser service."""
     server = create_browser_server(project=project, host=host, port=port)
     thread = threading.Thread(target=server.serve_forever, name="backlog-md-py-browser", daemon=True)
     thread.start()
@@ -71,7 +72,7 @@ def run_browser_service_foreground(
     port: int,
     open_browser: bool,
 ) -> None:
-    """Run the read-only browser service until interrupted."""
+    """Run the loopback browser service until interrupted."""
     server = create_browser_server(project=project, host=host, port=port)
     actual_host, actual_port = server.server_address[:2]
     root_url = _root_url(str(actual_host), int(actual_port))
@@ -121,8 +122,48 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        task_id = _status_endpoint_task_id(path)
+        if task_id is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+            return
+        if not self._origin_allowed():
+            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+            return
+
+        try:
+            status = _status_from_payload(self._read_json_body())
+            task = with_project_write_lock(
+                self.server.project,
+                "browser_task_status",
+                lambda: MutableRepository(self.server.project).edit_task(task_id, status=status),
+            )
+        except KeyError:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
+            return
+        except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+
+        self._send_json(HTTPStatus.OK, {"task": _task_payload(task, project=self.server.project)})
+
     def log_message(self, format: str, *args: object) -> None:
         _ = format, args
+
+    def _read_json_body(self) -> object:
+        length = int(self.headers.get("Content-Length", "0"))
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def _origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        host = self.headers.get("Host")
+        if host is None:
+            return False
+        parsed = urlparse(origin)
+        return parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS and parsed.netloc == host
 
     def _send_json(self, status: HTTPStatus, payload: Mapping[str, object]) -> None:
         self._send_text(status, json.dumps(payload, sort_keys=True), content_type="application/json")
@@ -140,7 +181,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
 
 def render_board_html(project: BacklogProject) -> str:
-    """Render a read-only kanban board snapshot."""
+    """Render a kanban board with drag-and-drop status movement."""
     payload = build_board_payload(project)
     project_name = escape(project.config.project_name)
     columns_obj = payload["columns"]
@@ -224,6 +265,12 @@ def render_board_html(project: BacklogProject) -> str:
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 10px;
+      cursor: grab;
+    }}
+    .column.drag-over .empty,
+    .column.drag-over .task {{
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }}
     .task-id {{
       color: var(--accent);
@@ -245,11 +292,44 @@ def render_board_html(project: BacklogProject) -> str:
 <body>
   <header>
     <h1>{project_name}</h1>
-    <div class="subtitle">Read-only Backlog.md board snapshot</div>
+    <div class="subtitle">Backlog.md board with drag-and-drop status movement</div>
   </header>
   <main class="board">
 {column_markup}
   </main>
+  <script>
+    let draggedTaskId = null;
+    document.querySelectorAll("[data-task-id]").forEach((task) => {{
+      task.addEventListener("dragstart", (event) => {{
+        draggedTaskId = task.dataset.taskId;
+        event.dataTransfer.setData("text/plain", draggedTaskId);
+      }});
+    }});
+    document.querySelectorAll("[data-status]").forEach((column) => {{
+      column.addEventListener("dragover", (event) => {{
+        event.preventDefault();
+        column.classList.add("drag-over");
+      }});
+      column.addEventListener("dragleave", () => column.classList.remove("drag-over"));
+      column.addEventListener("drop", async (event) => {{
+        event.preventDefault();
+        column.classList.remove("drag-over");
+        const taskId = event.dataTransfer.getData("text/plain") || draggedTaskId;
+        const status = column.dataset.status;
+        if (!taskId || !status) return;
+        const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}/status`, {{
+          method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{status}}),
+        }});
+        if (!response.ok) {{
+          console.error(await response.text());
+          return;
+        }}
+        window.location.reload();
+      }});
+    }});
+  </script>
 </body>
 </html>
 """
@@ -260,7 +340,7 @@ def _render_column(status: str, raw_tasks: object) -> str:
     task_markup = "\n".join(_render_task(task) for task in tasks)
     if not task_markup:
         task_markup = '      <div class="empty">No tasks</div>'
-    return f"""    <section class="column">
+    return f"""    <section class="column" data-status="{escape(status)}">
       <h2><span>{escape(status)}</span><span class="count">{len(tasks)}</span></h2>
 {task_markup}
     </section>"""
@@ -270,7 +350,7 @@ def _render_task(raw_task: object) -> str:
     task = raw_task if isinstance(raw_task, dict) else {}
     task_id = escape(str(task.get("id", "")))
     title = escape(str(task.get("title", "")))
-    return f"""      <article class="task">
+    return f"""      <article class="task" data-task-id="{task_id}" draggable="true">
         <div class="task-id">{task_id}</div>
         <div class="task-title">{title}</div>
       </article>"""
@@ -306,3 +386,23 @@ def _metadata_string(value: object) -> str | None:
 
 def _root_url(host: str, port: int) -> str:
     return f"http://{host}:{port}/"
+
+
+def _status_endpoint_task_id(path: str) -> str | None:
+    prefix = "/api/tasks/"
+    suffix = "/status"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    encoded_task_id = path[len(prefix) : -len(suffix)]
+    if not encoded_task_id:
+        return None
+    return unquote(encoded_task_id)
+
+
+def _status_from_payload(payload: object) -> str:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    status = payload.get("status")
+    if not isinstance(status, str) or not status.strip():
+        raise ValueError("Request body field status must be a non-empty string")
+    return status

@@ -17,7 +17,7 @@ full clone unless explicitly rejected.
 | Requirement | Classification | Agent cutover impact | Rationale |
 | --- | --- | --- | --- |
 | Responsive Kanban board | Required for full clone | Not required for agent cutover | Agents use `board`, task listing, and MCP tools; responsive browser layout is a human UI requirement. |
-| drag-and-drop task movement | Required for full clone | Intentionally deferred | Drag semantics need browser tests, conflict handling, and status persistence coverage before claiming browser parity. |
+| drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
 | Task create/edit forms | Required for full clone | Not required for agent cutover | CLI and MCP task create/edit cover agent workflows; browser forms can follow after API and storage parity stabilize. |
 | Acceptance criteria editor | Required for full clone | Not required for agent cutover | Agent workflows already mutate AC checks through safe CLI/MCP paths; rich browser editing is later UI work. |
 | Definition of Done settings | Required for full clone | Not required for agent cutover | DoD defaults exist through config helpers, CLI, and MCP; browser settings can layer on the same safe core later. |
@@ -25,7 +25,7 @@ full clone unless explicitly rejected.
 | Archive confirmations | Required for full clone | Not required for agent cutover | Agents use explicit archive/complete operations; browser confirmation UX belongs to a later human UI milestone. |
 | Rich Markdown editing | Required for full clone | Intentionally deferred | Rich editing must preserve unknown Markdown and frontmatter exactly, so it needs round-trip visual and parser tests. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
-| Custom port and no-open flags | Required for full clone | Implemented for read-only board service | `backlog-py browser --port <port> --no-open` starts a loopback read-only board service, honors config defaults, and has port-collision and launch-policy tests. |
+| Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
 | service mode | Required for full clone | Basic foreground lifecycle implemented; richer UI service deferred | The Python service can start, serve health/board/HTML endpoints, and shut down cleanly; live-update, logging, and rich editing service behavior remains part of the browser milestone. |
 | Mobile behavior | Required for full clone | Intentionally deferred | Mobile layout should be verified with real browser screenshots after the browser implementation exists. |
 
@@ -33,8 +33,8 @@ full clone unless explicitly rejected.
 
 A later browser milestone should not be marked complete until it has:
 
-- End-to-end browser tests for create/edit, drag-and-drop, archive confirmation,
-  and settings flows.
+- End-to-end browser tests for create/edit, archive confirmation, and settings
+  flows beyond the implemented drag-and-drop status movement.
 - Responsive checks for desktop and mobile viewports.
 - A clear service mode lifecycle for any richer browser UI behavior, including
   logging and live-update shutdown policy.

@@ -78,6 +78,7 @@ do not block the first local-file agent cutover candidate.
 | cli:rich-colored-output | implemented | ANSI-rich terminal rendering | cli:rich-colored-output |
 | cli:shell-completion-install | implemented | backlog completion install --shell bash, zsh, fish, pwsh | cli:shell-completion-install |
 | cli:interactive-config-wizard | implemented | backlog config interactive advanced wizard | cli:interactive-config-wizard |
+| browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 | git:auto-commit | implemented | autoCommit | git:auto-commit |
@@ -86,7 +87,6 @@ do not block the first local-file agent cutover candidate.
 
 | Inventory item | Status | Expected behavior | Deferred reason |
 | --- | --- | --- | --- |
-| browser:kanban-drag-drop | deferred | backlog browser | Browser UI parity is tracked in the browser deferral milestone. |
 | cli:interactive-board | deferred | backlog board interactive controls | Interactive terminal controls are deferred behind non-interactive agent workflows. |
 | cli:interactive-task-view-editor | deferred | backlog task <id> interactive task view and editor launch | Interactive task view and editor launch are deferred behind plain task output. |
 | cli:interactive-search-filters | deferred | interactive search filters and live filtering | Interactive search filtering is deferred behind deterministic search output. |

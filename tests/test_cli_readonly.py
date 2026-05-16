@@ -309,11 +309,11 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 66" in result.output
-    assert "deferred: 6" in result.output
+    assert "implemented: 67" in result.output
+    assert "deferred: 5" in result.output
     assert "total: 72" in result.output
     assert "cli: 39 implemented, 3 deferred, 42 total" in result.output
-    assert "browser: 1 implemented, 1 deferred, 2 total" in result.output
+    assert "browser: 2 implemented, 0 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 1 implemented, 0 deferred, 1 total" in result.output
     assert "git: 1 implemented, 2 deferred, 3 total" in result.output
@@ -325,7 +325,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert result.exit_code == 0
     assert '"agent_cutover_ready": true' in result.output
     assert '"browser:kanban-drag-drop"' in result.output
-    assert '"reason": "Browser UI parity is tracked in the browser deferral milestone."' in result.output
+    assert '"status": "implemented"' in result.output
 
 
 def test_task_list_plain_filters_by_metadata(tmp_path):

@@ -40,7 +40,7 @@ The Python clone keeps these features out of the first cutover path:
 - Interactive task/search flows remain deferred to human-facing parity work.
 - `backlog config` now provides the guided config wizard for human operators.
 - Browser `defaultPort` and `autoOpenBrowser` effects are implemented for the
-  read-only browser service; remaining TUI effects of extended config keys stay
+  loopback browser service; remaining TUI effects of extended config keys stay
   deferred.
 - `onStatusChange` is supported only when explicitly configured; task-level
   hooks override the project hook, and hook failures do not block status writes.

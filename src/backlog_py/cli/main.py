@@ -464,7 +464,7 @@ def overview_command(ctx: click.Context) -> None:
 @click.option("--no-open", is_flag=True, help="Do not open the browser after starting the service.")
 @click.pass_context
 def browser_command(ctx: click.Context, port: int | None, no_open: bool) -> None:
-    """Run the read-only browser board service."""
+    """Run the loopback browser board service."""
     project = _project(ctx)
     selected_port = port if port is not None else project.config.default_port
     open_browser = project.config.auto_open_browser and not no_open

@@ -107,5 +107,6 @@ until:
 - the package gate passes locally,
 - copied-repository smoke diffs are reviewed,
 - MCP or subprocess integration is verified in the consuming project,
-- browser UI, interactive TUI, hook-bypass, and remote-git deferrals are
-  acceptable for that workflow, and opt-in `autoCommit` policy is acceptable.
+- remaining browser editor/settings gaps, interactive TUI, hook-bypass, and
+  remote-git deferrals are acceptable for that workflow, and opt-in
+  `autoCommit` policy is acceptable.

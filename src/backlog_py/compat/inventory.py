@@ -170,12 +170,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "MCP tools",
             "definition_of_done_defaults_upsert(project, items)",
         ),
-        _deferred(
+        _implemented(
             "browser:kanban-drag-drop",
-            "browser-deferred",
+            "browser-implemented",
             "README.md",
             "backlog browser",
-            "Browser UI parity is tracked in the browser deferral milestone.",
         ),
         _implemented(
             "browser:custom-port-service",
