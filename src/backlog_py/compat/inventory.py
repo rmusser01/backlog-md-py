@@ -114,6 +114,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "ADVANCED-CONFIG.md",
             "config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds",
         ),
+        _implemented(
+            "config:task-prefix",
+            "config-implemented",
+            "CLI init/config source",
+            "init --task-prefix, config list taskPrefix read-only, and generated task/subtask IDs use prefixes.task",
+        ),
         _golden("mcp:workflow-overview", "agent-nudge.md", "backlog://workflow/overview"),
         _golden("mcp:task-workflow-alias", "agent-nudge.md", "backlog://docs/task-workflow"),
         _golden("mcp:board", "MCP tools", "task_board(project)"),

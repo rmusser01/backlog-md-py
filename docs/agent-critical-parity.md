@@ -74,6 +74,7 @@ do not block the first local-file agent cutover candidate.
 | Inventory item | Status | Expected command, resource, or tool | Fixture |
 | --- | --- | --- | --- |
 | config:extended-options | implemented | config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds | config:extended-options |
+| config:task-prefix | implemented | init --task-prefix, config list taskPrefix read-only, and generated task/subtask IDs use prefixes.task | config:task-prefix |
 
 ## Explicit Deferred Blockers
 

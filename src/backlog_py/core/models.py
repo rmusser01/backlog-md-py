@@ -20,6 +20,7 @@ class BacklogConfig:
     auto_commit: bool = False
     bypass_git_hooks: bool = False
     zero_padded_ids: int | None = None
+    task_prefix: str = "task"
     check_active_branches: bool = True
     active_branch_days: int = 30
     definition_of_done: list[str] | None = None

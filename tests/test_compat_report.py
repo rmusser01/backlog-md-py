@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 59,
+        "implemented": 60,
         "deferred": 12,
-        "total": 71,
+        "total": 72,
     }
     assert report["categories"]["cli"] == {
         "implemented": 36,
@@ -27,9 +27,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 2,
     }
     assert report["categories"]["config"] == {
-        "implemented": 1,
+        "implemented": 2,
         "deferred": 0,
-        "total": 1,
+        "total": 2,
     }
     assert report["categories"]["git"] == {
         "implemented": 0,

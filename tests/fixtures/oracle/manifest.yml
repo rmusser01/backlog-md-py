@@ -214,6 +214,10 @@ fixtures:
     command: ["backlog", "config", "set", "zeroPaddedIds", "3"]
     agent_critical: false
     classification: "config-implemented"
+  - name: "config:task-prefix"
+    command: ["backlog", "init", "Prefix Demo", "--defaults", "--task-prefix", "JIRA"]
+    agent_critical: false
+    classification: "config-implemented"
   - name: "core:on-status-change"
     command: ["backlog", "task", "edit", "TASK-1", "--status", "Done"]
     agent_critical: false
