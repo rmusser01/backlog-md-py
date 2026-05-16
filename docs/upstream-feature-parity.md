@@ -32,6 +32,9 @@ larger task commands:
   and decision IDs.
 - Init-time `--task-prefix`, read-only `taskPrefix` config listing, and
   generated task/subtask IDs that respect `prefixes.task`.
+- ANSI-rich terminal rendering for non-plain task list, search, board,
+  document, decision, and milestone summary output while preserving unstyled
+  `--plain` output.
 - Shell completion installer for bash, zsh, fish, and PowerShell using
   user-scoped completion paths for the `backlog-py` executable.
 

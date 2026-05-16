@@ -374,12 +374,12 @@ def search_command(
         lines.extend(_format_task_line(task_record, plain=plain) for task_record in task_results)
     if "document" in selected_types:
         lines.extend(
-            _format_document_line(document)
+            _format_document_line(document, plain=plain)
             for document in _document_service(ctx).search_documents(query)
         )
     if "decision" in selected_types:
         lines.extend(
-            _format_decision_line(decision)
+            _format_decision_line(decision, plain=plain)
             for decision in _decision_service(ctx).search_decisions(query)
         )
     if limit is not None:
@@ -433,9 +433,9 @@ def board_command(
     if args and args != ("view",):
         raise click.UsageError("Usage: board [view] | board export [filename]")
     for status, tasks in _repository(ctx).board().items():
-        click.echo(f"{status}:")
+        click.echo(f"{_style_status(status)}:")
         for task_record in tasks:
-            click.echo(f"  {_format_task_line(task_record, plain=True)}")
+            click.echo(f"  {_format_board_task_line(task_record)}")
 
 
 @main.command("overview")
@@ -1056,7 +1056,7 @@ def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:
         line = f"{task_record.id} [{task_record.status}] {task_record.title}"
         metadata = _format_task_metadata_lines(task_record)
         return "\n".join([line, *metadata])
-    return f"{task_record.id} - {task_record.title} ({task_record.status})"
+    return f"{_style_identifier(task_record.id)} - {task_record.title} ({_style_status(task_record.status)})"
 
 
 def _format_task_detail(task_record: TaskRecord, *, plain: bool) -> str:
@@ -1070,16 +1070,46 @@ def _format_task_detail(task_record: TaskRecord, *, plain: bool) -> str:
     return task_record.raw_source
 
 
-def _format_document_line(document: DocumentRecord) -> str:
-    return f"{document.path_relative} {document.title}".rstrip()
+def _format_board_task_line(task_record: TaskRecord) -> str:
+    return f"{_style_identifier(task_record.id)} [{_style_status(task_record.status)}] {task_record.title}"
 
 
-def _format_decision_line(decision: DecisionRecord) -> str:
-    return f"{decision.id} [{decision.status}] {decision.title}".rstrip()
+def _format_document_line(document: DocumentRecord, *, plain: bool = False) -> str:
+    path = str(document.path_relative) if plain else _style_identifier(str(document.path_relative))
+    return f"{path} {document.title}".rstrip()
+
+
+def _format_decision_line(decision: DecisionRecord, *, plain: bool = False) -> str:
+    identifier = decision.id if plain else _style_identifier(decision.id)
+    status = decision.status if plain else _style_status(decision.status)
+    return f"{identifier} [{status}] {decision.title}".rstrip()
 
 
 def _format_milestone_line(milestone: MilestoneRecord) -> str:
-    return f"{milestone.name} {milestone.path_relative}".rstrip()
+    return f"{_style_identifier(milestone.name)} {milestone.path_relative}".rstrip()
+
+
+def _style_identifier(value: str) -> str:
+    return click.style(value, fg="cyan", bold=True)
+
+
+def _style_status(status: str) -> str:
+    return click.style(status, fg=_status_color(status), bold=True)
+
+
+def _status_color(status: str) -> str:
+    normalized = status.strip().casefold()
+    if "done" in normalized or "complete" in normalized:
+        return "green"
+    if "progress" in normalized or "review" in normalized:
+        return "blue"
+    if "block" in normalized:
+        return "red"
+    if "todo" in normalized or "to do" in normalized or "backlog" in normalized:
+        return "yellow"
+    if "draft" in normalized:
+        return "magenta"
+    return "white"
 
 
 def _format_config_value(value: object) -> str:

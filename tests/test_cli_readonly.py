@@ -18,6 +18,10 @@ def _invoke(*args: str):
     return CliRunner().invoke(main, ["--cwd", str(FIXTURE_REPO), *args])
 
 
+def _invoke_color(*args: str):
+    return CliRunner().invoke(main, ["--cwd", str(FIXTURE_REPO), *args], color=True)
+
+
 def _invoke_repo(repo: Path, *args: str):
     return CliRunner().invoke(main, ["--cwd", str(repo), *args])
 
@@ -74,6 +78,21 @@ def test_task_list_plain_outputs_task_id():
     assert result.exit_code == 0
     assert "TASK-1" in result.output
     assert "Example task" in result.output
+
+
+def test_task_list_default_uses_ansi_color_without_changing_plain_contract():
+    result = _invoke_color("task", "list")
+    plain = _invoke_color("task", "list", "--plain")
+
+    assert result.exit_code == 0
+    assert "\x1b[" in result.output
+    assert "TASK-1" in result.output
+    assert "Example task" in result.output
+    assert "In Progress" in result.output
+
+    assert plain.exit_code == 0
+    assert "\x1b[" not in plain.output
+    assert "TASK-1 [In Progress] Example task" in plain.output
 
 
 def test_task_view_plain_outputs_task_body():
@@ -183,6 +202,21 @@ def test_board_outputs_status_grouping():
     assert "Done" in result.output
 
 
+def test_board_and_search_default_use_ansi_color_for_human_output():
+    board = _invoke_color("board")
+    search = _invoke_color("search", "parser preservation")
+
+    assert board.exit_code == 0
+    assert "\x1b[" in board.output
+    assert "In Progress" in board.output
+
+    assert search.exit_code == 0
+    assert "\x1b[" in search.output
+    assert "TASK-1" in search.output
+    assert "Example task" in search.output
+    assert "In Progress" in search.output
+
+
 def test_overview_outputs_plain_project_summary():
     result = _invoke("overview")
 
@@ -273,10 +307,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 61" in result.output
-    assert "deferred: 11" in result.output
+    assert "implemented: 62" in result.output
+    assert "deferred: 10" in result.output
     assert "total: 72" in result.output
-    assert "cli: 37 implemented, 5 deferred, 42 total" in result.output
+    assert "cli: 38 implemented, 4 deferred, 42 total" in result.output
     assert "browser: 0 implemented, 2 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "git: 0 implemented, 3 deferred, 3 total" in result.output

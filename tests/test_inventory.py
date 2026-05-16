@@ -21,3 +21,4 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
 
     assert by_name["browser:kanban-drag-drop"].classification == "browser-deferred"
     assert by_name["cli:interactive-board"].classification == "interactive-deferred"
+    assert by_name["cli:rich-colored-output"].classification == "terminal-implemented"
