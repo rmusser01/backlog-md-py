@@ -71,7 +71,6 @@ EXPECTED_AGENT_CRITICAL = {
 EXPECTED_DEFERRED = {
     "browser:kanban-drag-drop",
     "cli:interactive-board",
-    "cli:rich-colored-output",
     "cli:interactive-task-view-editor",
     "cli:interactive-search-filters",
     "cli:interactive-config-wizard",
@@ -210,6 +209,8 @@ def test_agent_critical_inventory_tracks_config_get_set_surface():
     assert by_name["config:task-prefix"].status == "implemented"
     assert "taskPrefix" in by_name["config:task-prefix"].expected
     assert "prefixes.task" in by_name["config:task-prefix"].expected
+    assert by_name["cli:rich-colored-output"].status == "implemented"
+    assert by_name["cli:rich-colored-output"].classification == "terminal-implemented"
 
 
 def test_agent_critical_inventory_tracks_agent_instruction_surface():

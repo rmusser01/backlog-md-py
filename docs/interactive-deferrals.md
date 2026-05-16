@@ -9,7 +9,6 @@ operations are the first compatibility target.
 
 | Capability | Classification | Agent cutover impact | Decision and reason |
 | --- | --- | --- | --- |
-| Colored output exactness | Interactive polish | Not required for agent cutover | Agents consume plain output. Exact ANSI colors can be added later without changing storage semantics. |
 | Interactive board | Interactive TUI | Intentionally deferred | The cutover requires deterministic `board` output, not keyboard-driven task movement or terminal UI state. |
 | Overview TUI | Interactive TUI | Intentionally deferred | A human dashboard can follow after the core inventory and mutation paths remain stable. |
 | Interactive task view/editor | Interactive TUI | Intentionally deferred | Plain `task <id> --plain` output covers agents; task-detail keybindings and editor launch need terminal/editor integration tests. |
@@ -39,6 +38,8 @@ Any future implementation of these features must provide:
 The Python clone keeps these features out of the first cutover path:
 
 - Plain output is the compatibility contract for agents.
+- ANSI color is implemented for non-plain task list/search/board output without
+  changing `--plain` output.
 - Interactive task/search/config flows remain deferred to human-facing parity work.
 - Browser and TUI effects of extended config keys remain deferred.
 - `onStatusChange` remains disabled by default.

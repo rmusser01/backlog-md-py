@@ -191,12 +191,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog board interactive controls",
             "Interactive terminal controls are deferred behind non-interactive agent workflows.",
         ),
-        _deferred(
+        _implemented(
             "cli:rich-colored-output",
-            "interactive-deferred",
+            "terminal-implemented",
             "CLI-INSTRUCTIONS.md",
             "ANSI-rich terminal rendering",
-            "Plain output is the cutover blocker; rich color is later polish.",
         ),
         _implemented(
             "cli:shell-completion-install",

@@ -193,7 +193,7 @@ fixtures:
   - name: "cli:rich-colored-output"
     command: ["backlog", "task", "list"]
     agent_critical: false
-    classification: "interactive-deferred"
+    classification: "terminal-implemented"
   - name: "cli:shell-completion-install"
     command: ["backlog", "completion", "install", "--shell", "bash"]
     agent_critical: false
