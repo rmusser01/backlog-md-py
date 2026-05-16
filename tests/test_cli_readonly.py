@@ -256,6 +256,13 @@ def test_config_list_outputs_safe_defaults():
 
     assert result.exit_code == 0
     assert "projectName: basic-fixture" in result.output
+    assert "defaultAssignee: (not set)" in result.output
+    assert "dateFormat: yyyy-mm-dd" in result.output
+    assert "includeDatetimeInDates: true" in result.output
+    assert "defaultEditor: (not set)" in result.output
+    assert "defaultPort: 6420" in result.output
+    assert "autoOpenBrowser: true" in result.output
+    assert "zeroPaddedIds: (disabled)" in result.output
     assert "autoCommit: false" in result.output
     assert "remoteOperations: false" in result.output
 
@@ -265,12 +272,12 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 58" in result.output
-    assert "deferred: 13" in result.output
+    assert "implemented: 59" in result.output
+    assert "deferred: 12" in result.output
     assert "total: 71" in result.output
     assert "cli: 36 implemented, 6 deferred, 42 total" in result.output
     assert "browser: 0 implemented, 2 deferred, 2 total" in result.output
-    assert "config: 0 implemented, 1 deferred, 1 total" in result.output
+    assert "config: 1 implemented, 0 deferred, 1 total" in result.output
     assert "git: 0 implemented, 3 deferred, 3 total" in result.output
 
 

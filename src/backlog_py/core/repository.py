@@ -11,6 +11,7 @@ from typing import Iterable, Sequence
 
 import yaml
 
+from backlog_py.core.ids import format_child_task_id, format_numbered_id
 from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.search.simple import contains_query
@@ -439,7 +440,7 @@ class MutableRepository(ReadOnlyRepository):
             match = re.fullmatch(r"TASK-(\d+)", task.id.upper())
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
-        return f"TASK-{max_id + 1}"
+        return format_numbered_id("TASK-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _next_child_task_id(self, parent_task_id: str) -> str:
         max_id = 0
@@ -451,7 +452,7 @@ class MutableRepository(ReadOnlyRepository):
             first_segment = rest.split(".", 1)[0]
             if first_segment.isdigit():
                 max_id = max(max_id, int(first_segment))
-        return f"{parent_task_id}.{max_id + 1}"
+        return format_child_task_id(parent_task_id, max_id + 1, self.project.config.zero_padded_ids)
 
     def _task_path(self, task_id: str, title: str) -> Path:
         task_dir = self.project.backlog_dir / "tasks"

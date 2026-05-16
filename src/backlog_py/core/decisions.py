@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 import yaml
 
+from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -102,7 +103,7 @@ class DecisionService:
             match = re.fullmatch(r"decision-(\d+)", decision.id.casefold())
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
-        return f"decision-{max_id + 1}"
+        return format_numbered_id("decision-", max_id + 1, self.project.config.zero_padded_ids)
 
 
 def _load_decision(base: Path, path: Path) -> DecisionRecord:

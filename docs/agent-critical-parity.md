@@ -69,6 +69,12 @@ do not block the first local-file agent cutover candidate.
 | mcp:definition-of-done-defaults-get | implemented | definition_of_done_defaults_get(project) | mcp:definition-of-done-defaults-get |
 | mcp:definition-of-done-defaults-upsert | implemented | definition_of_done_defaults_upsert(project, items) | mcp:definition-of-done-defaults-upsert |
 
+## Implemented Full-Parity Extensions
+
+| Inventory item | Status | Expected command, resource, or tool | Fixture |
+| --- | --- | --- | --- |
+| config:extended-options | implemented | config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds | config:extended-options |
+
 ## Explicit Deferred Blockers
 
 | Inventory item | Status | Expected behavior | Deferred reason |
@@ -81,7 +87,6 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-task-view-editor | deferred | backlog task <id> interactive task view and editor launch | Interactive task view and editor launch are deferred behind plain task output. |
 | cli:interactive-search-filters | deferred | interactive search filters and live filtering | Interactive search filtering is deferred behind deterministic search output. |
 | cli:interactive-config-wizard | deferred | backlog config interactive advanced wizard | The advanced config wizard is deferred behind non-interactive config get/set helpers. |
-| config:extended-options | deferred | defaultAssignee, dateFormat, includeDatetimeInDates, defaultPort, autoOpenBrowser, zeroPaddedIds | Advanced non-agent config options are deferred until full human-facing parity work. |
 | core:on-status-change | deferred | onStatusChange hooks | Hook execution remains disabled until a separate safety review. |
 | git:remote-operations | deferred | remote git operations | Remote git behavior is outside the first local-file compatibility gate. |
 | git:auto-commit | deferred | autoCommit | Automatic commits are deferred to keep mutation review explicit. |

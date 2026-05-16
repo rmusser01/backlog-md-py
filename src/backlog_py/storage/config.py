@@ -13,11 +13,23 @@ from backlog_py.security.paths import PathContainmentError, assert_path_within_b
 
 _KEY_ALIASES = {
     "project_name": ("project_name", "projectName"),
+    "default_assignee": ("default_assignee", "defaultAssignee"),
     "statuses": ("statuses",),
     "default_status": ("default_status", "defaultStatus"),
+    "date_format": ("date_format", "dateFormat"),
+    "include_datetime_in_dates": (
+        "include_datetime_in_dates",
+        "include_date_time_in_dates",
+        "includeDateTimeInDates",
+        "includeDatetimeInDates",
+    ),
+    "default_editor": ("default_editor", "defaultEditor"),
+    "auto_open_browser": ("auto_open_browser", "autoOpenBrowser"),
+    "default_port": ("default_port", "defaultPort"),
     "remote_operations": ("remote_operations", "remoteOperations"),
     "auto_commit": ("auto_commit", "autoCommit"),
     "bypass_git_hooks": ("bypass_git_hooks", "bypassGitHooks"),
+    "zero_padded_ids": ("zero_padded_ids", "zeroPaddedIds"),
     "check_active_branches": ("check_active_branches", "checkActiveBranches"),
     "active_branch_days": ("active_branch_days", "activeBranchDays"),
     "definition_of_done": ("definition_of_done", "definitionOfDone"),
@@ -28,12 +40,16 @@ _NORMALIZED_KEY_BY_ALIAS = {
     for alias in aliases
 }
 _BOOLEAN_CONFIG_KEYS = {
+    "include_datetime_in_dates",
+    "auto_open_browser",
     "remote_operations",
     "auto_commit",
     "bypass_git_hooks",
     "check_active_branches",
 }
 _INTEGER_CONFIG_KEYS = {"active_branch_days"}
+_PORT_CONFIG_KEYS = {"default_port"}
+_OPTIONAL_PADDING_KEYS = {"zero_padded_ids"}
 _LIST_CONFIG_KEYS = {"statuses", "definition_of_done"}
 
 
@@ -45,11 +61,18 @@ def load_config(path: Path) -> BacklogConfig:
 
     return BacklogConfig(
         project_name=_string_value(raw, "project_name", _default_project_name(path)),
+        default_assignee=_optional_string_value(raw, "default_assignee"),
         statuses=_optional_string_list(_get(raw, "statuses", None)),
         default_status=_string_value(raw, "default_status", "To Do"),
+        date_format=_string_value(raw, "date_format", "yyyy-mm-dd"),
+        include_datetime_in_dates=_bool_value(raw, "include_datetime_in_dates", True),
+        default_editor=_optional_string_value(raw, "default_editor"),
+        auto_open_browser=_bool_value(raw, "auto_open_browser", True),
+        default_port=_int_value(raw, "default_port", 6420),
         remote_operations=_bool_value(raw, "remote_operations", True),
         auto_commit=_bool_value(raw, "auto_commit", False),
         bypass_git_hooks=_bool_value(raw, "bypass_git_hooks", False),
+        zero_padded_ids=_optional_positive_int(raw, "zero_padded_ids"),
         check_active_branches=_bool_value(raw, "check_active_branches", True),
         active_branch_days=_int_value(raw, "active_branch_days", 30),
         definition_of_done=_optional_string_list(_get(raw, "definition_of_done", None)),
@@ -75,14 +98,19 @@ def replace_definition_of_done_defaults(project: BacklogProject, items: list[str
 def get_config_value(project: BacklogProject, key: str) -> Any:
     """Return a raw config value or known effective default by CLI key."""
     raw = _load_raw_config(project.config_path)
+    normalized_key = _normalized_config_key(key)
     raw_key = _find_existing_config_key(raw, key)
     if raw_key is not None:
+        if normalized_key == "zero_padded_ids":
+            return _zero_padded_ids_display(raw[raw_key])
         return raw[raw_key]
 
-    normalized_key = _normalized_config_key(key)
     if normalized_key is None:
         raise KeyError(f"Unknown config key: {key}")
-    return getattr(load_config(project.config_path), normalized_key)
+    value = getattr(load_config(project.config_path), normalized_key)
+    if normalized_key == "zero_padded_ids":
+        return _zero_padded_ids_display(value)
+    return value
 
 
 def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str, Any]:
@@ -91,10 +119,17 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
     normalized_key = _normalized_config_key(key)
     parsed_value = _parse_config_value(normalized_key, value)
     raw_key = _target_config_key(raw, key, normalized_key)
-    raw[raw_key] = parsed_value
+    if normalized_key == "zero_padded_ids" and parsed_value is None:
+        existing_key = _find_existing_config_key(raw, key)
+        if existing_key is not None:
+            raw.pop(existing_key, None)
+        display_value = _zero_padded_ids_display(parsed_value)
+    else:
+        raw[raw_key] = parsed_value
+        display_value = parsed_value
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n")
-    return raw_key, parsed_value
+    return raw_key, display_value
 
 
 def _get(raw: dict[Any, Any], normalized_key: str, default: Any) -> Any:
@@ -152,10 +187,30 @@ def _string_value(raw: dict[Any, Any], normalized_key: str, default: str) -> str
     return value
 
 
+def _optional_string_value(raw: dict[Any, Any], normalized_key: str) -> str | None:
+    value = _get(raw, normalized_key, None)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Backlog config value {normalized_key} must be a string")
+    return value
+
+
 def _bool_value(raw: dict[Any, Any], normalized_key: str, default: bool) -> bool:
     value = _get(raw, normalized_key, default)
     if not isinstance(value, bool):
         raise ValueError(f"Backlog config value {normalized_key} must be a boolean")
+    return value
+
+
+def _optional_positive_int(raw: dict[Any, Any], normalized_key: str) -> int | None:
+    value = _get(raw, normalized_key, None)
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"Backlog config value {normalized_key} must be an integer")
+    if value <= 0:
+        return None
     return value
 
 
@@ -194,6 +249,10 @@ def _normalized_config_key(key: str) -> str | None:
 def _parse_config_value(normalized_key: str | None, value: str) -> Any:
     if normalized_key in _BOOLEAN_CONFIG_KEYS:
         return _parse_bool_config_value(normalized_key, value)
+    if normalized_key in _PORT_CONFIG_KEYS:
+        return _parse_port_config_value(normalized_key, value)
+    if normalized_key in _OPTIONAL_PADDING_KEYS:
+        return _parse_zero_padded_ids_value(normalized_key, value)
     if normalized_key in _INTEGER_CONFIG_KEYS:
         return _parse_int_config_value(normalized_key, value)
     if normalized_key in _LIST_CONFIG_KEYS:
@@ -203,9 +262,9 @@ def _parse_config_value(normalized_key: str | None, value: str) -> Any:
 
 def _parse_bool_config_value(normalized_key: str | None, value: str) -> bool:
     normalized = value.strip().casefold()
-    if normalized == "true":
+    if normalized in {"true", "1", "yes"}:
         return True
-    if normalized == "false":
+    if normalized in {"false", "0", "no"}:
         return False
     raise ValueError(f"Backlog config value {normalized_key} must be a boolean")
 
@@ -216,6 +275,28 @@ def _parse_int_config_value(normalized_key: str | None, value: str) -> int:
     except ValueError as exc:
         raise ValueError(f"Backlog config value {normalized_key} must be an integer") from exc
     return parsed
+
+
+def _parse_port_config_value(normalized_key: str | None, value: str) -> int:
+    parsed = _parse_int_config_value(normalized_key, value)
+    if parsed < 1 or parsed > 65535:
+        raise ValueError(f"Backlog config value {normalized_key} must be a valid port number (1-65535)")
+    return parsed
+
+
+def _parse_zero_padded_ids_value(normalized_key: str | None, value: str) -> int | None:
+    parsed = _parse_int_config_value(normalized_key, value)
+    if parsed < 0:
+        raise ValueError(f"Backlog config value {normalized_key} must be a non-negative number")
+    return parsed or None
+
+
+def _zero_padded_ids_display(value: Any) -> Any:
+    if value is None:
+        return "(disabled)"
+    if isinstance(value, int) and not isinstance(value, bool) and value <= 0:
+        return "(disabled)"
+    return value
 
 
 def _parse_list_config_value(value: str) -> list[str]:

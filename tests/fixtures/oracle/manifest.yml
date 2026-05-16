@@ -211,9 +211,9 @@ fixtures:
     agent_critical: false
     classification: "interactive-deferred"
   - name: "config:extended-options"
-    command: ["backlog", "config", "list"]
+    command: ["backlog", "config", "set", "zeroPaddedIds", "3"]
     agent_critical: false
-    classification: "config-deferred"
+    classification: "config-implemented"
   - name: "core:on-status-change"
     command: ["backlog", "task", "edit", "TASK-1", "--status", "Done"]
     agent_critical: false
