@@ -25,8 +25,8 @@ full clone unless explicitly rejected.
 | Archive confirmations | Required for full clone | Not required for agent cutover | Agents use explicit archive/complete operations; browser confirmation UX belongs to a later human UI milestone. |
 | Rich Markdown editing | Required for full clone | Intentionally deferred | Rich editing must preserve unknown Markdown and frontmatter exactly, so it needs round-trip visual and parser tests. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
-| Custom port and no-open flags | Required for full clone | Intentionally deferred | Upstream supports `backlog browser --port <port> --no-open`; Python browser parity needs explicit port-collision and launch-policy tests. |
-| service mode | Required for full clone | Intentionally deferred | A browser service mode needs lifecycle, port, logging, and shutdown policy that should not be bundled with local-file cutover. |
+| Custom port and no-open flags | Required for full clone | Implemented for read-only board service | `backlog-py browser --port <port> --no-open` starts a loopback read-only board service, honors config defaults, and has port-collision and launch-policy tests. |
+| service mode | Required for full clone | Basic foreground lifecycle implemented; richer UI service deferred | The Python service can start, serve health/board/HTML endpoints, and shut down cleanly; live-update, logging, and rich editing service behavior remains part of the browser milestone. |
 | Mobile behavior | Required for full clone | Intentionally deferred | Mobile layout should be verified with real browser screenshots after the browser implementation exists. |
 
 ## Acceptance For Full Browser Clone
@@ -36,8 +36,8 @@ A later browser milestone should not be marked complete until it has:
 - End-to-end browser tests for create/edit, drag-and-drop, archive confirmation,
   and settings flows.
 - Responsive checks for desktop and mobile viewports.
-- A clear service mode lifecycle with startup, shutdown, logging, and port
-  collision behavior.
+- A clear service mode lifecycle for any richer browser UI behavior, including
+  logging and live-update shutdown policy.
 - Round-trip tests proving rich Markdown editing does not damage frontmatter,
   owned sections, unknown body text, mermaid blocks, or checklist markers.
 - Documentation that states whether the browser uses polling, server-sent

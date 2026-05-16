@@ -73,7 +73,6 @@ EXPECTED_DEFERRED = {
     "cli:interactive-board",
     "cli:interactive-task-view-editor",
     "cli:interactive-search-filters",
-    "browser:custom-port-service",
     "git:remote-operations",
     "git:hook-bypass",
 }
@@ -143,6 +142,16 @@ def test_agent_critical_inventory_tracks_auto_commit_surface():
     assert item.status == "implemented"
     assert item.classification == "git-implemented"
     assert item.expected == "autoCommit"
+
+
+def test_agent_critical_inventory_tracks_browser_service_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:custom-port-service"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "backlog browser --port <port> --no-open and browser service lifecycle"
 
 
 def test_agent_critical_inventory_tracks_init_surface():

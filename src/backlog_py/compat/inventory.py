@@ -177,12 +177,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog browser",
             "Browser UI parity is tracked in the browser deferral milestone.",
         ),
-        _deferred(
+        _implemented(
             "browser:custom-port-service",
-            "browser-deferred",
+            "browser-implemented",
             "CLI-INSTRUCTIONS.md",
             "backlog browser --port <port> --no-open and browser service lifecycle",
-            "Browser port flags and service lifecycle are deferred with the browser milestone.",
         ),
         _deferred(
             "cli:interactive-board",

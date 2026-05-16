@@ -44,15 +44,18 @@ larger task commands:
   Definition-of-Done defaults.
 - Opt-in local `autoCommit` after project write mutations, with dirty-worktree
   protection, no remote operations, and no hook bypass.
+- Read-only loopback `backlog browser` service with `--port <port>`,
+  `--no-open`, config-driven default port and auto-open behavior, health and
+  board JSON endpoints, and a static board snapshot.
 
 ## Remaining Full-Parity Work
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | `backlog browser`, responsive Kanban, drag-and-drop status changes, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Deferred to browser milestone |
-| Browser service | `backlog browser --port <port> --no-open`, service lifecycle, port collisions, logging, shutdown | Deferred to browser milestone |
+| Browser UI | responsive Kanban polish, drag-and-drop status changes, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic read-only board service implemented; interactive browser UI remains deferred |
+| Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, and static board snapshot are implemented |
 | Terminal UI | Interactive board, overview TUI, interactive task detail, editor launch, interactive search filters, live filtering | Deferred behind deterministic plain output |
-| Extended config effects | Browser/TUI behavior driven by `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display preferences | Config read/write and zero-padded ID generation implemented; browser/TUI effects remain deferred |
+| Extended config effects | TUI behavior driven by `defaultEditor` and date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects are implemented; TUI effects remain deferred |
 | Git automation | remote operations, active-branch accuracy behavior, hook bypass | Local auto-commit implemented; remote operations deferred; hook bypass rejected for first cutover |
 
 ## Recommended Work Order
