@@ -42,6 +42,8 @@ larger task commands:
   non-blocking failure handling.
 - Guided `backlog config` wizard for advanced settings and
   Definition-of-Done defaults.
+- Opt-in local `autoCommit` after project write mutations, with dirty-worktree
+  protection, no remote operations, and no hook bypass.
 
 ## Remaining Full-Parity Work
 
@@ -51,7 +53,7 @@ larger task commands:
 | Browser service | `backlog browser --port <port> --no-open`, service lifecycle, port collisions, logging, shutdown | Deferred to browser milestone |
 | Terminal UI | Interactive board, overview TUI, interactive task detail, editor launch, interactive search filters, live filtering | Deferred behind deterministic plain output |
 | Extended config effects | Browser/TUI behavior driven by `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display preferences | Config read/write and zero-padded ID generation implemented; browser/TUI effects remain deferred |
-| Git automation | remote operations, active-branch accuracy behavior, auto-commit, hook bypass | Remote and auto-commit deferred; hook bypass rejected for first cutover |
+| Git automation | remote operations, active-branch accuracy behavior, hook bypass | Local auto-commit implemented; remote operations deferred; hook bypass rejected for first cutover |
 
 ## Recommended Work Order
 
@@ -63,5 +65,5 @@ larger task commands:
    work and require end-to-end browser tests before claiming support.
 4. Implement interactive terminal/editor flows only after plain output remains
    stable and covered.
-5. Treat auto-commit, remotes, and hook bypass as separate security-sensitive
-   milestones with explicit opt-in behavior.
+5. Treat remotes and hook bypass as separate security-sensitive milestones with
+   explicit opt-in behavior.

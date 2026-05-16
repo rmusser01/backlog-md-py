@@ -15,7 +15,6 @@ operations are the first compatibility target.
 | Interactive search filters | Interactive TUI | Intentionally deferred | Deterministic search output covers agents; live filtering and refinement controls need terminal UI tests. |
 | Editor launch | Interactive TUI | Intentionally deferred | Launching `$EDITOR` is environment-dependent and not needed for non-interactive agent workflows. |
 | Extended display/browser config effects | Human-facing config | Intentionally deferred | Config read/write is supported; browser and TUI behavior that consumes `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display settings follows the browser/TUI milestones. |
-| auto-commit | Git automation | Intentionally deferred | Automatic commits hide mutation boundaries from reviewers and are outside the first local-file compatibility gate. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
 | Remote operations | Git/network behavior | Intentionally deferred | Remote git behavior introduces network and credential effects that are unnecessary for local Backlog.md compatibility. |
 
@@ -43,7 +42,10 @@ The Python clone keeps these features out of the first cutover path:
 - Browser and TUI effects of extended config keys remain deferred.
 - `onStatusChange` is supported only when explicitly configured; task-level
   hooks override the project hook, and hook failures do not block status writes.
-- auto-commit and remote operations are deferred.
+- `autoCommit` is opt-in and local-only. It runs after project write mutations
+  when the project had no pre-existing git changes, uses fixed `git` argv
+  without a shell, does not push or pull remotes, and does not bypass hooks.
+- Remote operations are deferred.
 - hook bypass is rejected for first cutover.
 - Rich interactive UI behavior remains later human-operator convenience, not an
   agent blocker.
