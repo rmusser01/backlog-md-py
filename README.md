@@ -41,6 +41,15 @@ backlog-py compat status
 backlog-py compat status --json
 ```
 
+Install shell completion for the `backlog-py` command:
+
+```bash
+backlog-py completion install --shell zsh
+backlog-py completion install --shell bash
+backlog-py completion install --shell fish
+backlog-py completion install --shell pwsh
+```
+
 See `docs/integration.md` for CLI, Python helper, and MCP integration notes.
 
 ## Singleton Daemon For Agents
@@ -107,8 +116,8 @@ agent-critical cutover validation record.
 
 Agent-critical parity is tracked in `docs/agent-critical-parity.md`. The matrix
 enumerates every CLI command, MCP resource, and pure MCP helper that blocks the
-first local-file agent cutover candidate, plus the browser, interactive,
-completion, hook, and git behaviors that are explicitly deferred.
+first local-file agent cutover candidate, plus the browser, interactive, hook,
+and git behaviors that are explicitly deferred.
 
 The gate is enforced by `tests/test_agent_critical_matrix.py`: every
 `golden-required` inventory item must have a matching oracle manifest fixture,

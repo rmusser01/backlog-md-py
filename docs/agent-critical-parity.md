@@ -75,6 +75,7 @@ do not block the first local-file agent cutover candidate.
 | --- | --- | --- | --- |
 | config:extended-options | implemented | config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds | config:extended-options |
 | config:task-prefix | implemented | init --task-prefix, config list taskPrefix read-only, and generated task/subtask IDs use prefixes.task | config:task-prefix |
+| cli:shell-completion-install | implemented | backlog completion install --shell bash, zsh, fish, pwsh | cli:shell-completion-install |
 
 ## Explicit Deferred Blockers
 
@@ -84,7 +85,6 @@ do not block the first local-file agent cutover candidate.
 | browser:custom-port-service | deferred | backlog browser --port <port> --no-open and browser service lifecycle | Browser port flags and service lifecycle are deferred with the browser milestone. |
 | cli:interactive-board | deferred | backlog board interactive controls | Interactive terminal controls are deferred behind non-interactive agent workflows. |
 | cli:rich-colored-output | deferred | ANSI-rich terminal rendering | Plain output is the cutover blocker; rich color is later polish. |
-| cli:shell-completion-install | deferred | backlog completion install | Shell completion installation is not needed for agent runtime cutover. |
 | cli:interactive-task-view-editor | deferred | backlog task <id> interactive task view and editor launch | Interactive task view and editor launch are deferred behind plain task output. |
 | cli:interactive-search-filters | deferred | interactive search filters and live filtering | Interactive search filtering is deferred behind deterministic search output. |
 | cli:interactive-config-wizard | deferred | backlog config interactive advanced wizard | The advanced config wizard is deferred behind non-interactive config get/set helpers. |

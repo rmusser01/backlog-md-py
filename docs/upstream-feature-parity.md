@@ -32,6 +32,8 @@ larger task commands:
   and decision IDs.
 - Init-time `--task-prefix`, read-only `taskPrefix` config listing, and
   generated task/subtask IDs that respect `prefixes.task`.
+- Shell completion installer for bash, zsh, fish, and PowerShell using
+  user-scoped completion paths for the `backlog-py` executable.
 
 ## Remaining Full-Parity Work
 
@@ -41,7 +43,6 @@ larger task commands:
 | Browser service | `backlog browser --port <port> --no-open`, service lifecycle, port collisions, logging, shutdown | Deferred to browser milestone |
 | Terminal UI | Interactive board, overview TUI, interactive task detail, editor launch, interactive search filters, live filtering | Deferred behind deterministic plain output |
 | Config wizard | `backlog config` with guided advanced settings and Definition-of-Done editing | Deferred behind non-interactive config helpers |
-| Shell completion | `backlog completion install` for bash, zsh, fish, and PowerShell | Deferred convenience tooling |
 | Extended config effects | Browser/TUI behavior driven by `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display preferences | Config read/write and zero-padded ID generation implemented; browser/TUI effects remain deferred |
 | Hooks | `onStatusChange` shell command execution and task-level override | Disabled until a safety review and opt-in execution model exist |
 | Git automation | remote operations, active-branch accuracy behavior, auto-commit, hook bypass | Remote and auto-commit deferred; hook bypass rejected for first cutover |

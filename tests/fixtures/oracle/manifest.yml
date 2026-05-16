@@ -195,9 +195,9 @@ fixtures:
     agent_critical: false
     classification: "interactive-deferred"
   - name: "cli:shell-completion-install"
-    command: ["backlog", "completion", "install"]
+    command: ["backlog", "completion", "install", "--shell", "bash"]
     agent_critical: false
-    classification: "completion-deferred"
+    classification: "completion-implemented"
   - name: "cli:interactive-task-view-editor"
     command: ["backlog", "task", "TASK-1"]
     agent_critical: false
