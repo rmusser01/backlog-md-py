@@ -33,6 +33,7 @@ from backlog_py.daemon.lifecycle import (
     daemon_status,
     daemon_stop,
 )
+from backlog_py.integration.legacy_shim import install_legacy_mcp_shim
 from backlog_py.storage.config import (
     get_config_value,
     get_definition_of_done_defaults,
@@ -480,6 +481,27 @@ def agents_command(ctx: click.Context, update_instructions: bool) -> None:
         raise click.ClickException(str(exc)) from exc
     for update in updates:
         click.echo(f"Updated {update.path_relative}")
+
+
+@main.group("integration")
+def integration_group() -> None:
+    """Install opt-in integration helpers."""
+
+
+@integration_group.command("install-legacy-mcp-shim")
+@click.option("--target", type=click.Path(path_type=Path), required=True, help="Existing backlog command to wrap.")
+@click.option("--mcp-command", type=click.Path(path_type=Path), default=None, help="backlog-py-mcp command path.")
+@click.option("--backup", type=click.Path(path_type=Path), default=None, help="Path for the original command backup.")
+def install_legacy_mcp_shim_command(target: Path, mcp_command: Path | None, backup: Path | None) -> None:
+    """Route cached 'backlog mcp start' launches to backlog-py-mcp."""
+    try:
+        result = install_legacy_mcp_shim(target=target, mcp_command=mcp_command, backup=backup)
+    except (FileNotFoundError, FileExistsError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Installed legacy MCP shim at {result.target}")
+    click.echo(f"Original command backup: {result.backup}")
+    click.echo(f"backlog mcp start now routes to: {result.mcp_command}")
 
 
 @main.group("daemon")

@@ -121,6 +121,17 @@ Every MCP tool takes a `project` argument containing the path to the Backlog.md
 project or a directory inside it. This keeps the server stateless and avoids a
 global mutable working directory.
 
+If existing long-lived agent sessions cannot be restarted and still launch
+`backlog mcp start`, use the explicit legacy shim installer:
+
+```bash
+backlog-py integration install-legacy-mcp-shim --target "$(command -v backlog)"
+```
+
+That wrapper is intentionally narrow: only `backlog mcp start` is redirected to
+`backlog-py-mcp`; all other Backlog.md CLI invocations use the backed-up
+original command.
+
 See `docs/singleton-daemon.md` for the full daemon lifecycle, local Codex config
 shape, and process verification steps.
 
