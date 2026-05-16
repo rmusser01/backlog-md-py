@@ -7,14 +7,14 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 56,
-        "deferred": 8,
-        "total": 64,
+        "implemented": 58,
+        "deferred": 13,
+        "total": 71,
     }
     assert report["categories"]["cli"] == {
-        "implemented": 34,
-        "deferred": 3,
-        "total": 37,
+        "implemented": 36,
+        "deferred": 6,
+        "total": 42,
     }
     assert report["categories"]["mcp"] == {
         "implemented": 22,
@@ -22,6 +22,11 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
+        "implemented": 0,
+        "deferred": 2,
+        "total": 2,
+    }
+    assert report["categories"]["config"] == {
         "implemented": 0,
         "deferred": 1,
         "total": 1,

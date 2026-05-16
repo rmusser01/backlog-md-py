@@ -25,6 +25,8 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:task-demote",
     "cli:draft-archive",
     "cli:task-edit",
+    "cli:task-edit-rich-sections",
+    "cli:task-edit-checklist-state",
     "cli:task-archive",
     "cli:cleanup",
     "cli:doc-list",
@@ -71,6 +73,11 @@ EXPECTED_DEFERRED = {
     "cli:interactive-board",
     "cli:rich-colored-output",
     "cli:shell-completion-install",
+    "cli:interactive-task-view-editor",
+    "cli:interactive-search-filters",
+    "cli:interactive-config-wizard",
+    "browser:custom-port-service",
+    "config:extended-options",
     "core:on-status-change",
     "git:remote-operations",
     "git:auto-commit",
@@ -157,7 +164,28 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
     assert "-d <text>" in by_name["cli:task-create"].expected
     assert "-s <status>" in by_name["cli:task-create"].expected
     assert "--draft" in by_name["cli:task-create"].expected
+    assert "--notes <text>" in by_name["cli:task-create"].expected
     assert "--no-dod-defaults" in by_name["cli:task-create"].expected
+
+
+def test_agent_critical_inventory_tracks_task_edit_rich_sections_and_checklists():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    rich_sections = by_name["cli:task-edit-rich-sections"].expected
+    assert "--notes <text>" in rich_sections
+    assert "--append-notes <text>" in rich_sections
+    assert "--final-summary <text>" in rich_sections
+    assert "--append-final-summary <text>" in rich_sections
+    assert "--clear-final-summary" in rich_sections
+
+    checklist_state = by_name["cli:task-edit-checklist-state"].expected
+    assert "--check-ac <index>" in checklist_state
+    assert "--uncheck-ac <index>" in checklist_state
+    assert "--check-dod <index>" in checklist_state
+    assert "--uncheck-dod <index>" in checklist_state
+    assert "--remove-ac <index>" in checklist_state
+    assert "--remove-dod <index>" in checklist_state
 
 
 def test_agent_critical_inventory_tracks_draft_cli_surface():

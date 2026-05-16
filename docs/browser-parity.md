@@ -25,6 +25,7 @@ full clone unless explicitly rejected.
 | Archive confirmations | Required for full clone | Not required for agent cutover | Agents use explicit archive/complete operations; browser confirmation UX belongs to a later human UI milestone. |
 | Rich Markdown editing | Required for full clone | Intentionally deferred | Rich editing must preserve unknown Markdown and frontmatter exactly, so it needs round-trip visual and parser tests. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
+| Custom port and no-open flags | Required for full clone | Intentionally deferred | Upstream supports `backlog browser --port <port> --no-open`; Python browser parity needs explicit port-collision and launch-policy tests. |
 | service mode | Required for full clone | Intentionally deferred | A browser service mode needs lifecycle, port, logging, and shutdown policy that should not be bundled with local-file cutover. |
 | Mobile behavior | Required for full clone | Intentionally deferred | Mobile layout should be verified with real browser screenshots after the browser implementation exists. |
 

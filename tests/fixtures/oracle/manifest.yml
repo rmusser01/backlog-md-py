@@ -1,8 +1,8 @@
-upstream_version: "1.44.0"
-source_kind: "npm-release"
-source_ref: "backlog.md@1.44.0"
-package_metadata_sha256: "b890dde4a33480361ff34195192e1c0a23d6c7dc1c47b095933a29c7ccb4eee6"
-generated_at: "2026-05-10"
+upstream_version: "1.45.1"
+source_kind: "github-main-package"
+source_ref: "backlog.md@1.45.1"
+package_metadata_sha256: "4b93cc1703bfab79a3c65653a2feda44cdc15b8e243720b486538102057aafde"
+generated_at: "2026-05-16"
 fixtures:
   - name: "cli:help"
     command: ["backlog", "--help"]
@@ -32,7 +32,7 @@ fixtures:
     command: ["backlog", "board", "export", "status.md", "--force", "--export-version", "v1.45.1"]
     agent_critical: true
   - name: "cli:task-create"
-    command: ["backlog", "task", "create", "Temporary smoke task", "-d", "Created through task aliases", "-s", "To Do", "--parent", "1", "--ordinal", "1000", "--final-summary", "Created summary", "--no-dod-defaults", "--plain"]
+    command: ["backlog", "task", "create", "Temporary smoke task", "-d", "Created through task aliases", "-s", "To Do", "--notes", "Initial fixture note", "--parent", "1", "--ordinal", "1000", "--final-summary", "Created summary", "--no-dod-defaults", "--plain"]
     agent_critical: true
   - name: "cli:draft-create"
     command: ["backlog", "draft", "create", "Spike GraphQL", "-d", "Explore schema.", "-l", "research"]
@@ -54,6 +54,12 @@ fixtures:
     agent_critical: true
   - name: "cli:task-edit"
     command: ["backlog", "task", "edit", "TASK-1", "--ordinal", "2000", "--append-notes", "Updated from fixture", "--plain"]
+    agent_critical: true
+  - name: "cli:task-edit-rich-sections"
+    command: ["backlog", "task", "edit", "TASK-1", "--notes", "Replacement fixture notes", "--append-notes", "Extra fixture notes", "--final-summary", "Fixture summary", "--append-final-summary", "More fixture summary", "--clear-final-summary", "--plain"]
+    agent_critical: true
+  - name: "cli:task-edit-checklist-state"
+    command: ["backlog", "task", "edit", "TASK-1", "--check-ac", "1", "--uncheck-ac", "2", "--check-dod", "1", "--uncheck-dod", "2", "--remove-ac", "3", "--remove-dod", "3", "--plain"]
     agent_critical: true
   - name: "cli:task-archive"
     command: ["backlog", "task", "archive", "TASK-1", "--plain"]
@@ -176,6 +182,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-deferred"
+  - name: "browser:custom-port-service"
+    command: ["backlog", "browser", "--port", "8080", "--no-open"]
+    agent_critical: false
+    classification: "browser-deferred"
   - name: "cli:interactive-board"
     command: ["backlog", "board"]
     agent_critical: false
@@ -188,6 +198,22 @@ fixtures:
     command: ["backlog", "completion", "install"]
     agent_critical: false
     classification: "completion-deferred"
+  - name: "cli:interactive-task-view-editor"
+    command: ["backlog", "task", "TASK-1"]
+    agent_critical: false
+    classification: "interactive-deferred"
+  - name: "cli:interactive-search-filters"
+    command: ["backlog", "search", "auth"]
+    agent_critical: false
+    classification: "interactive-deferred"
+  - name: "cli:interactive-config-wizard"
+    command: ["backlog", "config"]
+    agent_critical: false
+    classification: "interactive-deferred"
+  - name: "config:extended-options"
+    command: ["backlog", "config", "list"]
+    agent_critical: false
+    classification: "config-deferred"
   - name: "core:on-status-change"
     command: ["backlog", "task", "edit", "TASK-1", "--status", "Done"]
     agent_critical: false

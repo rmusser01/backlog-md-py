@@ -48,7 +48,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> --draft -d <text> -s <status> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain",
+            "backlog task create <title> --draft -d <text> -s <status> --plan <text> --notes <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain",
         ),
         _golden(
             "cli:draft-create",
@@ -64,6 +64,16 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
             "backlog task edit <id> --plan <text> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain",
+        ),
+        _golden(
+            "cli:task-edit-rich-sections",
+            "CLI-INSTRUCTIONS.md",
+            "backlog task edit <id> --notes <text> --append-notes <text> --final-summary <text> --append-final-summary <text> --clear-final-summary --plain",
+        ),
+        _golden(
+            "cli:task-edit-checklist-state",
+            "CLI-INSTRUCTIONS.md",
+            "backlog task edit <id> --check-ac <index> --uncheck-ac <index> --check-dod <index> --uncheck-dod <index> --remove-ac <index> --remove-dod <index> --plain",
         ),
         _golden("cli:task-archive", "CLI-INSTRUCTIONS.md", "backlog task archive <id> --plain"),
         _golden("cli:cleanup", "CLI-INSTRUCTIONS.md", "backlog cleanup"),
@@ -156,6 +166,13 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "Browser UI parity is tracked in the browser deferral milestone.",
         ),
         _deferred(
+            "browser:custom-port-service",
+            "browser-deferred",
+            "CLI-INSTRUCTIONS.md",
+            "backlog browser --port <port> --no-open and browser service lifecycle",
+            "Browser port flags and service lifecycle are deferred with the browser milestone.",
+        ),
+        _deferred(
             "cli:interactive-board",
             "interactive-deferred",
             "CLI-INSTRUCTIONS.md",
@@ -175,6 +192,34 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "CLI-INSTRUCTIONS.md",
             "backlog completion install",
             "Shell completion installation is not needed for agent runtime cutover.",
+        ),
+        _deferred(
+            "cli:interactive-task-view-editor",
+            "interactive-deferred",
+            "CLI-INSTRUCTIONS.md",
+            "backlog task <id> interactive task view and editor launch",
+            "Interactive task view and editor launch are deferred behind plain task output.",
+        ),
+        _deferred(
+            "cli:interactive-search-filters",
+            "interactive-deferred",
+            "CLI-INSTRUCTIONS.md",
+            "interactive search filters and live filtering",
+            "Interactive search filtering is deferred behind deterministic search output.",
+        ),
+        _deferred(
+            "cli:interactive-config-wizard",
+            "interactive-deferred",
+            "ADVANCED-CONFIG.md",
+            "backlog config interactive advanced wizard",
+            "The advanced config wizard is deferred behind non-interactive config get/set helpers.",
+        ),
+        _deferred(
+            "config:extended-options",
+            "config-deferred",
+            "ADVANCED-CONFIG.md",
+            "defaultAssignee, dateFormat, includeDatetimeInDates, defaultPort, autoOpenBrowser, zeroPaddedIds",
+            "Advanced non-agent config options are deferred until full human-facing parity work.",
         ),
         _deferred(
             "core:on-status-change",

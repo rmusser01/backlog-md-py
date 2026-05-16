@@ -71,9 +71,9 @@ agents or mutate orchestration state in this slice.
 
 ## Oracle Fixtures
 
-Compatibility fixtures are pinned to explicit upstream Backlog.md release
-metadata. The initial oracle manifest records `backlog.md@1.44.0`, source kind,
-source reference, package metadata hash, generation date, and the agent-critical
+Compatibility fixtures are pinned to explicit upstream Backlog.md metadata. The
+oracle manifest records `backlog.md@1.45.1`, source kind, source reference,
+package metadata hash, generation date, and the agent-critical
 commands/resources/tools that future golden fixtures must cover.
 
 Upstream Backlog.md and its Node/Bun toolchain are only allowed in fixture
@@ -130,3 +130,5 @@ cutover candidate:
   service mode, rich Markdown editing, and mobile behavior.
 - `docs/interactive-deferrals.md` records CLI/TUI, `onStatusChange`,
   auto-commit, hook bypass, and remote-operation deferrals.
+- `docs/upstream-feature-parity.md` records the current upstream feature-set
+  audit and the work that remains before claiming full clone parity.

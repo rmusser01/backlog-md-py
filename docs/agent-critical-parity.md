@@ -19,7 +19,7 @@ do not block the first local-file agent cutover candidate.
 | cli:overview | implemented | backlog overview | cli:overview |
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |
 | cli:config-list | implemented | backlog config list | cli:config-list |
-| cli:task-create | implemented | backlog task create <title> --draft -d <text> -s <status> --plan <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain | cli:task-create |
+| cli:task-create | implemented | backlog task create <title> --draft -d <text> -s <status> --plan <text> --notes <text> --final-summary <text> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --plain | cli:task-create |
 | cli:draft-create | implemented | backlog draft create <title> -d <text> -a <assignee> -l <label> | cli:draft-create |
 | cli:draft-list | implemented | backlog draft list --plain | cli:draft-list |
 | cli:draft-view | implemented | backlog draft view <id> --plain | cli:draft-view |
@@ -27,6 +27,8 @@ do not block the first local-file agent cutover candidate.
 | cli:task-demote | implemented | backlog task demote <id> | cli:task-demote |
 | cli:draft-archive | implemented | backlog draft archive <id> | cli:draft-archive |
 | cli:task-edit | implemented | backlog task edit <id> --plan <text> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
+| cli:task-edit-rich-sections | implemented | backlog task edit <id> --notes <text> --append-notes <text> --final-summary <text> --append-final-summary <text> --clear-final-summary --plain | cli:task-edit-rich-sections |
+| cli:task-edit-checklist-state | implemented | backlog task edit <id> --check-ac <index> --uncheck-ac <index> --check-dod <index> --uncheck-dod <index> --remove-ac <index> --remove-dod <index> --plain | cli:task-edit-checklist-state |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
 | cli:cleanup | implemented | backlog cleanup | cli:cleanup |
 | cli:doc-list | implemented | backlog doc list | cli:doc-list |
@@ -72,9 +74,14 @@ do not block the first local-file agent cutover candidate.
 | Inventory item | Status | Expected behavior | Deferred reason |
 | --- | --- | --- | --- |
 | browser:kanban-drag-drop | deferred | backlog browser | Browser UI parity is tracked in the browser deferral milestone. |
+| browser:custom-port-service | deferred | backlog browser --port <port> --no-open and browser service lifecycle | Browser port flags and service lifecycle are deferred with the browser milestone. |
 | cli:interactive-board | deferred | backlog board interactive controls | Interactive terminal controls are deferred behind non-interactive agent workflows. |
 | cli:rich-colored-output | deferred | ANSI-rich terminal rendering | Plain output is the cutover blocker; rich color is later polish. |
 | cli:shell-completion-install | deferred | backlog completion install | Shell completion installation is not needed for agent runtime cutover. |
+| cli:interactive-task-view-editor | deferred | backlog task <id> interactive task view and editor launch | Interactive task view and editor launch are deferred behind plain task output. |
+| cli:interactive-search-filters | deferred | interactive search filters and live filtering | Interactive search filtering is deferred behind deterministic search output. |
+| cli:interactive-config-wizard | deferred | backlog config interactive advanced wizard | The advanced config wizard is deferred behind non-interactive config get/set helpers. |
+| config:extended-options | deferred | defaultAssignee, dateFormat, includeDatetimeInDates, defaultPort, autoOpenBrowser, zeroPaddedIds | Advanced non-agent config options are deferred until full human-facing parity work. |
 | core:on-status-change | deferred | onStatusChange hooks | Hook execution remains disabled until a separate safety review. |
 | git:remote-operations | deferred | remote git operations | Remote git behavior is outside the first local-file compatibility gate. |
 | git:auto-commit | deferred | autoCommit | Automatic commits are deferred to keep mutation review explicit. |

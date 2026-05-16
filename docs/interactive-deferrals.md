@@ -12,8 +12,12 @@ operations are the first compatibility target.
 | Colored output exactness | Interactive polish | Not required for agent cutover | Agents consume plain output. Exact ANSI colors can be added later without changing storage semantics. |
 | Interactive board | Interactive TUI | Intentionally deferred | The cutover requires deterministic `board` output, not keyboard-driven task movement or terminal UI state. |
 | Overview TUI | Interactive TUI | Intentionally deferred | A human dashboard can follow after the core inventory and mutation paths remain stable. |
+| Interactive task view/editor | Interactive TUI | Intentionally deferred | Plain `task <id> --plain` output covers agents; task-detail keybindings and editor launch need terminal/editor integration tests. |
+| Interactive search filters | Interactive TUI | Intentionally deferred | Deterministic search output covers agents; live filtering and refinement controls need terminal UI tests. |
+| Advanced config wizard | Interactive TUI | Intentionally deferred | Non-interactive `config get`, `config set`, and DoD default helpers cover agents; the guided wizard is human-facing workflow parity. |
 | Editor launch | Interactive TUI | Intentionally deferred | Launching `$EDITOR` is environment-dependent and not needed for non-interactive agent workflows. |
 | Shell completions | Shell integration | Not required for agent cutover | Completion install is convenience tooling and should not affect runtime compatibility. |
+| Extended display/browser config | Human-facing config | Intentionally deferred | `defaultAssignee`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, and `zeroPaddedIds` are not needed for the first file-format cutover. |
 | onStatusChange | Automation hook | Intentionally deferred | Hook execution can run arbitrary commands, so it remains disabled until a dedicated safety design and tests exist. |
 | auto-commit | Git automation | Intentionally deferred | Automatic commits hide mutation boundaries from reviewers and are outside the first local-file compatibility gate. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
@@ -36,6 +40,9 @@ Any future implementation of these features must provide:
 The Python clone keeps these features out of the first cutover path:
 
 - Plain output is the compatibility contract for agents.
+- Interactive task/search/config flows remain deferred to human-facing parity work.
+- Extended UI/display/browser config keys remain deferred unless they become part
+  of a scripted agent workflow.
 - `onStatusChange` remains disabled by default.
 - auto-commit and remote operations are deferred.
 - hook bypass is rejected for first cutover.

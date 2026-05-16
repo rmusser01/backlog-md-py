@@ -12,10 +12,10 @@ MANIFEST_PATH = Path(__file__).parent / "fixtures" / "oracle" / "manifest.yml"
 def test_manifest_pins_upstream_version_and_source():
     manifest = load_oracle_manifest(MANIFEST_PATH)
 
-    assert manifest.upstream_version == "1.44.0"
-    assert manifest.source_kind == "npm-release"
-    assert manifest.source_ref == "backlog.md@1.44.0"
-    assert manifest.package_metadata_sha256 == "b890dde4a33480361ff34195192e1c0a23d6c7dc1c47b095933a29c7ccb4eee6"
+    assert manifest.upstream_version == "1.45.1"
+    assert manifest.source_kind == "github-main-package"
+    assert manifest.source_ref == "backlog.md@1.45.1"
+    assert manifest.package_metadata_sha256 == "4b93cc1703bfab79a3c65653a2feda44cdc15b8e243720b486538102057aafde"
 
 
 def test_manifest_marks_agent_critical_fixtures():
