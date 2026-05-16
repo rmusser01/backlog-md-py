@@ -83,10 +83,11 @@ jobs:
           /tmp/backlog-md-py-wheel-smoke/bin/python -m backlog_py --version
           /tmp/backlog-md-py-wheel-smoke/bin/python -c 'from importlib.resources import files; assert files("backlog_py").joinpath("py.typed").is_file()'
 
-      - name: Smoke test MCP extra
+      - name: Smoke test SDK-free MCP entry point
         run: |
           python -m venv /tmp/backlog-md-py-mcp-smoke
           /tmp/backlog-md-py-mcp-smoke/bin/python -m pip install --upgrade pip
           WHEEL="$(ls dist/*.whl)"
-          /tmp/backlog-md-py-mcp-smoke/bin/python -m pip install "${WHEEL}[mcp]"
-          /tmp/backlog-md-py-mcp-smoke/bin/python -c 'from backlog_py.mcp.server import create_server, is_mcp_sdk_available; assert is_mcp_sdk_available(); assert type(create_server()).__name__ == "FastMCP"'
+          /tmp/backlog-md-py-mcp-smoke/bin/python -m pip install "${WHEEL}"
+          printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | /tmp/backlog-md-py-mcp-smoke/bin/backlog-py-mcp
+          /tmp/backlog-md-py-mcp-smoke/bin/python -c 'from backlog_py.mcp.server import create_server; server = create_server(); assert server.name == "backlog-md-py"; assert type(server).__name__ == "SdkFreeMcpServer"'

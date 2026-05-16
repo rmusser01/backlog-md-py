@@ -16,15 +16,16 @@ Run the package validation gate from a clean checkout:
 ```bash
 uv venv --python 3.13 .venv
 source .venv/bin/activate
-uv pip install -e ".[dev,mcp]"
-uv run --extra dev --extra mcp python -m pytest tests -v
+uv pip install -e ".[dev]"
+uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
 ```
 
 The GitHub Actions package job also installs the built wheel and verifies the
-optional MCP extra, but local validation should not depend on remote CI alone.
+SDK-free MCP stdio entry point, but local validation should not depend on remote
+CI alone.
 
 ## Copied-Repository Smoke
 
@@ -60,19 +61,28 @@ unowned Markdown sections around edited task content.
 
 ## MCP Smoke
 
-For agent integrations, verify the FastMCP adapter can be constructed from the
-same environment that will run the server:
+For agent integrations, verify the SDK-free stdio server can handle MCP
+initialization from the same environment that will run the server:
 
 ```bash
-python - <<'PY'
-from backlog_py.mcp.server import create_server, is_mcp_sdk_available
-
-assert is_mcp_sdk_available()
-server = create_server()
-assert type(server).__name__ == "FastMCP"
-print(type(server).__name__)
-PY
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | backlog-py-mcp
 ```
+
+For multi-agent Codex use, verify the singleton daemon path as well:
+
+```bash
+backlog-py daemon ensure
+backlog-py daemon status --json
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | backlog-py-mcp
+ps -ef | rg "backlog|backlog-py|backlog.md-darwin-arm64"
+backlog-py daemon stop
+```
+
+During that smoke there should be exactly one Python `backlog_py daemon run`
+process and no `backlog.md-darwin-arm64/backlog mcp start` child process from
+the new path. The official Node/native Backlog.md binary does not participate
+in `backlog-md-py` filesystem locks, so do not run both mutation paths against
+the same live project during cutover.
 
 For pure Python embedding, call the helper functions against the copied project:
 

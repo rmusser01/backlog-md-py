@@ -27,12 +27,22 @@ def test_pyproject_derives_distribution_version_from_package_attribute():
     }
 
 
-def test_pyproject_exposes_mcp_server_extra_and_script():
+def test_pyproject_exposes_sdk_free_mcp_script_without_mcp_extra():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
 
-    assert "mcp" in pyproject["project"]["optional-dependencies"]
-    assert any(dependency.startswith("mcp>=") for dependency in pyproject["project"]["optional-dependencies"]["mcp"])
+    assert "mcp" not in pyproject["project"]["optional-dependencies"]
     assert pyproject["project"]["scripts"]["backlog-py-mcp"] == "backlog_py.mcp.server:main"
+
+
+def test_ci_smokes_sdk_free_mcp_entry_point_without_mcp_extra():
+    workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
+    package_steps = workflow["jobs"]["package"]["steps"]
+    package_runs = "\n".join(str(step.get("run", "")) for step in package_steps)
+
+    assert "[mcp]" not in package_runs
+    assert "FastMCP" not in package_runs
+    assert "is_mcp_sdk_available()" not in package_runs
+    assert "backlog-py-mcp" in package_runs
 
 
 def test_python_support_range_is_311_through_313():

@@ -16,18 +16,15 @@ Until package publishing is configured, install directly from the repository:
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
 ```
 
-Install the optional MCP SDK adapter with:
-
-```bash
-python -m pip install "backlog-md-py[mcp] @ git+https://github.com/rmusser01/backlog-md-py.git"
-```
+The `backlog-py-mcp` stdio entry point is installed by default and does not
+require the Python MCP SDK.
 
 For local development against a checkout:
 
 ```bash
 uv venv --python 3.13 .venv
 source .venv/bin/activate
-uv pip install -e ".[dev,mcp]"
+uv pip install -e ".[dev]"
 ```
 
 ## CLI Entry Points
@@ -103,9 +100,8 @@ should run them against a temporary copy first when integrating a new workflow.
 
 ## MCP Server
 
-The package exposes pure MCP-style helper functions without optional
-dependencies. Installing the `mcp` extra also installs a FastMCP-backed stdio
-server:
+The package exposes pure MCP-style helper functions and an SDK-free MCP stdio
+server without optional dependencies:
 
 ```bash
 backlog-py-mcp
@@ -113,14 +109,20 @@ backlog-py-mcp
 
 For agent integrations, use one of these patterns:
 
-- Run `backlog-py-mcp` as an MCP stdio server after installing
-  `backlog-md-py[mcp]`.
+- Start `backlog-py daemon ensure`, then run `backlog-py-mcp` as the stdio
+  compatibility shim. The shim forwards to the singleton daemon when a healthy
+  runtime record exists.
+- Run `backlog-py-mcp` without a daemon for direct SDK-free stdio mode. This is
+  the rollback path, but each client process handles its own requests.
 - Call the pure helper functions from Python.
 - Wrap `backlog-py --cwd <project> ...` as a subprocess tool.
 
 Every MCP tool takes a `project` argument containing the path to the Backlog.md
 project or a directory inside it. This keeps the server stateless and avoids a
 global mutable working directory.
+
+See `docs/singleton-daemon.md` for the full daemon lifecycle, local Codex config
+shape, and process verification steps.
 
 ## Validation For Consumers
 
@@ -134,7 +136,7 @@ Before switching a project to `backlog-md-py`, run at least:
 
 ```bash
 uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
-uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src
 ```
 

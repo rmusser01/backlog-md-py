@@ -21,9 +21,10 @@ Until package publishing is configured, install directly from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
-# Include the MCP SDK adapter:
-python -m pip install "backlog-md-py[mcp] @ git+https://github.com/rmusser01/backlog-md-py.git"
 ```
+
+The `backlog-py-mcp` stdio entry point is included by default and does not
+require the Python MCP SDK.
 
 Use `backlog-py` or `python -m backlog_py` for the experimental CLI:
 
@@ -41,6 +42,24 @@ backlog-py compat status --json
 ```
 
 See `docs/integration.md` for CLI, Python helper, and MCP integration notes.
+
+## Singleton Daemon For Agents
+
+For multi-agent environments, start one local daemon and let `backlog-py-mcp`
+forward stdio MCP traffic to it:
+
+```bash
+backlog-py daemon ensure
+backlog-py daemon status --json
+backlog-py-mcp
+backlog-py daemon stop
+```
+
+The daemon exposes a loopback `/mcp` JSON-RPC endpoint protected by a runtime
+token. The `backlog-py-mcp` command discovers a healthy daemon automatically; if
+none is running, it falls back to direct SDK-free stdio mode. See
+`docs/singleton-daemon.md` for Codex configuration notes, process-count checks,
+and rollback guidance.
 
 ## Optional Orchestration Metadata
 
@@ -69,14 +88,14 @@ and install editable development dependencies:
 ```bash
 uv venv --python 3.13 .venv
 source .venv/bin/activate
-uv pip install -e ".[dev,mcp]"
+uv pip install -e ".[dev]"
 ```
 
 Then run the focused or full test suite:
 
 ```bash
 uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
-uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m pytest tests -v
 ```
 
 See `CONTRIBUTING.md` for the full local validation gate.

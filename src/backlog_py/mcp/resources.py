@@ -52,3 +52,8 @@ def read_resource(uri: str) -> str:
     if canonical_uri is None:
         raise KeyError(f"Unsupported Backlog MCP resource: {uri}")
     return _RESOURCES[canonical_uri]
+
+
+def list_resource_uris() -> tuple[str, ...]:
+    """Return supported MCP resource URIs, including aliases."""
+    return tuple(_RESOURCE_ALIASES)

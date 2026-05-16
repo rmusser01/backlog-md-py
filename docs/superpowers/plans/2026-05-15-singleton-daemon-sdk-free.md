@@ -471,7 +471,7 @@ git commit -m "Add SDK-free MCP protocol"
 - Test: `tests/test_mcp_stdio_sdk_free.py`
 - Test: existing docs/reference tests if any fail after dependency removal
 
-- [ ] **Step 1: Write failing stdio tests**
+- [x] **Step 1: Write failing stdio tests**
 
 Test the command path without importing `mcp`:
 
@@ -501,13 +501,13 @@ def test_stdio_server_handles_initialize_line(monkeypatch, capsys):
     assert '"serverInfo"' in stdout.getvalue()
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `uv run --extra dev python -m pytest tests/test_mcp_stdio_sdk_free.py -q`
 
 Expected: FAIL because `server.py` still imports FastMCP when creating a server.
 
-- [ ] **Step 3: Implement SDK-free stdio server**
+- [x] **Step 3: Implement SDK-free stdio server**
 
 Implement:
 
@@ -518,35 +518,21 @@ Implement:
 
 Input format: one JSON-RPC JSON object per line. Output format: one JSON-RPC JSON object per line for requests; no output for notifications.
 
-- [ ] **Step 4: Remove MCP SDK dependency**
+- [x] **Step 4: Remove MCP SDK dependency**
 
-Remove optional dependency block entry:
+Removed the optional `mcp` extra from `pyproject.toml`; no empty compatibility
+extra was retained.
 
-```toml
-mcp = [
-  "mcp>=1.0.0",
-]
-```
+- [x] **Step 5: Update docs**
 
-If keeping an empty `mcp` extra is needed for backwards install compatibility, leave it as `mcp = []` and document that it is deprecated. Prefer removing references to `--extra mcp` from validation docs.
-
-- [ ] **Step 5: Update docs**
-
-Replace install examples like:
-
-```bash
-uv pip install -e ".[dev,mcp]"
-uv run --extra dev --extra mcp python -m pytest tests -v
-```
-
-with:
+Docs now use the SDK-free install/test path:
 
 ```bash
 uv pip install -e ".[dev]"
 uv run --extra dev python -m pytest tests -v
 ```
 
-- [ ] **Step 6: Run focused and baseline tests**
+- [x] **Step 6: Run focused and baseline tests**
 
 Run:
 
@@ -556,7 +542,7 @@ uv run --extra dev python -m pytest tests/test_mcp_protocol_sdk_free.py tests/te
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit SDK-free stdio slice**
+- [x] **Step 7: Commit SDK-free stdio slice**
 
 ```bash
 git add src/backlog_py/mcp pyproject.toml README.md docs tests/test_mcp_stdio_sdk_free.py
@@ -646,7 +632,7 @@ git commit -m "Lock MCP project mutations"
 - Modify: `src/backlog_py/cli/main.py`
 - Test: `tests/test_daemon_lifecycle.py`
 
-- [ ] **Step 1: Write failing daemon CLI tests**
+- [x] **Step 1: Write failing daemon CLI tests**
 
 Use `CliRunner` and fake process runners:
 
@@ -671,13 +657,13 @@ def test_daemon_status_json_omits_token(tmp_path, monkeypatch):
     assert '"endpoint"' in result.output
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `uv run --extra dev python -m pytest tests/test_daemon_lifecycle.py -q`
 
 Expected: FAIL because daemon commands do not exist.
 
-- [ ] **Step 3: Implement lifecycle helpers**
+- [x] **Step 3: Implement lifecycle helpers**
 
 Implement:
 
@@ -688,6 +674,8 @@ Implement:
 - `is_pid_alive(pid: int) -> bool`
 - stale runtime cleanup
 
+Also verified that graceful stop timeouts keep the runtime record intact instead of allowing duplicate daemon startup after a failed stop.
+
 `daemon_start` should launch:
 
 ```bash
@@ -696,7 +684,7 @@ python -m backlog_py daemon run --foreground --host 127.0.0.1 --port <port>
 
 Capture stdout/stderr to the allocated daemon log path.
 
-- [ ] **Step 4: Add Click commands**
+- [x] **Step 4: Add Click commands**
 
 Add group:
 
@@ -708,13 +696,13 @@ Add group:
 
 Keep `run` hidden if desired, but tests should call it directly.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `uv run --extra dev python -m pytest tests/test_daemon_lifecycle.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit daemon lifecycle**
+- [x] **Step 6: Commit daemon lifecycle**
 
 ```bash
 git add src/backlog_py/daemon src/backlog_py/cli/main.py tests/test_daemon_lifecycle.py
@@ -730,7 +718,7 @@ git commit -m "Add singleton daemon lifecycle commands"
 - Test: `tests/test_daemon_http_server.py`
 - Test: `tests/test_mcp_stdio_sdk_free.py`
 
-- [ ] **Step 1: Write failing HTTP endpoint tests**
+- [x] **Step 1: Write failing HTTP endpoint tests**
 
 Use a foreground server in a background thread with a temp state dir:
 
@@ -747,7 +735,7 @@ def test_http_endpoint_requires_daemon_token(tmp_path, monkeypatch):
 
 Add success test with `Authorization: Bearer secret`, plus batch request test.
 
-- [ ] **Step 2: Write failing stdio forwarding test**
+- [x] **Step 2: Write failing stdio forwarding test**
 
 Start a fake HTTP daemon and run:
 
@@ -757,13 +745,13 @@ run_stdio(stdin=io.StringIO(request_line), stdout=stdout, daemon_endpoint=fake.e
 
 Assert the stdout response is the fake daemon response and that no repository/tool code runs in the shim.
 
-- [ ] **Step 3: Run tests to verify failure**
+- [x] **Step 3: Run tests to verify failure**
 
 Run: `uv run --extra dev python -m pytest tests/test_daemon_http_server.py tests/test_mcp_stdio_sdk_free.py -q`
 
 Expected: FAIL because HTTP endpoint and forwarding shim are not implemented.
 
-- [ ] **Step 4: Implement HTTP JSON-RPC endpoint**
+- [x] **Step 4: Implement HTTP JSON-RPC endpoint**
 
 Use stdlib `ThreadingHTTPServer` unless tests show Codex requires a different HTTP shape. The endpoint should support:
 
@@ -776,7 +764,7 @@ Use stdlib `ThreadingHTTPServer` unless tests show Codex requires a different HT
 
 Keep the body protocol delegated to `backlog_py.mcp.protocol`.
 
-- [ ] **Step 5: Implement stdio forwarding mode**
+- [x] **Step 5: Implement stdio forwarding mode**
 
 `backlog-py-mcp` behavior:
 
@@ -785,13 +773,13 @@ Keep the body protocol delegated to `backlog_py.mcp.protocol`.
 
 Default for multi-agent Codex migration should be forwarding mode, so per-client shims stay lightweight.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `uv run --extra dev python -m pytest tests/test_daemon_http_server.py tests/test_mcp_stdio_sdk_free.py tests/test_mcp_protocol_sdk_free.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit HTTP/shim slice**
+- [x] **Step 7: Commit HTTP/shim slice**
 
 ```bash
 git add src/backlog_py/mcp/http_server.py src/backlog_py/mcp/stdio_server.py src/backlog_py/daemon/service.py tests/test_daemon_http_server.py tests/test_mcp_stdio_sdk_free.py
@@ -807,7 +795,7 @@ git commit -m "Add SDK-free daemon MCP endpoint"
 - Create: `docs/singleton-daemon.md`
 - Test: docs command snippets where practical
 
-- [ ] **Step 1: Write docs update**
+- [x] **Step 1: Write docs update**
 
 Document:
 
@@ -818,7 +806,7 @@ Document:
 - how to verify one daemon process,
 - limitations: official Node/native Backlog.md binary does not honor Python locks.
 
-- [ ] **Step 2: Run docs/reference grep checks**
+- [x] **Step 2: Run docs/reference grep checks**
 
 Run:
 
@@ -828,7 +816,7 @@ rg -n "extra mcp|\\[mcp\\]|FastMCP|MCP SDK|mcp>=|backlog mcp start" README.md do
 
 Expected: only intentional historical/rollback references remain.
 
-- [ ] **Step 3: Run full package tests**
+- [x] **Step 3: Run full package tests**
 
 Run:
 
@@ -838,7 +826,7 @@ uv run --extra dev python -m pytest tests -v
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Bandit**
+- [x] **Step 4: Run Bandit**
 
 Run:
 
@@ -848,7 +836,7 @@ uv run --extra dev python -m bandit -r src -f json -o /tmp/bandit_backlog_py_dae
 
 Expected: PASS or no new high/medium findings in touched daemon/protocol code.
 
-- [ ] **Step 5: Build and check package**
+- [x] **Step 5: Build and check package**
 
 Run:
 
@@ -859,7 +847,7 @@ uv run --extra dev python -m twine check /tmp/backlog-md-py-daemon-dist/*
 
 Expected: PASS.
 
-- [ ] **Step 6: Run local process smoke**
+- [x] **Step 6: Run local process smoke**
 
 Run:
 
@@ -877,7 +865,13 @@ Expected:
 - no `backlog.md-darwin-arm64/backlog mcp start` child process from the new path,
 - `backlog-py-mcp` does not import or require the Python `mcp` package.
 
-- [ ] **Step 7: Commit docs and validation**
+Result: isolated daemon smoke started one Python `backlog_py daemon run` process,
+`backlog-py-mcp` initialized through the daemon, and `daemon stop` removed that
+process. Host `ps` output still showed many pre-existing
+`backlog.md-darwin-arm64/backlog mcp start` processes from outside this new
+path; they were not spawned by the Python singleton smoke.
+
+- [x] **Step 7: Commit docs and validation**
 
 ```bash
 git add README.md docs

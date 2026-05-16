@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable, TypeVar
 
 import click
 
 from backlog_py import __version__
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
-from backlog_py.core.agents import AgentInstructionError, update_agent_instruction_files
+from backlog_py.core.agents import AgentInstructionError, AgentInstructionUpdate, update_agent_instruction_files
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.drafts import DraftService
-from backlog_py.core.init import InitProjectError, init_project
+from backlog_py.core.init import InitProjectError, InitProjectResult, init_project
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
@@ -23,13 +24,26 @@ from backlog_py.core.repository import (
     TaskRecord,
     normalize_ordinal_value,
 )
+from backlog_py.daemon.lifecycle import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DaemonNotRunningError,
+    daemon_ensure,
+    daemon_start,
+    daemon_status,
+    daemon_stop,
+)
 from backlog_py.storage.config import (
     get_config_value,
     get_definition_of_done_defaults,
     replace_definition_of_done_defaults,
     set_config_value,
 )
+from backlog_py.runtime.locks import with_init_lock, with_project_write_lock
+from backlog_py.runtime.state import RuntimeRecord, runtime_status
 from backlog_py.storage.project import discover_project
+
+T = TypeVar("T")
 
 
 @click.group()
@@ -63,11 +77,16 @@ def init_command(
 ) -> None:
     """Initialize a Backlog.md project with non-interactive defaults."""
     try:
-        result = init_project(
-            _cwd(ctx),
-            project_name=project_name,
-            backlog_dir=backlog_dir,
-            config_location=config_location,
+        result, instruction_updates = _locked_init(
+            ctx,
+            "init_project",
+            lambda: _initialize_project(
+                ctx,
+                project_name=project_name,
+                backlog_dir=backlog_dir,
+                config_location=config_location,
+                agent_instructions=agent_instructions,
+            ),
         )
     except InitProjectError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -75,9 +94,8 @@ def init_command(
     click.echo(f"Initialized Backlog.md project at {result.project.backlog_dir}")
     if not result.config_created:
         click.echo(f"Preserved existing config at {result.project.config_path}")
-    if agent_instructions:
-        for update in update_agent_instruction_files(result.project):
-            click.echo(f"Updated {update.path_relative}")
+    for update in instruction_updates:
+        click.echo(f"Updated {update.path_relative}")
 
 
 @main.command("task")
@@ -179,13 +197,13 @@ def task_command(
     if args and args[0] == "archive":
         if len(args) != 2:
             raise click.UsageError("Usage: task archive TASK_ID")
-        task_record = _mutable_repository(ctx).archive_task(args[1])
+        task_record = _locked_write(ctx, "task_archive", lambda: _mutable_repository(ctx).archive_task(args[1]))
         click.echo(f"{_format_task_line(task_record, plain=plain)} archived")
         return
     if args and args[0] == "demote":
         if len(args) != 2:
             raise click.UsageError("Usage: task demote TASK_ID")
-        draft_record = _draft_service(ctx).demote_task(args[1])
+        draft_record = _locked_write(ctx, "draft_demote", lambda: _draft_service(ctx).demote_task(args[1]))
         if plain:
             click.echo(_format_task_line(draft_record, plain=True))
         else:
@@ -197,9 +215,41 @@ def task_command(
         if clear_milestone:
             raise click.UsageError("Cannot use --clear-milestone with task create.")
         if draft:
-            task_record = _draft_service(ctx).create_draft(
+            task_record = _locked_write(
+                ctx,
+                "draft_create",
+                lambda: _draft_service(ctx).create_draft(
+                    title=args[1],
+                    draft_id=task_id,
+                    description=description or "",
+                    plan=plan or "",
+                    notes=notes or "",
+                    final_summary=final_summary or "",
+                    acceptance_criteria=acceptance_criteria,
+                    definition_of_done=definition_of_done or None,
+                    definition_of_done_add=definition_of_done_add,
+                    disable_definition_of_done_defaults=disable_definition_of_done_defaults,
+                    dependencies=dependencies,
+                    assignees=assignees,
+                    labels=labels,
+                    priority=priority,
+                    milestone=milestone,
+                    ordinal=_parse_ordinal(ordinal),
+                    parent_task_id=parent_task_id,
+                    references=references,
+                    documentation=documentation,
+                    modified_files=modified_files,
+                ),
+            )
+            click.echo(_format_task_line(task_record, plain=plain))
+            return
+        task_record = _locked_write(
+            ctx,
+            "task_create",
+            lambda: _mutable_repository(ctx).create_task(
                 title=args[1],
-                draft_id=task_id,
+                task_id=task_id,
+                status=status,
                 description=description or "",
                 plan=plan or "",
                 notes=notes or "",
@@ -218,31 +268,7 @@ def task_command(
                 references=references,
                 documentation=documentation,
                 modified_files=modified_files,
-            )
-            click.echo(_format_task_line(task_record, plain=plain))
-            return
-        task_record = _mutable_repository(ctx).create_task(
-            title=args[1],
-            task_id=task_id,
-            status=status,
-            description=description or "",
-            plan=plan or "",
-            notes=notes or "",
-            final_summary=final_summary or "",
-            acceptance_criteria=acceptance_criteria,
-            definition_of_done=definition_of_done or None,
-            definition_of_done_add=definition_of_done_add,
-            disable_definition_of_done_defaults=disable_definition_of_done_defaults,
-            dependencies=dependencies,
-            assignees=assignees,
-            labels=labels,
-            priority=priority,
-            milestone=milestone,
-            ordinal=_parse_ordinal(ordinal),
-            parent_task_id=parent_task_id,
-            references=references,
-            documentation=documentation,
-            modified_files=modified_files,
+            ),
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
@@ -251,37 +277,41 @@ def task_command(
             raise click.UsageError("Usage: task edit TASK_ID")
         if milestone is not None and clear_milestone:
             raise click.UsageError("Cannot use --milestone and --clear-milestone together.")
-        task_record = _mutable_repository(ctx).edit_task(
-            args[1],
-            title=title,
-            description=description,
-            plan=plan,
-            append_plan=append_plan,
-            clear_plan=clear_plan,
-            notes=notes,
-            status=status,
-            append_notes=append_notes,
-            acceptance_criteria_add=acceptance_criteria,
-            definition_of_done_add=definition_of_done_add,
-            check_ac=check_ac,
-            check_dod=check_dod,
-            uncheck_ac=uncheck_ac,
-            uncheck_dod=uncheck_dod,
-            remove_ac=remove_ac,
-            remove_dod=remove_dod,
-            dependencies=dependencies if dependencies else None,
-            assignees=assignees if assignees else None,
-            labels=labels if labels else None,
-            priority=priority,
-            milestone=milestone,
-            ordinal=_parse_ordinal(ordinal),
-            clear_milestone=clear_milestone,
-            references=references if references else None,
-            documentation=documentation if documentation else None,
-            modified_files=modified_files if modified_files else None,
-            final_summary=final_summary,
-            append_final_summary=append_final_summary,
-            clear_final_summary=clear_final_summary,
+        task_record = _locked_write(
+            ctx,
+            "task_edit",
+            lambda: _mutable_repository(ctx).edit_task(
+                args[1],
+                title=title,
+                description=description,
+                plan=plan,
+                append_plan=append_plan,
+                clear_plan=clear_plan,
+                notes=notes,
+                status=status,
+                append_notes=append_notes,
+                acceptance_criteria_add=acceptance_criteria,
+                definition_of_done_add=definition_of_done_add,
+                check_ac=check_ac,
+                check_dod=check_dod,
+                uncheck_ac=uncheck_ac,
+                uncheck_dod=uncheck_dod,
+                remove_ac=remove_ac,
+                remove_dod=remove_dod,
+                dependencies=dependencies if dependencies else None,
+                assignees=assignees if assignees else None,
+                labels=labels if labels else None,
+                priority=priority,
+                milestone=milestone,
+                ordinal=_parse_ordinal(ordinal),
+                clear_milestone=clear_milestone,
+                references=references if references else None,
+                documentation=documentation if documentation else None,
+                modified_files=modified_files if modified_files else None,
+                final_summary=final_summary,
+                append_final_summary=append_final_summary,
+                clear_final_summary=clear_final_summary,
+            ),
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
@@ -371,10 +401,14 @@ def board_command(
         if len(args) > 2:
             raise click.UsageError("Usage: board export [filename]")
         if readme:
-            update_readme_with_board(
-                _project(ctx),
-                _repository(ctx).list_tasks(),
-                version=export_version or __version__,
+            _locked_write(
+                ctx,
+                "board_export_readme",
+                lambda: update_readme_with_board(
+                    _project(ctx),
+                    _repository(ctx).list_tasks(),
+                    version=export_version or __version__,
+                ),
             )
             click.echo("Updated README.md with Kanban board.")
             return
@@ -384,7 +418,11 @@ def board_command(
             if not click.confirm(f'File "{output_path}" already exists. Overwrite?', default=False):
                 click.echo("Export cancelled.")
                 return
-        target = export_board_to_file(_project(ctx), _repository(ctx).list_tasks(), output_file)
+        target = _locked_write(
+            ctx,
+            "board_export_file",
+            lambda: export_board_to_file(_project(ctx), _repository(ctx).list_tasks(), output_file),
+        )
         click.echo(f"Exported board to {target}")
         return
     if args and args != ("view",):
@@ -419,10 +457,7 @@ def overview_command(ctx: click.Context) -> None:
 @click.pass_context
 def cleanup_command(ctx: click.Context) -> None:
     """Move active Done tasks into backlog/completed."""
-    repository = _mutable_repository(ctx)
-    done_tasks = [task for task in repository.list_tasks() if _is_completed_status(task.status)]
-    for task in done_tasks:
-        repository.complete_task(task.id)
+    done_tasks = _locked_write(ctx, "cleanup_complete_done", lambda: _cleanup_completed_tasks(ctx))
     count = len(done_tasks)
     noun = "task" if count == 1 else "tasks"
     click.echo(f"Moved {count} completed {noun} to backlog/completed.")
@@ -436,11 +471,76 @@ def agents_command(ctx: click.Context, update_instructions: bool) -> None:
     if not update_instructions:
         raise click.UsageError("Usage: agents --update-instructions")
     try:
-        updates = update_agent_instruction_files(_project(ctx))
+        updates = _locked_write(
+            ctx,
+            "agents_update_instructions",
+            lambda: update_agent_instruction_files(_project(ctx)),
+        )
     except AgentInstructionError as exc:
         raise click.ClickException(str(exc)) from exc
     for update in updates:
         click.echo(f"Updated {update.path_relative}")
+
+
+@main.group("daemon")
+def daemon_group() -> None:
+    """Manage the local singleton daemon."""
+
+
+@daemon_group.command("status")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+def daemon_status_command(as_json: bool) -> None:
+    """Print singleton daemon status."""
+    try:
+        status = daemon_status()
+    except DaemonNotRunningError as exc:
+        raise click.ClickException(str(exc)) from exc
+    _echo_daemon_status(status.record, as_json=as_json)
+
+
+@daemon_group.command("ensure")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+def daemon_ensure_command(as_json: bool) -> None:
+    """Start the daemon if needed, then print status."""
+    status = daemon_ensure()
+    _echo_daemon_status(status.record, as_json=as_json)
+
+
+@daemon_group.command("start")
+@click.option("--host", default=DEFAULT_HOST, show_default=True, help="Loopback host to bind.")
+@click.option("--port", default=DEFAULT_PORT, show_default=True, type=int, help="Loopback port to bind.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+def daemon_start_command(host: str, port: int, as_json: bool) -> None:
+    """Start the singleton daemon."""
+    status = daemon_start(host=host, port=port)
+    _echo_daemon_status(status.record, as_json=as_json)
+
+
+@daemon_group.command("stop")
+@click.option("--force", is_flag=True, help="Force daemon termination when graceful stop does not complete.")
+def daemon_stop_command(force: bool) -> None:
+    """Stop the singleton daemon."""
+    try:
+        stopped = daemon_stop(force=force)
+    except TimeoutError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if stopped:
+        click.echo("Stopped daemon.")
+    else:
+        click.echo("Daemon not running.")
+
+
+@daemon_group.command("run")
+@click.option("--foreground", is_flag=True, help="Run the daemon in the foreground.")
+@click.option("--host", default=DEFAULT_HOST, show_default=True, help="Loopback host to bind.")
+@click.option("--port", default=DEFAULT_PORT, show_default=True, type=int, help="Loopback port to bind.")
+def daemon_run_command(foreground: bool, host: str, port: int) -> None:
+    """Run the singleton daemon service."""
+    if not foreground:
+        raise click.UsageError("Usage: daemon run --foreground")
+    from backlog_py.daemon.service import run_foreground_service
+
+    run_foreground_service(host=host, port=port)
 
 
 @main.group("compat")
@@ -521,7 +621,11 @@ def config_get(ctx: click.Context, key: str) -> None:
 def config_set(ctx: click.Context, key: str, value: str) -> None:
     """Persist one project config value."""
     try:
-        raw_key, parsed_value = set_config_value(_project(ctx), key, value)
+        raw_key, parsed_value = _locked_write(
+            ctx,
+            "config_set",
+            lambda: set_config_value(_project(ctx), key, value),
+        )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"{raw_key}: {_format_config_value(parsed_value)}")
@@ -540,7 +644,11 @@ def config_dod_defaults_get(ctx: click.Context) -> None:
 @click.pass_context
 def config_dod_defaults_upsert(ctx: click.Context, items: tuple[str, ...]) -> None:
     """Replace project Definition of Done defaults."""
-    config = replace_definition_of_done_defaults(_project(ctx), list(items))
+    config = _locked_write(
+        ctx,
+        "definition_of_done_defaults_upsert",
+        lambda: replace_definition_of_done_defaults(_project(ctx), list(items)),
+    )
     for item in config.definition_of_done or []:
         click.echo(item)
 
@@ -591,16 +699,29 @@ def document_create_command(
     service = _document_service(ctx)
     metadata = _document_metadata(document_type, tags)
     if title is None:
-        document = service.create_document_from_title(
-            path_or_title,
-            directory=document_path,
-            content=content,
-            metadata=metadata,
+        document = _locked_write(
+            ctx,
+            "document_create",
+            lambda: service.create_document_from_title(
+                path_or_title,
+                directory=document_path,
+                content=content,
+                metadata=metadata,
+            ),
         )
     else:
         if document_path is not None:
             raise click.UsageError("Use --path only with title-based document create.")
-        document = service.create_document(path_or_title, title=title, content=content, metadata=metadata)
+        document = _locked_write(
+            ctx,
+            "document_create",
+            lambda: service.create_document(
+                path_or_title,
+                title=title,
+                content=content,
+                metadata=metadata,
+            ),
+        )
     click.echo(_format_document_line(document))
 
 
@@ -622,12 +743,16 @@ def document_update_command(
     tags: tuple[str, ...],
 ) -> None:
     """Update a document while preserving omitted metadata."""
-    document = _document_service(ctx).update_document(
-        path_or_id,
-        title=title,
-        content=content,
-        directory=document_path,
-        metadata=_document_metadata(document_type, tags),
+    document = _locked_write(
+        ctx,
+        "document_update",
+        lambda: _document_service(ctx).update_document(
+            path_or_id,
+            title=title,
+            content=content,
+            directory=document_path,
+            metadata=_document_metadata(document_type, tags),
+        ),
     )
     click.echo(_format_document_line(document))
 
@@ -672,11 +797,15 @@ def draft_create_command(
 ) -> None:
     """Create a draft task."""
     _ = status
-    draft = _draft_service(ctx).create_draft(
-        title=title,
-        description=description,
-        assignees=assignees,
-        labels=labels,
+    draft = _locked_write(
+        ctx,
+        "draft_create",
+        lambda: _draft_service(ctx).create_draft(
+            title=title,
+            description=description,
+            assignees=assignees,
+            labels=labels,
+        ),
     )
     click.echo(f"Created draft {draft.id}")
     click.echo(f"File: {draft.path}")
@@ -687,7 +816,7 @@ def draft_create_command(
 @click.pass_context
 def draft_promote_command(ctx: click.Context, draft_id: str) -> None:
     """Promote a draft task to an active task."""
-    task = _draft_service(ctx).promote_draft(draft_id)
+    task = _locked_write(ctx, "draft_promote", lambda: _draft_service(ctx).promote_draft(draft_id))
     click.echo(f"Promoted draft {draft_id} to {task.id}")
 
 
@@ -696,7 +825,7 @@ def draft_promote_command(ctx: click.Context, draft_id: str) -> None:
 @click.pass_context
 def draft_archive_command(ctx: click.Context, draft_id: str) -> None:
     """Archive a draft task."""
-    draft = _draft_service(ctx).archive_draft(draft_id)
+    draft = _locked_write(ctx, "draft_archive", lambda: _draft_service(ctx).archive_draft(draft_id))
     click.echo(f"Archived draft {draft.id}")
 
 
@@ -721,7 +850,11 @@ def decision_group() -> None:
 @click.pass_context
 def decision_create_command(ctx: click.Context, title: str, status: str) -> None:
     """Create an architectural decision record."""
-    decision = _decision_service(ctx).create_decision(title, status=status)
+    decision = _locked_write(
+        ctx,
+        "decision_create",
+        lambda: _decision_service(ctx).create_decision(title, status=status),
+    )
     click.echo(f"Created decision {decision.id}")
 
 
@@ -744,7 +877,11 @@ def milestone_list_command(ctx: click.Context) -> None:
 @click.pass_context
 def milestone_add_command(ctx: click.Context, name: str, description: str) -> None:
     """Create a milestone file."""
-    milestone = _milestone_service(ctx).add_milestone(name, description=description)
+    milestone = _locked_write(
+        ctx,
+        "milestone_add",
+        lambda: _milestone_service(ctx).add_milestone(name, description=description),
+    )
     click.echo(_format_milestone_line(milestone))
 
 
@@ -755,7 +892,11 @@ def milestone_add_command(ctx: click.Context, name: str, description: str) -> No
 @click.pass_context
 def milestone_rename_command(ctx: click.Context, old_name: str, new_name: str, update_tasks: bool) -> None:
     """Rename a milestone file."""
-    milestone = _milestone_service(ctx).rename_milestone(old_name, new_name, update_tasks=update_tasks)
+    milestone = _locked_write(
+        ctx,
+        "milestone_rename",
+        lambda: _milestone_service(ctx).rename_milestone(old_name, new_name, update_tasks=update_tasks),
+    )
     click.echo(_format_milestone_line(milestone))
 
 
@@ -765,7 +906,11 @@ def milestone_rename_command(ctx: click.Context, old_name: str, new_name: str, u
 @click.pass_context
 def milestone_remove_command(ctx: click.Context, name: str, clear_tasks: bool) -> None:
     """Remove a milestone file."""
-    milestone = _milestone_service(ctx).remove_milestone(name, clear_tasks=clear_tasks)
+    milestone = _locked_write(
+        ctx,
+        "milestone_remove",
+        lambda: _milestone_service(ctx).remove_milestone(name, clear_tasks=clear_tasks),
+    )
     click.echo(_format_milestone_line(milestone))
 
 
@@ -774,7 +919,11 @@ def milestone_remove_command(ctx: click.Context, name: str, clear_tasks: bool) -
 @click.pass_context
 def milestone_archive_command(ctx: click.Context, name: str) -> None:
     """Move a milestone file to backlog/archive/milestones."""
-    milestone = _milestone_service(ctx).archive_milestone(name)
+    milestone = _locked_write(
+        ctx,
+        "milestone_archive",
+        lambda: _milestone_service(ctx).archive_milestone(name),
+    )
     click.echo(f"{_format_milestone_line(milestone)} archived")
 
 
@@ -812,6 +961,40 @@ def _decision_service(ctx: click.Context) -> DecisionService:
 
 def _milestone_service(ctx: click.Context) -> MilestoneService:
     return MilestoneService(_project(ctx))
+
+
+def _locked_write(ctx: click.Context, operation: str, fn: Callable[[], T]) -> T:
+    return with_project_write_lock(_project(ctx), operation, fn)
+
+
+def _locked_init(ctx: click.Context, operation: str, fn: Callable[[], T]) -> T:
+    return with_init_lock(_cwd(ctx), operation, fn)
+
+
+def _initialize_project(
+    ctx: click.Context,
+    *,
+    project_name: str | None,
+    backlog_dir: str,
+    config_location: str,
+    agent_instructions: bool,
+) -> tuple[InitProjectResult, list[AgentInstructionUpdate]]:
+    result = init_project(
+        _cwd(ctx),
+        project_name=project_name,
+        backlog_dir=backlog_dir,
+        config_location=config_location,
+    )
+    instruction_updates = update_agent_instruction_files(result.project) if agent_instructions else []
+    return result, instruction_updates
+
+
+def _cleanup_completed_tasks(ctx: click.Context) -> list[TaskRecord]:
+    repository = _mutable_repository(ctx)
+    done_tasks = [task for task in repository.list_tasks() if _is_completed_status(task.status)]
+    for task in done_tasks:
+        repository.complete_task(task.id)
+    return done_tasks
 
 
 def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:
@@ -853,6 +1036,16 @@ def _format_config_value(value: object) -> str:
     if value is None:
         return "null"
     return str(value)
+
+
+def _echo_daemon_status(record: RuntimeRecord, *, as_json: bool) -> None:
+    status = runtime_status(record)
+    if as_json:
+        click.echo(json.dumps(status, sort_keys=True))
+        return
+    click.echo(f"Daemon running at {status['endpoint']}")
+    click.echo(f"PID: {status['pid']}")
+    click.echo(f"Log: {status['log_path']}")
 
 
 def _format_task_metadata_lines(task_record: TaskRecord) -> list[str]:
