@@ -13,7 +13,6 @@ operations are the first compatibility target.
 | Overview TUI | Interactive TUI | Intentionally deferred | A human dashboard can follow after the core inventory and mutation paths remain stable. |
 | Interactive task view/editor | Interactive TUI | Intentionally deferred | Plain `task <id> --plain` output covers agents; task-detail keybindings and editor launch need terminal/editor integration tests. |
 | Interactive search filters | Interactive TUI | Intentionally deferred | Deterministic search output covers agents; live filtering and refinement controls need terminal UI tests. |
-| Advanced config wizard | Interactive TUI | Intentionally deferred | Non-interactive `config get`, `config set`, and DoD default helpers cover agents; the guided wizard is human-facing workflow parity. |
 | Editor launch | Interactive TUI | Intentionally deferred | Launching `$EDITOR` is environment-dependent and not needed for non-interactive agent workflows. |
 | Extended display/browser config effects | Human-facing config | Intentionally deferred | Config read/write is supported; browser and TUI behavior that consumes `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display settings follows the browser/TUI milestones. |
 | auto-commit | Git automation | Intentionally deferred | Automatic commits hide mutation boundaries from reviewers and are outside the first local-file compatibility gate. |
@@ -39,7 +38,8 @@ The Python clone keeps these features out of the first cutover path:
 - Plain output is the compatibility contract for agents.
 - ANSI color is implemented for non-plain task list/search/board output without
   changing `--plain` output.
-- Interactive task/search/config flows remain deferred to human-facing parity work.
+- Interactive task/search flows remain deferred to human-facing parity work.
+- `backlog config` now provides the guided config wizard for human operators.
 - Browser and TUI effects of extended config keys remain deferred.
 - `onStatusChange` is supported only when explicitly configured; task-level
   hooks override the project hook, and hook failures do not block status writes.

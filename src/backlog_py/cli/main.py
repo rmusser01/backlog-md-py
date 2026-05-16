@@ -618,9 +618,12 @@ def compat_status_command(as_json: bool) -> None:
             click.echo(f"  - {item['name']}: {item['reason']}")
 
 
-@main.group("config")
-def config_group() -> None:
-    """Inspect Backlog.md configuration."""
+@main.group("config", invoke_without_command=True, no_args_is_help=False)
+@click.pass_context
+def config_group(ctx: click.Context) -> None:
+    """Inspect or interactively edit Backlog.md configuration."""
+    if ctx.invoked_subcommand is None:
+        _run_config_wizard(ctx)
 
 
 @config_group.command("list")
@@ -704,6 +707,78 @@ def config_dod_defaults_upsert(ctx: click.Context, items: tuple[str, ...]) -> No
     )
     for item in config.definition_of_done or []:
         click.echo(item)
+
+
+def _run_config_wizard(ctx: click.Context) -> None:
+    try:
+        _run_config_wizard_inner(ctx)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _run_config_wizard_inner(ctx: click.Context) -> None:
+    project = _project(ctx)
+    config = project.config
+    click.echo("Interactive Backlog.md configuration")
+
+    _prompt_config_text(ctx, "projectName", "Project name", config.project_name)
+    _prompt_config_text(ctx, "defaultAssignee", "Default assignee", config.default_assignee or "")
+    _prompt_config_text(ctx, "defaultStatus", "Default status", config.default_status)
+    _prompt_config_text(ctx, "dateFormat", "Date format", config.date_format)
+    _prompt_config_bool(
+        ctx,
+        "includeDatetimeInDates",
+        "Include time in dates",
+        config.include_datetime_in_dates,
+    )
+    _prompt_config_text(ctx, "defaultEditor", "Default editor", config.default_editor or "")
+    _prompt_config_text(ctx, "defaultPort", "Browser port", str(config.default_port))
+    _prompt_config_bool(ctx, "autoOpenBrowser", "Auto-open browser", config.auto_open_browser)
+    _prompt_config_bool(ctx, "remoteOperations", "Enable remote git operations", config.remote_operations)
+    _prompt_config_bool(ctx, "autoCommit", "Enable auto-commit", config.auto_commit)
+    _prompt_config_bool(ctx, "bypassGitHooks", "Bypass git hooks", config.bypass_git_hooks)
+    _prompt_config_text(
+        ctx,
+        "onStatusChange",
+        "Status change hook command",
+        config.on_status_change or "",
+    )
+    _prompt_config_text(
+        ctx,
+        "zeroPaddedIds",
+        "Zero-padded ID width (0 disables)",
+        str(config.zero_padded_ids or 0),
+    )
+    _prompt_config_bool(ctx, "checkActiveBranches", "Check active branches", config.check_active_branches)
+    _prompt_config_text(ctx, "activeBranchDays", "Active branch days", str(config.active_branch_days))
+    _prompt_config_text(ctx, "statuses", "Statuses (comma-separated)", ",".join(config.statuses or []))
+
+    defaults = get_definition_of_done_defaults(project)
+    dod_text = click.prompt(
+        "Definition of Done defaults (comma-separated)",
+        default=",".join(defaults),
+        show_default=bool(defaults),
+    )
+    _locked_write(
+        ctx,
+        "config_wizard_definition_of_done",
+        lambda: replace_definition_of_done_defaults(_project(ctx), _split_csv_items(dod_text)),
+    )
+    click.echo(f"Updated config at {project.config_path}")
+
+
+def _prompt_config_text(ctx: click.Context, key: str, label: str, default: str) -> None:
+    value = click.prompt(label, default=default, show_default=bool(default))
+    _locked_write(ctx, f"config_wizard_{key}", lambda: set_config_value(_project(ctx), key, value))
+
+
+def _prompt_config_bool(ctx: click.Context, key: str, label: str, default: bool) -> None:
+    value = click.confirm(label, default=default)
+    _locked_write(ctx, f"config_wizard_{key}", lambda: set_config_value(_project(ctx), key, _bool_text(value)))
+
+
+def _split_csv_items(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 @main.group("doc")
