@@ -198,12 +198,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "ANSI-rich terminal rendering",
             "Plain output is the cutover blocker; rich color is later polish.",
         ),
-        _deferred(
+        _implemented(
             "cli:shell-completion-install",
-            "completion-deferred",
+            "completion-implemented",
             "CLI-INSTRUCTIONS.md",
-            "backlog completion install",
-            "Shell completion installation is not needed for agent runtime cutover.",
+            "backlog completion install --shell bash, zsh, fish, pwsh",
         ),
         _deferred(
             "cli:interactive-task-view-editor",

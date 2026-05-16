@@ -72,7 +72,6 @@ EXPECTED_DEFERRED = {
     "browser:kanban-drag-drop",
     "cli:interactive-board",
     "cli:rich-colored-output",
-    "cli:shell-completion-install",
     "cli:interactive-task-view-editor",
     "cli:interactive-search-filters",
     "cli:interactive-config-wizard",

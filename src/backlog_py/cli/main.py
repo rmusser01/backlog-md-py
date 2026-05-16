@@ -7,6 +7,7 @@ from typing import Callable, TypeVar
 import click
 
 from backlog_py import __version__
+from backlog_py.cli.completion import CompletionInstallError, install_completion
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
 from backlog_py.core.agents import AgentInstructionError, AgentInstructionUpdate, update_agent_instruction_files
@@ -484,6 +485,24 @@ def agents_command(ctx: click.Context, update_instructions: bool) -> None:
         raise click.ClickException(str(exc)) from exc
     for update in updates:
         click.echo(f"Updated {update.path_relative}")
+
+
+@main.group("completion")
+def completion_group() -> None:
+    """Manage shell completion scripts."""
+
+
+@completion_group.command("install")
+@click.option("--shell", default=None, help="Shell type: bash, zsh, fish, or pwsh.")
+def completion_install_command(shell: str | None) -> None:
+    """Install a user-scoped shell completion script."""
+    try:
+        result = install_completion(main, target=shell)
+    except CompletionInstallError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Installed {result.shell_name} completion for backlog-py CLI.")
+    click.echo(f"Completion script written to {result.install_path}")
+    click.echo(result.instructions)
 
 
 @main.group("integration")
