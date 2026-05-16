@@ -1,5 +1,6 @@
 import json
 import shutil
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -37,6 +38,95 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "In Progress" in html
     assert "TASK-1" in html
     assert "Example task" in html
+
+
+def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        payload = _post_json(f"{service.root_url}/api/tasks/TASK-1/status", {"status": "Done"})
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert lock_operations == [(repo, "browser_task_status")]
+    assert payload["task"]["id"] == "TASK-1"
+    assert payload["task"]["status"] == "Done"
+    assert board["columns"]["In Progress"] == []
+    assert board["columns"]["Done"][0]["id"] == "TASK-1"
+    assert "status: Done" in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_browser_status_move_endpoint_rejects_invalid_status_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/tasks/TASK-1/status", {"status": "Blocked"})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_status_move_endpoint_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/status",
+                {"status": "Done"},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_board_html_exposes_drag_and_drop_controls(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'data-status="In Progress"' in html
+    assert 'data-task-id="TASK-1"' in html
+    assert 'draggable="true"' in html
+    assert "dragstart" in html
+    assert "/api/tasks/" in html
 
 
 def test_browser_service_rejects_occupied_port(tmp_path):
@@ -115,6 +205,12 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _task_file(repo: Path) -> Path:
+    matches = sorted((repo / "backlog" / "tasks").glob("task-1 -*.md"))
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _get_json(url: str) -> object:
     return json.loads(_get_text(url))
 
@@ -122,3 +218,17 @@ def _get_json(url: str) -> object:
 def _get_text(url: str) -> str:
     with urllib.request.urlopen(url, timeout=2) as response:
         return response.read().decode("utf-8")
+
+
+def _post_json(url: str, payload: object, *, origin: str | None = None) -> object:
+    headers = {"Content-Type": "application/json"}
+    if origin is not None:
+        headers["Origin"] = origin
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=2) as response:
+        return json.loads(response.read().decode("utf-8"))

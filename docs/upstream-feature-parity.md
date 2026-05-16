@@ -47,12 +47,14 @@ larger task commands:
 - Read-only loopback `backlog browser` service with `--port <port>`,
   `--no-open`, config-driven default port and auto-open behavior, health and
   board JSON endpoints, and a static board snapshot.
+- Browser drag-and-drop status movement backed by the project write lock and
+  status validation.
 
 ## Remaining Full-Parity Work
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | responsive Kanban polish, drag-and-drop status changes, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic read-only board service implemented; interactive browser UI remains deferred |
+| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic board service and drag-and-drop status movement are implemented; richer browser UI remains deferred |
 | Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, and static board snapshot are implemented |
 | Terminal UI | Interactive board, overview TUI, interactive task detail, editor launch, interactive search filters, live filtering | Deferred behind deterministic plain output |
 | Extended config effects | TUI behavior driven by `defaultEditor` and date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects are implemented; TUI effects remain deferred |

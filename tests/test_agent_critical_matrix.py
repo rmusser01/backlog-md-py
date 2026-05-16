@@ -69,7 +69,6 @@ EXPECTED_AGENT_CRITICAL = {
 }
 
 EXPECTED_DEFERRED = {
-    "browser:kanban-drag-drop",
     "cli:interactive-board",
     "cli:interactive-task-view-editor",
     "cli:interactive-search-filters",
@@ -152,6 +151,16 @@ def test_agent_critical_inventory_tracks_browser_service_surface():
     assert item.status == "implemented"
     assert item.classification == "browser-implemented"
     assert item.expected == "backlog browser --port <port> --no-open and browser service lifecycle"
+
+
+def test_agent_critical_inventory_tracks_browser_drag_drop_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:kanban-drag-drop"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "backlog browser"
 
 
 def test_agent_critical_inventory_tracks_init_surface():
