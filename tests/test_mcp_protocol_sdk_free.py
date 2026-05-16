@@ -42,6 +42,16 @@ def test_tools_list_contains_existing_task_search_tool():
     assert "project" in task_search["inputSchema"]["required"]
 
 
+def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
+    response = handle_jsonrpc_message({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"})
+
+    task_edit = next(tool for tool in response["result"]["tools"] if tool["name"] == "task_edit")
+    properties = task_edit["inputSchema"]["properties"]
+    assert "acceptanceCriteria" in properties
+    assert "acceptanceCriteriaAdd" in properties
+    assert "acceptanceCriteriaSet" in properties
+
+
 def test_resources_list_contains_workflow_resources():
     response = handle_jsonrpc_message({"jsonrpc": "2.0", "id": "resources", "method": "resources/list"})
 

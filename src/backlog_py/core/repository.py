@@ -245,6 +245,7 @@ class MutableRepository(ReadOnlyRepository):
         clear_plan: bool = False,
         notes: str | None = None,
         append_notes: str | None = None,
+        acceptance_criteria: Sequence[str] | None = None,
         acceptance_criteria_add: Sequence[str] | None = None,
         definition_of_done_add: Sequence[str] | None = None,
         final_summary: str | None = None,
@@ -321,6 +322,9 @@ class MutableRepository(ReadOnlyRepository):
             parsed = parse_task_markdown(source)
         if clear_final_summary:
             source = _replace_section(source, parsed, "FINAL_SUMMARY", "")
+            parsed = parse_task_markdown(source)
+        if acceptance_criteria is not None:
+            source = _replace_checklist_items(source, "AC", acceptance_criteria)
             parsed = parse_task_markdown(source)
         if check_ac:
             source = _set_checklist_indexes(source, parsed, "AC", check_ac, checked=True)
@@ -775,6 +779,21 @@ def _append_checklist_items(
         for index, item in enumerate(normalized_items, start=start_index)
     )
     return source.replace(raw, f"{prefix}{appended}{lines[-1]}", 1)
+
+
+def _replace_checklist_items(
+    source: str,
+    marker: str,
+    items: Sequence[str],
+) -> str:
+    normalized_items = [_normalize_block(item) for item in items if _normalize_block(item)]
+    raw = _extract_marker_block(source, marker)
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    rendered_items = _render_checklist(normalized_items)
+    if newline == "\r\n":
+        rendered_items = rendered_items.replace("\n", "\r\n")
+    replacement = f"<!-- {marker}:BEGIN -->{newline}{rendered_items}<!-- {marker}:END -->"
+    return source.replace(raw, replacement, 1)
 
 
 def _remove_checklist_indexes(
