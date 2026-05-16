@@ -6,6 +6,9 @@ from pathlib import Path
 import yaml
 from click.testing import CliRunner
 
+from backlog_py.core.decisions import DecisionService
+from backlog_py.core.documents import DocumentService
+from backlog_py.core.drafts import DraftService
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository
 from backlog_py.mcp.tools import definition_of_done_defaults_get, definition_of_done_defaults_upsert, task_create
@@ -139,10 +142,22 @@ def test_cli_config_get_outputs_effective_values(tmp_path):
     runner = CliRunner()
 
     default_status = runner.invoke(main, ["--cwd", str(repo), "config", "get", "defaultStatus"])
+    date_format = runner.invoke(main, ["--cwd", str(repo), "config", "get", "dateFormat"])
+    default_port = runner.invoke(main, ["--cwd", str(repo), "config", "get", "defaultPort"])
+    auto_open_browser = runner.invoke(main, ["--cwd", str(repo), "config", "get", "autoOpenBrowser"])
+    zero_padded_ids = runner.invoke(main, ["--cwd", str(repo), "config", "get", "zeroPaddedIds"])
     remote_operations = runner.invoke(main, ["--cwd", str(repo), "config", "get", "remoteOperations"])
 
     assert default_status.exit_code == 0
     assert default_status.output == "To Do\n"
+    assert date_format.exit_code == 0
+    assert date_format.output == "yyyy-mm-dd\n"
+    assert default_port.exit_code == 0
+    assert default_port.output == "6420\n"
+    assert auto_open_browser.exit_code == 0
+    assert auto_open_browser.output == "true\n"
+    assert zero_padded_ids.exit_code == 0
+    assert zero_padded_ids.output == "(disabled)\n"
     assert remote_operations.exit_code == 0
     assert remote_operations.output == "false\n"
 
@@ -151,30 +166,125 @@ def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
     repo = _copy_fixture(tmp_path)
     runner = CliRunner()
 
+    default_assignee = runner.invoke(main, ["--cwd", str(repo), "config", "set", "defaultAssignee", "@alex"])
+    date_format = runner.invoke(main, ["--cwd", str(repo), "config", "set", "dateFormat", "dd/mm/yyyy"])
+    include_datetime = runner.invoke(main, ["--cwd", str(repo), "config", "set", "includeDatetimeInDates", "false"])
+    default_port = runner.invoke(main, ["--cwd", str(repo), "config", "set", "defaultPort", "8080"])
+    auto_open_browser = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoOpenBrowser", "false"])
+    zero_padded_ids = runner.invoke(main, ["--cwd", str(repo), "config", "set", "zeroPaddedIds", "3"])
     auto_commit = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoCommit", "true"])
     active_days = runner.invoke(main, ["--cwd", str(repo), "config", "set", "activeBranchDays", "45"])
     default_editor = runner.invoke(
         main,
         ["--cwd", str(repo), "config", "set", "defaultEditor", "code --wait"],
     )
+    get_zero_padded_ids = runner.invoke(main, ["--cwd", str(repo), "config", "get", "zeroPaddedIds"])
     get_default_editor = runner.invoke(main, ["--cwd", str(repo), "config", "get", "defaultEditor"])
 
+    assert default_assignee.exit_code == 0
+    assert default_assignee.output == "defaultAssignee: @alex\n"
+    assert date_format.exit_code == 0
+    assert date_format.output == "dateFormat: dd/mm/yyyy\n"
+    assert include_datetime.exit_code == 0
+    assert include_datetime.output == "includeDatetimeInDates: false\n"
+    assert default_port.exit_code == 0
+    assert default_port.output == "defaultPort: 8080\n"
+    assert auto_open_browser.exit_code == 0
+    assert auto_open_browser.output == "autoOpenBrowser: false\n"
+    assert zero_padded_ids.exit_code == 0
+    assert zero_padded_ids.output == "zeroPaddedIds: 3\n"
     assert auto_commit.exit_code == 0
     assert auto_commit.output == "autoCommit: true\n"
     assert active_days.exit_code == 0
     assert active_days.output == "activeBranchDays: 45\n"
     assert default_editor.exit_code == 0
     assert default_editor.output == "defaultEditor: code --wait\n"
+    assert get_zero_padded_ids.exit_code == 0
+    assert get_zero_padded_ids.output == "3\n"
     assert get_default_editor.exit_code == 0
     assert get_default_editor.output == "code --wait\n"
 
     config = _project(repo).config
+    assert config.default_assignee == "@alex"
+    assert config.date_format == "dd/mm/yyyy"
+    assert config.include_datetime_in_dates is False
+    assert config.default_port == 8080
+    assert config.auto_open_browser is False
+    assert config.zero_padded_ids == 3
     assert config.auto_commit is True
     assert config.active_branch_days == 45
     raw_config = yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))
+    assert raw_config["defaultAssignee"] == "@alex"
+    assert raw_config["dateFormat"] == "dd/mm/yyyy"
+    assert raw_config["includeDatetimeInDates"] is False
+    assert raw_config["defaultPort"] == 8080
+    assert raw_config["autoOpenBrowser"] is False
+    assert raw_config["zeroPaddedIds"] == 3
     assert raw_config["autoCommit"] is True
     assert raw_config["activeBranchDays"] == 45
     assert raw_config["defaultEditor"] == "code --wait"
+
+
+def test_cli_config_set_zero_padded_ids_zero_disables_padding(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    set_padding = runner.invoke(main, ["--cwd", str(repo), "config", "set", "zeroPaddedIds", "3"])
+    disable_padding = runner.invoke(main, ["--cwd", str(repo), "config", "set", "zeroPaddedIds", "0"])
+    get_padding = runner.invoke(main, ["--cwd", str(repo), "config", "get", "zeroPaddedIds"])
+
+    assert set_padding.exit_code == 0
+    assert disable_padding.exit_code == 0
+    assert disable_padding.output == "zeroPaddedIds: (disabled)\n"
+    assert get_padding.exit_code == 0
+    assert get_padding.output == "(disabled)\n"
+    raw_config = yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))
+    assert "zeroPaddedIds" not in raw_config
+
+
+def test_cli_config_set_accepts_upstream_boolean_aliases(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    auto_open_browser = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoOpenBrowser", "no"])
+    include_datetime = runner.invoke(main, ["--cwd", str(repo), "config", "set", "includeDatetimeInDates", "0"])
+    auto_commit = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoCommit", "yes"])
+    remote_operations = runner.invoke(main, ["--cwd", str(repo), "config", "set", "remoteOperations", "1"])
+
+    assert auto_open_browser.exit_code == 0
+    assert auto_open_browser.output == "autoOpenBrowser: false\n"
+    assert include_datetime.exit_code == 0
+    assert include_datetime.output == "includeDatetimeInDates: false\n"
+    assert auto_commit.exit_code == 0
+    assert auto_commit.output == "autoCommit: true\n"
+    assert remote_operations.exit_code == 0
+    assert remote_operations.output == "remoteOperations: true\n"
+
+    config = _project(repo).config
+    assert config.auto_open_browser is False
+    assert config.include_datetime_in_dates is False
+    assert config.auto_commit is True
+    assert config.remote_operations is True
+
+
+def test_zero_padded_ids_apply_to_generated_item_ids(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    set_padding = runner.invoke(main, ["--cwd", str(repo), "config", "set", "zeroPaddedIds", "3"])
+    assert set_padding.exit_code == 0
+
+    task = MutableRepository(_project(repo)).create_task(title="Padded task")
+    child = MutableRepository(_project(repo)).create_task(title="Padded child", parent_task_id=task.id)
+    draft = DraftService(_project(repo)).create_draft(title="Padded draft")
+    document = DocumentService(_project(repo)).create_document_from_title("Padded document")
+    decision = DecisionService(_project(repo)).create_decision("Padded decision")
+
+    assert task.id == "TASK-002"
+    assert child.id == "TASK-002.01"
+    assert draft.id == "draft-001"
+    assert document.id == "DOC-001"
+    assert decision.id == "decision-001"
 
 
 def test_cli_config_set_rejects_invalid_typed_values_without_writing(tmp_path):
@@ -184,9 +294,15 @@ def test_cli_config_set_rejects_invalid_typed_values_without_writing(tmp_path):
     before = config_path.read_text(encoding="utf-8")
 
     result = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoCommit", "sometimes"])
+    bad_port = runner.invoke(main, ["--cwd", str(repo), "config", "set", "defaultPort", "70000"])
+    bad_padding = runner.invoke(main, ["--cwd", str(repo), "config", "set", "zeroPaddedIds", "--", "-1"])
 
     assert result.exit_code != 0
     assert "boolean" in result.output
+    assert bad_port.exit_code != 0
+    assert "valid port" in bad_port.output
+    assert bad_padding.exit_code != 0
+    assert "non-negative" in bad_padding.output
     assert config_path.read_text(encoding="utf-8") == before
 
 

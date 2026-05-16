@@ -608,10 +608,17 @@ def config_list(ctx: click.Context) -> None:
     project = _project(ctx)
     config = project.config
     click.echo(f"projectName: {config.project_name}")
+    click.echo(f"defaultAssignee: {config.default_assignee or '(not set)'}")
     click.echo(f"defaultStatus: {config.default_status}")
+    click.echo(f"dateFormat: {config.date_format}")
+    click.echo(f"includeDatetimeInDates: {_bool_text(config.include_datetime_in_dates)}")
+    click.echo(f"defaultEditor: {config.default_editor or '(not set)'}")
+    click.echo(f"defaultPort: {config.default_port}")
+    click.echo(f"autoOpenBrowser: {_bool_text(config.auto_open_browser)}")
     click.echo(f"remoteOperations: {_bool_text(config.remote_operations)}")
     click.echo(f"autoCommit: {_bool_text(config.auto_commit)}")
     click.echo(f"bypassGitHooks: {_bool_text(config.bypass_git_hooks)}")
+    click.echo(f"zeroPaddedIds: {config.zero_padded_ids if config.zero_padded_ids is not None else '(disabled)'}")
     click.echo(f"checkActiveBranches: {_bool_text(config.check_active_branches)}")
     click.echo(f"activeBranchDays: {config.active_branch_days}")
     if config.statuses is not None:

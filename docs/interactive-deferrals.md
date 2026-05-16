@@ -17,7 +17,7 @@ operations are the first compatibility target.
 | Advanced config wizard | Interactive TUI | Intentionally deferred | Non-interactive `config get`, `config set`, and DoD default helpers cover agents; the guided wizard is human-facing workflow parity. |
 | Editor launch | Interactive TUI | Intentionally deferred | Launching `$EDITOR` is environment-dependent and not needed for non-interactive agent workflows. |
 | Shell completions | Shell integration | Not required for agent cutover | Completion install is convenience tooling and should not affect runtime compatibility. |
-| Extended display/browser config | Human-facing config | Intentionally deferred | `defaultAssignee`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, and `zeroPaddedIds` are not needed for the first file-format cutover. |
+| Extended display/browser config effects | Human-facing config | Intentionally deferred | Config read/write is supported; browser and TUI behavior that consumes `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display settings follows the browser/TUI milestones. |
 | onStatusChange | Automation hook | Intentionally deferred | Hook execution can run arbitrary commands, so it remains disabled until a dedicated safety design and tests exist. |
 | auto-commit | Git automation | Intentionally deferred | Automatic commits hide mutation boundaries from reviewers and are outside the first local-file compatibility gate. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
@@ -41,8 +41,7 @@ The Python clone keeps these features out of the first cutover path:
 
 - Plain output is the compatibility contract for agents.
 - Interactive task/search/config flows remain deferred to human-facing parity work.
-- Extended UI/display/browser config keys remain deferred unless they become part
-  of a scripted agent workflow.
+- Browser and TUI effects of extended config keys remain deferred.
 - `onStatusChange` remains disabled by default.
 - auto-commit and remote operations are deferred.
 - hook bypass is rejected for first cutover.

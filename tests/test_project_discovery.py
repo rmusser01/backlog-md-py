@@ -115,10 +115,17 @@ def test_load_config_accepts_snake_case_keys(tmp_path):
         "\n".join(
             [
                 "project_name: snake-demo",
+                "default_assignee: '@alex'",
                 "default_status: In Progress",
+                "date_format: dd/mm/yyyy",
+                "include_datetime_in_dates: false",
+                "default_editor: code --wait",
+                "default_port: 8080",
+                "auto_open_browser: false",
                 "remote_operations: false",
                 "auto_commit: true",
                 "bypass_git_hooks: true",
+                "zero_padded_ids: 4",
                 "check_active_branches: false",
                 "active_branch_days: 14",
                 "definition_of_done:",
@@ -131,10 +138,17 @@ def test_load_config_accepts_snake_case_keys(tmp_path):
     config = load_config(config_path)
 
     assert config.project_name == "snake-demo"
+    assert config.default_assignee == "@alex"
     assert config.default_status == "In Progress"
+    assert config.date_format == "dd/mm/yyyy"
+    assert config.include_datetime_in_dates is False
+    assert config.default_editor == "code --wait"
+    assert config.default_port == 8080
+    assert config.auto_open_browser is False
     assert config.remote_operations is False
     assert config.auto_commit is True
     assert config.bypass_git_hooks is True
+    assert config.zero_padded_ids == 4
     assert config.check_active_branches is False
     assert config.active_branch_days == 14
     assert config.definition_of_done == ["Tests pass"]
@@ -146,10 +160,17 @@ def test_load_config_accepts_camel_case_keys(tmp_path):
         "\n".join(
             [
                 "projectName: camel-demo",
+                "defaultAssignee: '@sam'",
                 "defaultStatus: Done",
+                "dateFormat: mm/dd/yyyy",
+                "includeDatetimeInDates: true",
+                "defaultEditor: vim",
+                "defaultPort: 9090",
+                "autoOpenBrowser: true",
                 "remoteOperations: false",
                 "autoCommit: true",
                 "bypassGitHooks: true",
+                "zeroPaddedIds: 3",
                 "checkActiveBranches: false",
                 "activeBranchDays: 7",
                 "definitionOfDone:",
@@ -162,10 +183,17 @@ def test_load_config_accepts_camel_case_keys(tmp_path):
     config = load_config(config_path)
 
     assert config.project_name == "camel-demo"
+    assert config.default_assignee == "@sam"
     assert config.default_status == "Done"
+    assert config.date_format == "mm/dd/yyyy"
+    assert config.include_datetime_in_dates is True
+    assert config.default_editor == "vim"
+    assert config.default_port == 9090
+    assert config.auto_open_browser is True
     assert config.remote_operations is False
     assert config.auto_commit is True
     assert config.bypass_git_hooks is True
+    assert config.zero_padded_ids == 3
     assert config.check_active_branches is False
     assert config.active_branch_days == 7
     assert config.definition_of_done == ["Review complete"]

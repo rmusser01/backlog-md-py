@@ -108,6 +108,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog config dod-defaults-upsert [item...]",
         ),
         _golden("cli:agents-update-instructions", "CLI-INSTRUCTIONS.md", "backlog agents --update-instructions"),
+        _implemented(
+            "config:extended-options",
+            "config-implemented",
+            "ADVANCED-CONFIG.md",
+            "config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds",
+        ),
         _golden("mcp:workflow-overview", "agent-nudge.md", "backlog://workflow/overview"),
         _golden("mcp:task-workflow-alias", "agent-nudge.md", "backlog://docs/task-workflow"),
         _golden("mcp:board", "MCP tools", "task_board(project)"),
@@ -215,13 +221,6 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "The advanced config wizard is deferred behind non-interactive config get/set helpers.",
         ),
         _deferred(
-            "config:extended-options",
-            "config-deferred",
-            "ADVANCED-CONFIG.md",
-            "defaultAssignee, dateFormat, includeDatetimeInDates, defaultPort, autoOpenBrowser, zeroPaddedIds",
-            "Advanced non-agent config options are deferred until full human-facing parity work.",
-        ),
-        _deferred(
             "core:on-status-change",
             "automation-deferred",
             "ADVANCED-CONFIG.md",
@@ -257,6 +256,17 @@ def _golden(name: str, upstream_reference: str, expected: str) -> CompatibilityI
     return CompatibilityItem(
         name=name,
         classification="golden-required",
+        upstream_reference=upstream_reference,
+        expected=expected,
+        status="implemented",
+        fixture=name,
+    )
+
+
+def _implemented(name: str, classification: str, upstream_reference: str, expected: str) -> CompatibilityItem:
+    return CompatibilityItem(
+        name=name,
+        classification=classification,
         upstream_reference=upstream_reference,
         expected=expected,
         status="implemented",

@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 import yaml
 
+from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -187,7 +188,7 @@ class DocumentService:
             match = re.fullmatch(r"DOC-(\d+)", document.id.upper())
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
-        return f"DOC-{max_id + 1}"
+        return format_numbered_id("DOC-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _document_id_exists(self, document_id: str) -> bool:
         normalized_id = document_id.casefold()

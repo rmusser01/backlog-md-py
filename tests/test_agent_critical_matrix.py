@@ -77,7 +77,6 @@ EXPECTED_DEFERRED = {
     "cli:interactive-search-filters",
     "cli:interactive-config-wizard",
     "browser:custom-port-service",
-    "config:extended-options",
     "core:on-status-change",
     "git:remote-operations",
     "git:auto-commit",
@@ -206,6 +205,9 @@ def test_agent_critical_inventory_tracks_config_get_set_surface():
 
     assert by_name["cli:config-get"].expected == "backlog config get <key>"
     assert by_name["cli:config-set"].expected == "backlog config set <key> <value>"
+    assert by_name["config:extended-options"].status == "implemented"
+    assert "defaultAssignee" in by_name["config:extended-options"].expected
+    assert "zeroPaddedIds" in by_name["config:extended-options"].expected
 
 
 def test_agent_critical_inventory_tracks_agent_instruction_surface():
@@ -256,7 +258,7 @@ def test_agent_critical_matrix_doc_matches_inventory():
     matrix_lines = matrix.splitlines()
 
     for item in inventory.items:
-        detail = item.fixture if item.classification == "golden-required" else item.deferred_reason
+        detail = item.fixture if item.status == "implemented" else item.deferred_reason
         assert any(
             item.name in line
             and item.expected in line

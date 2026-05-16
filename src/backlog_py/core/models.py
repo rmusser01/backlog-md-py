@@ -8,11 +8,18 @@ from typing import Any
 @dataclass(frozen=True)
 class BacklogConfig:
     project_name: str
+    default_assignee: str | None = None
     statuses: list[str] | None = None
     default_status: str = "To Do"
+    date_format: str = "yyyy-mm-dd"
+    include_datetime_in_dates: bool = True
+    default_editor: str | None = None
+    auto_open_browser: bool = True
+    default_port: int = 6420
     remote_operations: bool = True
     auto_commit: bool = False
     bypass_git_hooks: bool = False
+    zero_padded_ids: int | None = None
     check_active_branches: bool = True
     active_branch_days: int = 30
     definition_of_done: list[str] | None = None

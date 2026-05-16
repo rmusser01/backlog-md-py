@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Sequence
 
+from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
     MutableRepository,
@@ -170,7 +171,7 @@ class DraftService:
             match = _DRAFT_ID_RE.fullmatch(draft.id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
-        return f"draft-{max_id + 1}"
+        return format_numbered_id("draft-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _draft_exists(self, draft_id: str) -> bool:
         normalized_id = draft_id.casefold()
