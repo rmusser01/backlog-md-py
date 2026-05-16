@@ -459,6 +459,43 @@ def test_overview_outputs_plain_project_summary():
     assert "  To Do: 0" in result.output
     assert "  In Progress: 1" in result.output
     assert "  Done: 0" in result.output
+    assert "Project Overview" not in result.output
+    assert "Actions:" not in result.output
+
+
+def test_overview_interactive_renders_dashboard_sections(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    repository = MutableRepository.from_path(repo)
+    repository.edit_task("TASK-1", priority="high")
+    repository.create_task(
+        title="Blocked overview task",
+        task_id="TASK-2",
+        status="To Do",
+        priority="low",
+        dependencies=["TASK-1"],
+    )
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "overview", input="q")
+
+    assert result.exit_code == 0
+    assert "basic-fixture - Project Overview" in result.output
+    assert "Status Overview" in result.output
+    assert "To Do: 1 tasks" in result.output
+    assert "In Progress: 1 tasks" in result.output
+    assert "Done: 0 tasks" in result.output
+    assert "Total Tasks: 2" in result.output
+    assert "Completion: 0%" in result.output
+    assert "Priority Breakdown" in result.output
+    assert "High: 1 tasks" in result.output
+    assert "Low: 1 tasks" in result.output
+    assert "Project Health" in result.output
+    assert "Blocked Tasks: 1" in result.output
+    assert "Actions: [Q]uit" in result.output
 
 
 def test_board_export_writes_markdown_report(tmp_path):
@@ -538,10 +575,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 70" in result.output
+    assert "implemented: 71" in result.output
     assert "deferred: 2" in result.output
-    assert "total: 72" in result.output
-    assert "cli: 42 implemented, 0 deferred, 42 total" in result.output
+    assert "total: 73" in result.output
+    assert "cli: 43 implemented, 0 deferred, 43 total" in result.output
     assert "browser: 2 implemented, 0 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 1 implemented, 0 deferred, 1 total" in result.output
@@ -554,6 +591,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert result.exit_code == 0
     assert '"agent_cutover_ready": true' in result.output
     assert '"cli:interactive-task-view-editor"' in result.output
+    assert '"cli:interactive-overview"' in result.output
     assert '"status": "implemented"' in result.output
 
 

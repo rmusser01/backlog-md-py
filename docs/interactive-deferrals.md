@@ -10,7 +10,7 @@ reviewable file operations are the first compatibility target.
 | Capability | Classification | Agent cutover impact | Decision and reason |
 | --- | --- | --- | --- |
 | Interactive board | Interactive TUI | Implemented | Interactive terminals can view, edit, or move tasks from `board`; non-interactive output remains deterministic. |
-| Overview TUI | Interactive TUI | Intentionally deferred | A human dashboard can follow after the core inventory and mutation paths remain stable. |
+| Overview TUI | Interactive TUI | Implemented | Interactive terminals render a project statistics dashboard from `overview`; non-interactive output remains deterministic. |
 | Interactive task view/editor | Interactive TUI | Implemented | Non-plain `task <id>` renders a human task detail view and interactive terminals can press `E` to launch the configured editor under the project write lock. |
 | Interactive search filters | Interactive TUI | Implemented | Non-plain `search` renders a human filter panel; interactive terminals can refine by status, priority, result type, or modified file while preserving `--plain`. |
 | Editor launch | Interactive TUI | Implemented for task view and board | `defaultEditor`, `VISUAL`, or `EDITOR` is split into argv without a shell and receives the task file path. |
@@ -43,6 +43,8 @@ The Python clone keeps these features out of the first cutover path:
   changing `search <query> --plain`.
 - Interactive board view/edit/move controls are implemented for human operators
   without changing non-interactive `board` output.
+- Interactive overview dashboard output is implemented for human operators
+  without changing non-interactive `overview` output.
 - `backlog config` now provides the guided config wizard for human operators.
 - Browser `defaultPort` and `autoOpenBrowser` effects are implemented for the
   loopback browser service; remaining TUI effects of extended config keys stay

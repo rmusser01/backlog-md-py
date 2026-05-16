@@ -146,7 +146,8 @@ tracked separately from the first agent cutover candidate:
   status movement are implemented, but interactive browser editing remains
   deferred.
 - `docs/interactive-deferrals.md` records the implemented task detail/editor,
-  search filter, and board flows, remaining CLI/TUI deferrals, hook bypass,
-  and remote-operation deferrals plus the opt-in auto-commit runtime policy.
+  search filter, board, and overview flows, remaining CLI/TUI deferrals, hook
+  bypass, and remote-operation deferrals plus the opt-in auto-commit runtime
+  policy.
 - `docs/upstream-feature-parity.md` records the current upstream feature-set
   audit and the work that remains before claiming full clone parity.

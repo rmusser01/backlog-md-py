@@ -189,6 +189,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog board interactive controls",
         ),
         _implemented(
+            "cli:interactive-overview",
+            "interactive-implemented",
+            "CLI-INSTRUCTIONS.md",
+            "backlog overview interactive project statistics dashboard",
+        ),
+        _implemented(
             "cli:rich-colored-output",
             "terminal-implemented",
             "CLI-INSTRUCTIONS.md",

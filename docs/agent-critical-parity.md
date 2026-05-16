@@ -81,6 +81,7 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-task-view-editor | implemented | backlog task <id> interactive task view and editor launch | cli:interactive-task-view-editor |
 | cli:interactive-search-filters | implemented | interactive search filters and live filtering | cli:interactive-search-filters |
 | cli:interactive-board | implemented | backlog board interactive controls | cli:interactive-board |
+| cli:interactive-overview | implemented | backlog overview interactive project statistics dashboard | cli:interactive-overview |
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
