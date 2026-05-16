@@ -365,6 +365,41 @@ def search_command(
     limit: int | None,
 ) -> None:
     """Search tasks, documents, and decisions."""
+    if plain:
+        for line in _search_output_lines(
+            ctx,
+            query,
+            plain=True,
+            status=status,
+            priority=priority,
+            modified_files=modified_files,
+            result_types=result_types,
+            limit=limit,
+        ):
+            click.echo(line)
+        return
+    _run_interactive_search_view(
+        ctx,
+        query,
+        status=status,
+        priority=priority,
+        modified_files=modified_files,
+        result_types=result_types,
+        limit=limit,
+    )
+
+
+def _search_output_lines(
+    ctx: click.Context,
+    query: str,
+    *,
+    plain: bool,
+    status: str | None,
+    priority: str | None,
+    modified_files: tuple[str, ...],
+    result_types: tuple[str, ...],
+    limit: int | None,
+) -> list[str]:
     selected_types = _search_result_types(result_types)
     task_filters_present = status is not None or priority is not None or bool(modified_files)
     if selected_types is None:
@@ -391,8 +426,128 @@ def search_command(
         )
     if limit is not None:
         lines = lines[: max(limit, 0)]
-    for line in lines:
-        click.echo(line)
+    return lines
+
+
+def _run_interactive_search_view(
+    ctx: click.Context,
+    query: str,
+    *,
+    status: str | None,
+    priority: str | None,
+    modified_files: tuple[str, ...],
+    result_types: tuple[str, ...],
+    limit: int | None,
+) -> None:
+    _echo_search_panel(
+        "Search results for",
+        query,
+        _search_output_lines(
+            ctx,
+            query,
+            plain=False,
+            status=status,
+            priority=priority,
+            modified_files=modified_files,
+            result_types=result_types,
+            limit=limit,
+        ),
+    )
+    if not _stdin_is_interactive():
+        return
+    key = _read_interactive_key()
+    if key == "s":
+        refined_status = _optional_prompt("Filter status", status)
+        _echo_filtered_search_panel(
+            ctx,
+            query,
+            f"Filter status: {refined_status or '(cleared)'}",
+            status=refined_status,
+            priority=priority,
+            modified_files=modified_files,
+            result_types=result_types,
+            limit=limit,
+        )
+    elif key == "p":
+        refined_priority = _optional_prompt("Filter priority", priority)
+        _echo_filtered_search_panel(
+            ctx,
+            query,
+            f"Filter priority: {refined_priority or '(cleared)'}",
+            status=status,
+            priority=refined_priority,
+            modified_files=modified_files,
+            result_types=result_types,
+            limit=limit,
+        )
+    elif key == "t":
+        refined_type = _optional_prompt("Filter type", ",".join(result_types))
+        _echo_filtered_search_panel(
+            ctx,
+            query,
+            f"Filter type: {refined_type or '(cleared)'}",
+            status=status,
+            priority=priority,
+            modified_files=modified_files,
+            result_types=(refined_type,) if refined_type is not None else (),
+            limit=limit,
+        )
+    elif key == "m":
+        refined_file = _optional_prompt("Filter modified file", ",".join(modified_files))
+        _echo_filtered_search_panel(
+            ctx,
+            query,
+            f"Filter modified file: {refined_file or '(cleared)'}",
+            status=status,
+            priority=priority,
+            modified_files=(refined_file,) if refined_file is not None else (),
+            result_types=result_types,
+            limit=limit,
+        )
+
+
+def _echo_filtered_search_panel(
+    ctx: click.Context,
+    query: str,
+    filter_label: str,
+    *,
+    status: str | None,
+    priority: str | None,
+    modified_files: tuple[str, ...],
+    result_types: tuple[str, ...],
+    limit: int | None,
+) -> None:
+    click.echo("")
+    click.echo(filter_label)
+    _echo_search_panel(
+        "Filtered results",
+        query,
+        _search_output_lines(
+            ctx,
+            query,
+            plain=False,
+            status=status,
+            priority=priority,
+            modified_files=modified_files,
+            result_types=result_types,
+            limit=limit,
+        ),
+    )
+
+
+def _echo_search_panel(heading: str, query: str, lines: list[str]) -> None:
+    click.echo(f"{heading}: {query}")
+    if lines:
+        for line in lines:
+            click.echo(line)
+    else:
+        click.echo("(no results)")
+    click.echo("Actions: [S]tatus  [P]riority  [T]ype  [M]odified file  [Q]uit")
+
+
+def _optional_prompt(label: str, current: str | None) -> str | None:
+    value = click.prompt(label, default=current or "", show_default=bool(current)).strip()
+    return value or None
 
 
 @main.command("board")
@@ -1174,7 +1329,7 @@ def _run_interactive_task_view(ctx: click.Context, task_record: TaskRecord) -> N
     click.echo(_format_interactive_task_detail(_project(ctx), task_record))
     if not _stdin_is_interactive():
         return
-    key = click.getchar().strip().casefold()
+    key = _read_interactive_key()
     if key == "e":
         _edit_task_in_configured_editor(ctx, task_record)
 
@@ -1235,6 +1390,10 @@ def _run_editor_command(command: list[str], path: Path) -> None:
 
 def _stdin_is_interactive() -> bool:
     return click.get_text_stream("stdin").isatty()
+
+
+def _read_interactive_key() -> str:
+    return click.getchar().strip().casefold()
 
 
 def _format_board_task_line(task_record: TaskRecord) -> str:

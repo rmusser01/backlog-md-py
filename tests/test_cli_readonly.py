@@ -19,8 +19,8 @@ def _invoke(*args: str):
     return CliRunner().invoke(main, ["--cwd", str(FIXTURE_REPO), *args])
 
 
-def _invoke_color(*args: str):
-    return CliRunner().invoke(main, ["--cwd", str(FIXTURE_REPO), *args], color=True)
+def _invoke_color(*args: str, input: str | None = None):
+    return CliRunner().invoke(main, ["--cwd", str(FIXTURE_REPO), *args], color=True, input=input)
 
 
 def _invoke_repo(repo: Path, *args: str, input: str | None = None):
@@ -162,6 +162,94 @@ def test_search_plain_outputs_matching_task():
     assert result.exit_code == 0
     assert "TASK-1" in result.output
     assert "Example task" in result.output
+    assert "Actions:" not in result.output
+
+
+def test_search_default_renders_interactive_filter_panel():
+    result = _invoke_color("search", "parser preservation")
+
+    assert result.exit_code == 0
+    assert "\x1b[" in result.output
+    assert "Search results for: parser preservation" in result.output
+    assert "TASK-1" in result.output
+    assert "Actions: [S]tatus  [P]riority  [T]ype  [M]odified file  [Q]uit" in result.output
+
+
+def test_search_interactive_status_filter_refines_results(tmp_path, monkeypatch):
+    repo = _metadata_filter_repo(tmp_path)
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "search", "task", input="sTo Do\n")
+
+    assert result.exit_code == 0
+    assert "Filter status: To Do" in result.output
+    filtered_output = result.output.split("Filtered results", maxsplit=1)[1]
+    assert "TASK-2" in filtered_output
+    assert "Documentation task" in filtered_output
+    assert "TASK-1" not in filtered_output
+
+
+def test_search_interactive_priority_filter_refines_results(tmp_path, monkeypatch):
+    repo = _metadata_filter_repo(tmp_path)
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "search", "task", input="plow\n")
+
+    assert result.exit_code == 0
+    assert "Filter priority: low" in result.output
+    filtered_output = result.output.split("Filtered results", maxsplit=1)[1]
+    assert "TASK-2" in filtered_output
+    assert "Documentation task" in filtered_output
+    assert "TASK-1" not in filtered_output
+
+
+def test_search_interactive_type_filter_refines_results(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MutableRepository.from_path(repo).create_task(title="Shared needle task", task_id="TASK-2")
+    DocumentService(project).create_document(
+        "guides/shared.md",
+        title="Shared needle document",
+        content="Shared needle body.",
+    )
+    DecisionService(project).create_decision("Shared needle decision")
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "search", "shared needle", input="tdocument\n")
+
+    assert result.exit_code == 0
+    assert "Filter type: document" in result.output
+    filtered_output = result.output.split("Filtered results", maxsplit=1)[1]
+    assert "guides/shared.md Shared needle document" in filtered_output
+    assert "TASK-2" not in filtered_output
+    assert "decision-1" not in filtered_output
+
+
+def test_search_interactive_modified_file_filter_refines_results(tmp_path, monkeypatch):
+    repo = _metadata_filter_repo(tmp_path)
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "search", "task", input="msrc/server\n")
+
+    assert result.exit_code == 0
+    assert "Filter modified file: src/server" in result.output
+    filtered_output = result.output.split("Filtered results", maxsplit=1)[1]
+    assert "TASK-2" in filtered_output
+    assert "Documentation task" in filtered_output
+    assert "TASK-1" not in filtered_output
 
 
 def test_search_plain_outputs_matching_documents_when_unfiltered(tmp_path):
@@ -361,10 +449,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 68" in result.output
-    assert "deferred: 4" in result.output
+    assert "implemented: 69" in result.output
+    assert "deferred: 3" in result.output
     assert "total: 72" in result.output
-    assert "cli: 40 implemented, 2 deferred, 42 total" in result.output
+    assert "cli: 41 implemented, 1 deferred, 42 total" in result.output
     assert "browser: 2 implemented, 0 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 1 implemented, 0 deferred, 1 total" in result.output

@@ -207,12 +207,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "CLI-INSTRUCTIONS.md",
             "backlog task <id> interactive task view and editor launch",
         ),
-        _deferred(
+        _implemented(
             "cli:interactive-search-filters",
-            "interactive-deferred",
+            "interactive-implemented",
             "CLI-INSTRUCTIONS.md",
             "interactive search filters and live filtering",
-            "Interactive search filtering is deferred behind deterministic search output.",
         ),
         _implemented(
             "cli:interactive-config-wizard",
