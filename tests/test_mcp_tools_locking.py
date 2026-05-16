@@ -132,5 +132,51 @@ def test_mcp_read_tools_do_not_acquire_project_lock(repo, monkeypatch):
     assert seen == []
 
 
+@pytest.mark.parametrize("field_name", ["acceptanceCriteria", "acceptance_criteria"])
+def test_mcp_task_edit_acceptance_criteria_alias_adds_items(repo, field_name):
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "task_edit",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    field_name: ["Helper-populated criterion"],
+                },
+            },
+        }
+    )
+
+    assert "result" in response, response
+    task_source = (repo / "backlog" / "tasks" / "task-1 - Example-task.md").read_text(encoding="utf-8")
+    assert "- [ ] #4 Helper-populated criterion" in task_source
+
+
+def test_mcp_task_edit_acceptance_criteria_set_replaces_items(repo):
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "task_edit",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "acceptanceCriteriaSet": ["Replacement criterion"],
+                },
+            },
+        }
+    )
+
+    assert "result" in response, response
+    task_source = (repo / "backlog" / "tasks" / "task-1 - Example-task.md").read_text(encoding="utf-8")
+    assert "- [ ] #1 Replacement criterion" in task_source
+    assert "Preserve completed acceptance criteria raw line" not in task_source
+
+
 def _project(repo: Path):
     return discover_project(Path.cwd(), explicit_cwd=repo)

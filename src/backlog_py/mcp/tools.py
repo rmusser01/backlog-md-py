@@ -145,8 +145,15 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
             clear_plan=_coerce_bool(_get_alias(kwargs, "planClear", "clear_plan")) or False,
             notes=_optional_string(kwargs.get("notes")),
             append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
-            acceptance_criteria_add=_optional_string_list(
-                _get_alias(kwargs, "acceptanceCriteriaAdd", "acceptance_criteria_add")
+            acceptance_criteria=_optional_string_list(
+                _get_alias(kwargs, "acceptanceCriteriaSet", "acceptance_criteria_set")
+            ),
+            acceptance_criteria_add=_combined_optional_string_list(
+                kwargs,
+                "acceptanceCriteriaAdd",
+                "acceptance_criteria_add",
+                "acceptanceCriteria",
+                "acceptance_criteria",
             ),
             definition_of_done_add=_optional_string_list(
                 _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
@@ -454,3 +461,13 @@ def _get_alias(mapping: dict[str, Any], *names: str) -> Any:
         if name in mapping:
             return mapping[name]
     return None
+
+
+def _combined_optional_string_list(mapping: dict[str, Any], *names: str) -> list[str] | None:
+    values: list[str] = []
+    found = False
+    for name in names:
+        if name in mapping:
+            found = True
+            values.extend(_string_list(mapping[name]))
+    return values if found else None

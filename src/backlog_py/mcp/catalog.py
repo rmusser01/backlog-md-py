@@ -60,6 +60,10 @@ def _project_schema(
     }
 
 
+def _string_array_schema(description: str) -> dict[str, Any]:
+    return {"type": "array", "items": {"type": "string"}, "description": description}
+
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition("task_board", "Return tasks grouped by board status.", _project_schema(), tool_registry.task_board),
     ToolDefinition("task_list", "List tasks in a Backlog.md project.", _project_schema(), tool_registry.task_list),
@@ -84,7 +88,17 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "task_edit",
         "Edit supported task fields in a Backlog.md project.",
-        _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
+        _project_schema(
+            {
+                "task_id": {"type": "string"},
+                "acceptanceCriteria": _string_array_schema(
+                    "Acceptance criteria to add; alias for acceptanceCriteriaAdd."
+                ),
+                "acceptanceCriteriaAdd": _string_array_schema("Acceptance criteria to append."),
+                "acceptanceCriteriaSet": _string_array_schema("Acceptance criteria to replace the section with."),
+            },
+            required=("project", "task_id"),
+        ),
         tool_registry.task_edit,
     ),
     ToolDefinition(
