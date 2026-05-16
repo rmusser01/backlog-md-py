@@ -77,6 +77,7 @@ do not block the first local-file agent cutover candidate.
 | config:task-prefix | implemented | init --task-prefix, config list taskPrefix read-only, and generated task/subtask IDs use prefixes.task | config:task-prefix |
 | cli:rich-colored-output | implemented | ANSI-rich terminal rendering | cli:rich-colored-output |
 | cli:shell-completion-install | implemented | backlog completion install --shell bash, zsh, fish, pwsh | cli:shell-completion-install |
+| cli:interactive-config-wizard | implemented | backlog config interactive advanced wizard | cli:interactive-config-wizard |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 
 ## Explicit Deferred Blockers
@@ -88,7 +89,6 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-board | deferred | backlog board interactive controls | Interactive terminal controls are deferred behind non-interactive agent workflows. |
 | cli:interactive-task-view-editor | deferred | backlog task <id> interactive task view and editor launch | Interactive task view and editor launch are deferred behind plain task output. |
 | cli:interactive-search-filters | deferred | interactive search filters and live filtering | Interactive search filtering is deferred behind deterministic search output. |
-| cli:interactive-config-wizard | deferred | backlog config interactive advanced wizard | The advanced config wizard is deferred behind non-interactive config get/set helpers. |
 | git:remote-operations | deferred | remote git operations | Remote git behavior is outside the first local-file compatibility gate. |
 | git:auto-commit | deferred | autoCommit | Automatic commits are deferred to keep mutation review explicit. |
 | git:hook-bypass | deferred | bypassGitHooks | Hook bypass remains unsupported for safety. |

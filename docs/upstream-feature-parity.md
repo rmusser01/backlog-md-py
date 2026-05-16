@@ -40,6 +40,8 @@ larger task commands:
 - `onStatusChange` shell command execution on status edits, including
   task-level override, upstream-compatible environment variables, and
   non-blocking failure handling.
+- Guided `backlog config` wizard for advanced settings and
+  Definition-of-Done defaults.
 
 ## Remaining Full-Parity Work
 
@@ -48,7 +50,6 @@ larger task commands:
 | Browser UI | `backlog browser`, responsive Kanban, drag-and-drop status changes, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Deferred to browser milestone |
 | Browser service | `backlog browser --port <port> --no-open`, service lifecycle, port collisions, logging, shutdown | Deferred to browser milestone |
 | Terminal UI | Interactive board, overview TUI, interactive task detail, editor launch, interactive search filters, live filtering | Deferred behind deterministic plain output |
-| Config wizard | `backlog config` with guided advanced settings and Definition-of-Done editing | Deferred behind non-interactive config helpers |
 | Extended config effects | Browser/TUI behavior driven by `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display preferences | Config read/write and zero-padded ID generation implemented; browser/TUI effects remain deferred |
 | Git automation | remote operations, active-branch accuracy behavior, auto-commit, hook bypass | Remote and auto-commit deferred; hook bypass rejected for first cutover |
 

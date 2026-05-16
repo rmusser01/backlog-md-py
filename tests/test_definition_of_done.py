@@ -179,6 +179,89 @@ def test_on_status_change_false_config_is_disabled(tmp_path):
     assert load_config(config_path).on_status_change is None
 
 
+def test_cli_config_without_subcommand_runs_interactive_wizard(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    user_input = "\n".join(
+        [
+            "Wizard Project",
+            "@sam",
+            "Review",
+            "dd/mm/yyyy",
+            "n",
+            "vim",
+            "7777",
+            "n",
+            "y",
+            "y",
+            "n",
+            "echo status",
+            "4",
+            "n",
+            "14",
+            "Review,Done",
+            "Tests pass,Docs updated",
+        ]
+    )
+
+    result = runner.invoke(main, ["--cwd", str(repo), "config"], input=f"{user_input}\n")
+
+    assert result.exit_code == 0
+    assert "Interactive Backlog.md configuration" in result.output
+    assert "Updated config" in result.output
+    config = load_config(repo / "backlog" / "config.yml")
+    assert config.project_name == "Wizard Project"
+    assert config.default_assignee == "@sam"
+    assert config.default_status == "Review"
+    assert config.date_format == "dd/mm/yyyy"
+    assert config.include_datetime_in_dates is False
+    assert config.default_editor == "vim"
+    assert config.default_port == 7777
+    assert config.auto_open_browser is False
+    assert config.remote_operations is True
+    assert config.auto_commit is True
+    assert config.bypass_git_hooks is False
+    assert config.on_status_change == "echo status"
+    assert config.zero_padded_ids == 4
+    assert config.check_active_branches is False
+    assert config.active_branch_days == 14
+    assert config.statuses == ["Review", "Done"]
+    assert get_definition_of_done_defaults(_project(repo)) == ["Tests pass", "Docs updated"]
+
+
+def test_cli_config_wizard_keeps_disabled_status_hook_on_blank_default(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    user_input = "\n".join([""] * 17)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "config"], input=f"{user_input}\n")
+
+    assert result.exit_code == 0
+    assert load_config(repo / "backlog" / "config.yml").on_status_change is None
+    raw_config = yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))
+    assert "onStatusChange" not in raw_config
+    assert "on_status_change" not in raw_config
+
+
+def test_cli_config_wizard_reports_invalid_values(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    user_input = "\n".join(
+        [
+            "Wizard Project",
+            "@sam",
+            "Review",
+            "dd/mm/yyyy",
+            "n",
+            "vim",
+            "70000",
+        ]
+    )
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "config"], input=f"{user_input}\n")
+
+    assert result.exit_code == 1
+    assert "valid port number" in result.output
+
+
 def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
     repo = _copy_fixture(tmp_path)
     runner = CliRunner()

@@ -73,7 +73,6 @@ EXPECTED_DEFERRED = {
     "cli:interactive-board",
     "cli:interactive-task-view-editor",
     "cli:interactive-search-filters",
-    "cli:interactive-config-wizard",
     "browser:custom-port-service",
     "git:remote-operations",
     "git:auto-commit",
@@ -125,6 +124,16 @@ def test_agent_critical_inventory_tracks_status_change_callback_surface():
     assert item.status == "implemented"
     assert item.classification == "automation-implemented"
     assert item.expected == "onStatusChange hooks"
+
+
+def test_agent_critical_inventory_tracks_interactive_config_wizard_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["cli:interactive-config-wizard"]
+    assert item.status == "implemented"
+    assert item.classification == "interactive-implemented"
+    assert item.expected == "backlog config interactive advanced wizard"
 
 
 def test_agent_critical_inventory_tracks_init_surface():

@@ -217,12 +217,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "interactive search filters and live filtering",
             "Interactive search filtering is deferred behind deterministic search output.",
         ),
-        _deferred(
+        _implemented(
             "cli:interactive-config-wizard",
-            "interactive-deferred",
+            "interactive-implemented",
             "ADVANCED-CONFIG.md",
             "backlog config interactive advanced wizard",
-            "The advanced config wizard is deferred behind non-interactive config get/set helpers.",
         ),
         _implemented(
             "core:on-status-change",
