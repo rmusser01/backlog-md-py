@@ -205,7 +205,7 @@ fixtures:
   - name: "cli:interactive-search-filters"
     command: ["backlog", "search", "auth"]
     agent_critical: false
-    classification: "interactive-deferred"
+    classification: "interactive-implemented"
   - name: "cli:interactive-config-wizard"
     command: ["backlog", "config"]
     agent_critical: false

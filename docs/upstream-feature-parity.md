@@ -44,6 +44,8 @@ larger task commands:
   Definition-of-Done defaults.
 - Non-plain `backlog task <id>` task detail view with `defaultEditor`/`VISUAL`/
   `EDITOR` launch from interactive terminals under the project write lock.
+- Non-plain `backlog search` interactive filter panel with status, priority,
+  result-type, and modified-file refinement while preserving `--plain`.
 - Opt-in local `autoCommit` after project write mutations, with dirty-worktree
   protection, no remote operations, and no hook bypass.
 - Loopback `backlog browser` service with `--port <port>`,
@@ -58,7 +60,7 @@ larger task commands:
 | --- | --- | --- |
 | Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic board service and drag-and-drop status movement are implemented; richer browser UI remains deferred |
 | Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, and static board snapshot are implemented |
-| Terminal UI | Interactive board, overview TUI, interactive search filters, live filtering | Task detail/editor launch is implemented; remaining TUI controls are deferred behind deterministic plain output |
+| Terminal UI | Interactive board, overview TUI | Task detail/editor launch and search filters are implemented; remaining TUI controls are deferred behind deterministic plain output |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects plus task-view `defaultEditor` are implemented; remaining TUI display effects are deferred |
 | Git automation | remote operations, active-branch accuracy behavior, hook bypass | Local auto-commit implemented; remote operations deferred; hook bypass rejected for first cutover |
 
@@ -70,7 +72,7 @@ larger task commands:
    should explicitly advertise a headless/agent-focused compatibility scope.
 3. If browser parity is in scope, implement it separately from MCP/CLI runtime
    work and require end-to-end browser tests before claiming support.
-4. Implement remaining interactive board/search flows only after plain output
-   remains stable and covered.
+4. Implement remaining interactive board flow only after plain output remains
+   stable and covered.
 5. Treat remotes and hook bypass as separate security-sensitive milestones with
    explicit opt-in behavior.

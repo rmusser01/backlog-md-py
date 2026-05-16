@@ -138,7 +138,7 @@ Before enabling this in another project, also run the full local validation and
 copied-repo mutation smoke documented in `docs/cutover-validation.md`. Mutation
 smoke commands must use a temporary copy, not the live repository backlog.
 
-Browser editor/settings gaps, remaining board/search interactivity, and remaining git automation are
+Browser editor/settings gaps, remaining board interactivity, and remaining git automation are
 tracked separately from the first agent cutover candidate:
 
 - `docs/browser-parity.md` records browser requirements such as rich Markdown
@@ -146,7 +146,7 @@ tracked separately from the first agent cutover candidate:
   status movement are implemented, but interactive browser editing remains
   deferred.
 - `docs/interactive-deferrals.md` records the implemented task detail/editor
-  flow, remaining CLI/TUI deferrals, hook bypass, and remote-operation
-  deferrals plus the opt-in auto-commit runtime policy.
+  and search filter flows, remaining CLI/TUI deferrals, hook bypass, and
+  remote-operation deferrals plus the opt-in auto-commit runtime policy.
 - `docs/upstream-feature-parity.md` records the current upstream feature-set
   audit and the work that remains before claiming full clone parity.

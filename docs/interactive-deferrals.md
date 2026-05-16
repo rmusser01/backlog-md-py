@@ -12,7 +12,7 @@ reviewable file operations are the first compatibility target.
 | Interactive board | Interactive TUI | Intentionally deferred | The cutover requires deterministic `board` output, not keyboard-driven task movement or terminal UI state. |
 | Overview TUI | Interactive TUI | Intentionally deferred | A human dashboard can follow after the core inventory and mutation paths remain stable. |
 | Interactive task view/editor | Interactive TUI | Implemented | Non-plain `task <id>` renders a human task detail view and interactive terminals can press `E` to launch the configured editor under the project write lock. |
-| Interactive search filters | Interactive TUI | Intentionally deferred | Deterministic search output covers agents; live filtering and refinement controls need terminal UI tests. |
+| Interactive search filters | Interactive TUI | Implemented | Non-plain `search` renders a human filter panel; interactive terminals can refine by status, priority, result type, or modified file while preserving `--plain`. |
 | Editor launch | Interactive TUI | Implemented for task view | `defaultEditor`, `VISUAL`, or `EDITOR` is split into argv without a shell and receives the task file path. |
 | Extended display/TUI config effects | Human-facing config | Partially deferred | Config read/write is supported and browser `defaultPort`/`autoOpenBrowser` behavior is implemented; task view consumes `defaultEditor`; date display preferences follow the remaining TUI milestone. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
@@ -39,7 +39,9 @@ The Python clone keeps these features out of the first cutover path:
   changing `--plain` output.
 - Interactive task view/editor is implemented for human operators without
   changing `task <id> --plain`.
-- Interactive board/search flows remain deferred to human-facing parity work.
+- Interactive search filters are implemented for human operators without
+  changing `search <query> --plain`.
+- Interactive board flow remains deferred to human-facing parity work.
 - `backlog config` now provides the guided config wizard for human operators.
 - Browser `defaultPort` and `autoOpenBrowser` effects are implemented for the
   loopback browser service; remaining TUI effects of extended config keys stay
