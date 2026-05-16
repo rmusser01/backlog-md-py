@@ -27,7 +27,7 @@ larger task commands:
   uncheck state, and removal.
 - Extended config get/set/list support for `defaultAssignee`, `dateFormat`,
   `includeDatetimeInDates`, `defaultEditor`, `defaultPort`,
-  `autoOpenBrowser`, and `zeroPaddedIds`.
+  `autoOpenBrowser`, `onStatusChange`, and `zeroPaddedIds`.
 - `zeroPaddedIds` generation for top-level task, child task, draft, document,
   and decision IDs.
 - Init-time `--task-prefix`, read-only `taskPrefix` config listing, and
@@ -37,6 +37,9 @@ larger task commands:
   `--plain` output.
 - Shell completion installer for bash, zsh, fish, and PowerShell using
   user-scoped completion paths for the `backlog-py` executable.
+- `onStatusChange` shell command execution on status edits, including
+  task-level override, upstream-compatible environment variables, and
+  non-blocking failure handling.
 
 ## Remaining Full-Parity Work
 
@@ -47,7 +50,6 @@ larger task commands:
 | Terminal UI | Interactive board, overview TUI, interactive task detail, editor launch, interactive search filters, live filtering | Deferred behind deterministic plain output |
 | Config wizard | `backlog config` with guided advanced settings and Definition-of-Done editing | Deferred behind non-interactive config helpers |
 | Extended config effects | Browser/TUI behavior driven by `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display preferences | Config read/write and zero-padded ID generation implemented; browser/TUI effects remain deferred |
-| Hooks | `onStatusChange` shell command execution and task-level override | Disabled until a safety review and opt-in execution model exist |
 | Git automation | remote operations, active-branch accuracy behavior, auto-commit, hook bypass | Remote and auto-commit deferred; hook bypass rejected for first cutover |
 
 ## Recommended Work Order
@@ -60,5 +62,5 @@ larger task commands:
    work and require end-to-end browser tests before claiming support.
 4. Implement interactive terminal/editor flows only after plain output remains
    stable and covered.
-5. Treat hook execution, auto-commit, remotes, and hook bypass as separate
-   security-sensitive milestones with explicit opt-in behavior.
+5. Treat auto-commit, remotes, and hook bypass as separate security-sensitive
+   milestones with explicit opt-in behavior.

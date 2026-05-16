@@ -75,7 +75,6 @@ EXPECTED_DEFERRED = {
     "cli:interactive-search-filters",
     "cli:interactive-config-wizard",
     "browser:custom-port-service",
-    "core:on-status-change",
     "git:remote-operations",
     "git:auto-commit",
     "git:hook-bypass",
@@ -116,6 +115,16 @@ def test_agent_critical_inventory_tracks_task_ordinal_mutation_surface():
     assert "--ordinal <number>" in by_name["cli:task-edit"].expected
     assert "ordinal=None" in by_name["mcp:task-create"].expected
     assert "ordinal=None" in by_name["mcp:task-edit"].expected
+
+
+def test_agent_critical_inventory_tracks_status_change_callback_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["core:on-status-change"]
+    assert item.status == "implemented"
+    assert item.classification == "automation-implemented"
+    assert item.expected == "onStatusChange hooks"
 
 
 def test_agent_critical_inventory_tracks_init_surface():
@@ -205,6 +214,7 @@ def test_agent_critical_inventory_tracks_config_get_set_surface():
     assert by_name["cli:config-set"].expected == "backlog config set <key> <value>"
     assert by_name["config:extended-options"].status == "implemented"
     assert "defaultAssignee" in by_name["config:extended-options"].expected
+    assert "onStatusChange" in by_name["config:extended-options"].expected
     assert "zeroPaddedIds" in by_name["config:extended-options"].expected
     assert by_name["config:task-prefix"].status == "implemented"
     assert "taskPrefix" in by_name["config:task-prefix"].expected

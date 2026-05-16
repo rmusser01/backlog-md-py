@@ -13,6 +13,7 @@ import yaml
 
 from backlog_py.core.ids import format_child_task_id, format_numbered_id
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
+from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.search.simple import contains_query
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
@@ -22,6 +23,7 @@ from backlog_py.storage.project import discover_project
 
 _TASK_ID_RE = re.compile(r"^[A-Z]+-\d+(?:\.\d+)*$")
 _CHECKLIST_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*]\s+\[)[ xX](?P<suffix>\]\s+.*)$")
+_NO_STATUS_CALLBACK_UPDATE = object()
 
 
 @dataclass(frozen=True)
@@ -179,10 +181,10 @@ class MutableRepository(ReadOnlyRepository):
         references: Sequence[str] | None = None,
         documentation: Sequence[str] | None = None,
         modified_files: Sequence[str] | None = None,
-        on_status_change: bool | None = None,
+        on_status_change: str | bool | None = None,
     ) -> TaskRecord:
-        _reject_on_status_change(on_status_change)
         current_config = load_config(self.project.config_path)
+        normalized_on_status_change = _normalize_on_status_change_create(on_status_change)
         tasks = self.list_tasks()
         normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
         normalized_id = _normalize_task_id(
@@ -229,6 +231,7 @@ class MutableRepository(ReadOnlyRepository):
             references=_normalize_metadata_list(references),
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
+            on_status_change=normalized_on_status_change,
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
@@ -272,12 +275,13 @@ class MutableRepository(ReadOnlyRepository):
         remove_documentation: Sequence[str] | None = None,
         modified_files: Sequence[str] | None = None,
         status: str | None = None,
-        on_status_change: bool | None = None,
+        on_status_change: str | bool | None = None,
     ) -> TaskRecord:
-        _reject_on_status_change(on_status_change)
         if milestone is not None and clear_milestone:
             raise TaskMutationError("Cannot set and clear milestone in one edit")
         task = self.get_task(task_id)
+        old_status = task.status
+        on_status_change_update = _normalize_on_status_change_update(on_status_change)
         safe_current_path = _mutation_path(task.path.parent, task.path)
         target_path = safe_current_path
         if title is not None:
@@ -385,6 +389,7 @@ class MutableRepository(ReadOnlyRepository):
             or normalized_references is not None
             or normalized_documentation is not None
             or normalized_modified_files is not None
+            or on_status_change_update is not _NO_STATUS_CALLBACK_UPDATE
         ):
             updates: dict[str, object] = {}
             if title is not None:
@@ -412,13 +417,18 @@ class MutableRepository(ReadOnlyRepository):
                 updates["documentation"] = normalized_documentation
             if normalized_modified_files is not None:
                 updates["modified_files"] = normalized_modified_files
+            if on_status_change_update is not _NO_STATUS_CALLBACK_UPDATE:
+                updates["onStatusChange"] = on_status_change_update
             source = _replace_frontmatter_values(source, parsed, updates)
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
         _atomic_write_text(target_path, source)
         if target_path != safe_current_path:
             safe_current_path.unlink()
-        return _load_task(target_path)
+        updated_task = _load_task(target_path)
+        if status is not None and updated_task.status != old_status:
+            _run_status_change_callback(self.project, updated_task, old_status, updated_task.status)
+        return updated_task
 
     def archive_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
@@ -597,6 +607,7 @@ def _new_task_source(
     references: Sequence[str],
     documentation: Sequence[str],
     modified_files: Sequence[str],
+    on_status_change: str | None,
 ) -> str:
     frontmatter: dict[str, object] = {
         "id": task_id,
@@ -623,6 +634,8 @@ def _new_task_source(
         frontmatter["documentation"] = list(documentation)
     if modified_files:
         frontmatter["modified_files"] = list(modified_files)
+    if on_status_change:
+        frontmatter["onStatusChange"] = on_status_change
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
     return (
         f"---\n{yaml_text}\n---\n\n"
@@ -1094,9 +1107,65 @@ def _reject_unknown_status(status: str, statuses: Sequence[str] | None) -> None:
         raise TaskMutationError(f"Unknown status: {status}")
 
 
-def _reject_on_status_change(on_status_change: bool | None) -> None:
-    if on_status_change:
-        raise TaskMutationError("onStatusChange is disabled by default and is not implemented")
+def _normalize_on_status_change_create(value: str | bool | None) -> str | None:
+    normalized = _normalize_on_status_change_value(value)
+    if normalized is _NO_STATUS_CALLBACK_UPDATE:
+        return None
+    return normalized
+
+
+def _normalize_on_status_change_update(value: str | bool | None) -> str | None | object:
+    if value is None:
+        return _NO_STATUS_CALLBACK_UPDATE
+    return _normalize_on_status_change_value(value)
+
+
+def _normalize_on_status_change_value(value: str | bool | None) -> str | None | object:
+    if value is None:
+        return _NO_STATUS_CALLBACK_UPDATE
+    if isinstance(value, bool):
+        if value:
+            raise TaskMutationError("onStatusChange must be a command string, not true")
+        return None
+    normalized = str(value).strip()
+    if normalized.casefold() in {"", "false", "0", "no", "disabled", "(disabled)"}:
+        return None
+    return normalized
+
+
+def _task_status_callback_command(task: TaskRecord, config: BacklogConfig) -> str | None:
+    raw = task.parsed.frontmatter.get("onStatusChange")
+    if raw is None:
+        raw = task.parsed.frontmatter.get("on_status_change")
+    if raw is not None:
+        normalized = _normalize_on_status_change_value(raw if isinstance(raw, bool) else str(raw))
+        if normalized is _NO_STATUS_CALLBACK_UPDATE:
+            return None
+        return normalized
+    return config.on_status_change
+
+
+def _run_status_change_callback(
+    project: BacklogProject,
+    task: TaskRecord,
+    old_status: str,
+    new_status: str,
+) -> None:
+    command = _task_status_callback_command(task, load_config(project.config_path))
+    if not command:
+        return
+    try:
+        execute_status_callback(
+            command=command,
+            task_id=task.id,
+            old_status=old_status,
+            new_status=new_status,
+            task_title=task.title,
+            cwd=project.root,
+        )
+    except Exception:
+        # Upstream treats status callbacks as best-effort automation.
+        return
 
 
 def _is_done_status(status: str) -> bool:

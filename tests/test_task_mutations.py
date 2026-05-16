@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import shutil
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from click.testing import CliRunner
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.mcp.tools import task_create, task_edit
-from backlog_py.storage.config import replace_definition_of_done_defaults
+from backlog_py.storage.config import replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
 
 
@@ -586,11 +587,51 @@ def test_symlinked_task_file_escape_is_rejected_without_outside_write(tmp_path):
     assert outside_task.read_text(encoding="utf-8") == original
 
 
-def test_on_status_change_is_disabled_by_default(tmp_path):
+def test_global_on_status_change_runs_when_task_status_changes(tmp_path):
     repo = _copy_fixture(tmp_path)
+    output_path = tmp_path / "status-callback.txt"
+    command = (
+        "printf '%s' "
+        '"$TASK_ID:$OLD_STATUS->$NEW_STATUS:$TASK_TITLE" '
+        f"> {shlex.quote(str(output_path))}"
+    )
+    set_config_value(_project(repo), "onStatusChange", command)
 
-    with pytest.raises(TaskMutationError, match="onStatusChange is disabled"):
-        _repository(repo).edit_task("TASK-1", status="Done", on_status_change=True)
+    edited = _repository(repo).edit_task("TASK-1", status="Done")
+
+    assert edited.status == "Done"
+    assert output_path.read_text(encoding="utf-8") == "TASK-1:In Progress->Done:Example task"
+
+
+def test_per_task_on_status_change_overrides_global_callback(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    global_output = tmp_path / "global-callback.txt"
+    task_output = tmp_path / "task-callback.txt"
+    set_config_value(
+        _project(repo),
+        "onStatusChange",
+        f"printf global > {shlex.quote(str(global_output))}",
+    )
+    per_task_command = f'printf "%s" "$TASK_ID:$NEW_STATUS" > {shlex.quote(str(task_output))}'
+
+    edited = _repository(repo).edit_task(
+        "TASK-1",
+        status="Done",
+        on_status_change=per_task_command,
+    )
+
+    assert edited.parsed.frontmatter["onStatusChange"] == per_task_command
+    assert task_output.read_text(encoding="utf-8") == "TASK-1:Done"
+    assert not global_output.exists()
+
+
+def test_on_status_change_failure_does_not_block_status_update(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    set_config_value(_project(repo), "onStatusChange", "exit 7")
+
+    edited = _repository(repo).edit_task("TASK-1", status="Done")
+
+    assert edited.status == "Done"
 
 
 def test_cli_task_create_and_edit_use_safe_core(tmp_path):
@@ -1142,9 +1183,20 @@ def test_mcp_bool_string_values_are_parsed_explicitly(tmp_path):
     assert "- [ ] #2 Specific" in source
 
 
-def test_mcp_invalid_bool_string_is_rejected(tmp_path):
+def test_mcp_on_status_change_accepts_command_strings(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)
 
-    with pytest.raises(TypeError, match="boolean"):
-        task_create(project, title="Bad bool", onStatusChange="sometimes")
+    created = task_create(project, title="MCP callback task", onStatusChange="echo changed")
+
+    assert created["id"] == "TASK-2"
+    source = _task_file(repo, "task-2").read_text(encoding="utf-8")
+    assert "onStatusChange: echo changed" in source
+
+
+def test_mcp_on_status_change_rejects_true_without_command(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+
+    with pytest.raises(TypeError, match="command string"):
+        task_create(project, title="Bad callback", onStatusChange=True)

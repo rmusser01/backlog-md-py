@@ -7,8 +7,8 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 62,
-        "deferred": 10,
+        "implemented": 63,
+        "deferred": 9,
         "total": 72,
     }
     assert report["categories"]["cli"] == {
@@ -31,6 +31,11 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "deferred": 0,
         "total": 2,
     }
+    assert report["categories"]["core"] == {
+        "implemented": 1,
+        "deferred": 0,
+        "total": 1,
+    }
     assert report["categories"]["git"] == {
         "implemented": 0,
         "deferred": 3,
@@ -48,7 +53,7 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["cli:task-list-plain"]["fixture"] == "cli:task-list-plain"
     assert items_by_name["cli:shell-completion-install"]["status"] == "implemented"
     assert items_by_name["cli:rich-colored-output"]["status"] == "implemented"
-    assert items_by_name["core:on-status-change"]["status"] == "deferred"
+    assert items_by_name["core:on-status-change"]["status"] == "implemented"
     assert deferred_by_name["browser:kanban-drag-drop"] == {
         "name": "browser:kanban-drag-drop",
         "classification": "browser-deferred",

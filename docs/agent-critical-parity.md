@@ -73,10 +73,11 @@ do not block the first local-file agent cutover candidate.
 
 | Inventory item | Status | Expected command, resource, or tool | Fixture |
 | --- | --- | --- | --- |
-| config:extended-options | implemented | config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds | config:extended-options |
+| config:extended-options | implemented | config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, onStatusChange, zeroPaddedIds | config:extended-options |
 | config:task-prefix | implemented | init --task-prefix, config list taskPrefix read-only, and generated task/subtask IDs use prefixes.task | config:task-prefix |
 | cli:rich-colored-output | implemented | ANSI-rich terminal rendering | cli:rich-colored-output |
 | cli:shell-completion-install | implemented | backlog completion install --shell bash, zsh, fish, pwsh | cli:shell-completion-install |
+| core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 
 ## Explicit Deferred Blockers
 
@@ -88,7 +89,6 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-task-view-editor | deferred | backlog task <id> interactive task view and editor launch | Interactive task view and editor launch are deferred behind plain task output. |
 | cli:interactive-search-filters | deferred | interactive search filters and live filtering | Interactive search filtering is deferred behind deterministic search output. |
 | cli:interactive-config-wizard | deferred | backlog config interactive advanced wizard | The advanced config wizard is deferred behind non-interactive config get/set helpers. |
-| core:on-status-change | deferred | onStatusChange hooks | Hook execution remains disabled until a separate safety review. |
 | git:remote-operations | deferred | remote git operations | Remote git behavior is outside the first local-file compatibility gate. |
 | git:auto-commit | deferred | autoCommit | Automatic commits are deferred to keep mutation review explicit. |
 | git:hook-bypass | deferred | bypassGitHooks | Hook bypass remains unsupported for safety. |

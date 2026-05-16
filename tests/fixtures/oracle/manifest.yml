@@ -221,7 +221,7 @@ fixtures:
   - name: "core:on-status-change"
     command: ["backlog", "task", "edit", "TASK-1", "--status", "Done"]
     agent_critical: false
-    classification: "automation-deferred"
+    classification: "automation-implemented"
   - name: "git:remote-operations"
     command: ["backlog", "task", "create", "Remote operation example"]
     agent_critical: false

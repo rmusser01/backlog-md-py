@@ -12,7 +12,7 @@ from backlog_py.core.drafts import DraftService
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository
 from backlog_py.mcp.tools import definition_of_done_defaults_get, definition_of_done_defaults_upsert, task_create
-from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
+from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
 
 
@@ -147,6 +147,7 @@ def test_cli_config_get_outputs_effective_values(tmp_path):
     auto_open_browser = runner.invoke(main, ["--cwd", str(repo), "config", "get", "autoOpenBrowser"])
     zero_padded_ids = runner.invoke(main, ["--cwd", str(repo), "config", "get", "zeroPaddedIds"])
     remote_operations = runner.invoke(main, ["--cwd", str(repo), "config", "get", "remoteOperations"])
+    on_status_change = runner.invoke(main, ["--cwd", str(repo), "config", "get", "onStatusChange"])
 
     assert default_status.exit_code == 0
     assert default_status.output == "To Do\n"
@@ -160,6 +161,22 @@ def test_cli_config_get_outputs_effective_values(tmp_path):
     assert zero_padded_ids.output == "(disabled)\n"
     assert remote_operations.exit_code == 0
     assert remote_operations.output == "false\n"
+    assert on_status_change.exit_code == 0
+    assert on_status_change.output == "(disabled)\n"
+
+
+def test_on_status_change_false_config_is_disabled(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw_config["onStatusChange"] = False
+    config_path.write_text(yaml.safe_dump(raw_config, sort_keys=False), encoding="utf-8")
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "config", "get", "onStatusChange"])
+
+    assert result.exit_code == 0
+    assert result.output == "(disabled)\n"
+    assert load_config(config_path).on_status_change is None
 
 
 def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
@@ -174,6 +191,7 @@ def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
     zero_padded_ids = runner.invoke(main, ["--cwd", str(repo), "config", "set", "zeroPaddedIds", "3"])
     auto_commit = runner.invoke(main, ["--cwd", str(repo), "config", "set", "autoCommit", "true"])
     active_days = runner.invoke(main, ["--cwd", str(repo), "config", "set", "activeBranchDays", "45"])
+    on_status_change = runner.invoke(main, ["--cwd", str(repo), "config", "set", "onStatusChange", "echo changed"])
     default_editor = runner.invoke(
         main,
         ["--cwd", str(repo), "config", "set", "defaultEditor", "code --wait"],
@@ -197,6 +215,8 @@ def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
     assert auto_commit.output == "autoCommit: true\n"
     assert active_days.exit_code == 0
     assert active_days.output == "activeBranchDays: 45\n"
+    assert on_status_change.exit_code == 0
+    assert on_status_change.output == "onStatusChange: echo changed\n"
     assert default_editor.exit_code == 0
     assert default_editor.output == "defaultEditor: code --wait\n"
     assert get_zero_padded_ids.exit_code == 0
@@ -213,6 +233,7 @@ def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
     assert config.zero_padded_ids == 3
     assert config.auto_commit is True
     assert config.active_branch_days == 45
+    assert config.on_status_change == "echo changed"
     raw_config = yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))
     assert raw_config["defaultAssignee"] == "@alex"
     assert raw_config["dateFormat"] == "dd/mm/yyyy"
@@ -222,6 +243,7 @@ def test_cli_config_set_updates_typed_values_and_extension_keys(tmp_path):
     assert raw_config["zeroPaddedIds"] == 3
     assert raw_config["autoCommit"] is True
     assert raw_config["activeBranchDays"] == 45
+    assert raw_config["onStatusChange"] == "echo changed"
     assert raw_config["defaultEditor"] == "code --wait"
 
 
