@@ -14,7 +14,7 @@ operations are the first compatibility target.
 | Interactive task view/editor | Interactive TUI | Intentionally deferred | Plain `task <id> --plain` output covers agents; task-detail keybindings and editor launch need terminal/editor integration tests. |
 | Interactive search filters | Interactive TUI | Intentionally deferred | Deterministic search output covers agents; live filtering and refinement controls need terminal UI tests. |
 | Editor launch | Interactive TUI | Intentionally deferred | Launching `$EDITOR` is environment-dependent and not needed for non-interactive agent workflows. |
-| Extended display/browser config effects | Human-facing config | Intentionally deferred | Config read/write is supported; browser and TUI behavior that consumes `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display settings follows the browser/TUI milestones. |
+| Extended display/TUI config effects | Human-facing config | Partially deferred | Config read/write is supported and browser `defaultPort`/`autoOpenBrowser` behavior is implemented; TUI behavior that consumes `defaultEditor` and date display settings follows the TUI milestone. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
 | Remote operations | Git/network behavior | Intentionally deferred | Remote git behavior introduces network and credential effects that are unnecessary for local Backlog.md compatibility. |
 
@@ -39,7 +39,9 @@ The Python clone keeps these features out of the first cutover path:
   changing `--plain` output.
 - Interactive task/search flows remain deferred to human-facing parity work.
 - `backlog config` now provides the guided config wizard for human operators.
-- Browser and TUI effects of extended config keys remain deferred.
+- Browser `defaultPort` and `autoOpenBrowser` effects are implemented for the
+  read-only browser service; remaining TUI effects of extended config keys stay
+  deferred.
 - `onStatusChange` is supported only when explicitly configured; task-level
   hooks override the project hook, and hook failures do not block status writes.
 - `autoCommit` is opt-in and local-only. It runs after project write mutations

@@ -34,6 +34,12 @@ backlog-py --cwd /path/to/project task list --priority high -a codex -l implemen
 python -m backlog_py --cwd /path/to/project board
 ```
 
+Start the optional read-only browser board service on loopback:
+
+```bash
+backlog-py --cwd /path/to/project browser --port 6420 --no-open
+```
+
 Check the built-in cutover inventory without mutating a project:
 
 ```bash
@@ -132,11 +138,13 @@ Before enabling this in another project, also run the full local validation and
 copied-repo mutation smoke documented in `docs/cutover-validation.md`. Mutation
 smoke commands must use a temporary copy, not the live repository backlog.
 
-Browser, remaining interactive behavior, and remaining git automation are
+Browser UI, remaining interactive behavior, and remaining git automation are
 tracked separately from the first agent cutover candidate:
 
 - `docs/browser-parity.md` records browser requirements such as drag-and-drop,
-  service mode, rich Markdown editing, and mobile behavior.
+  rich Markdown editing, and mobile behavior. The read-only custom-port
+  browser service is implemented, but interactive browser editing remains
+  deferred.
 - `docs/interactive-deferrals.md` records remaining CLI/TUI, hook bypass, and
   remote-operation deferrals plus the opt-in auto-commit runtime policy.
 - `docs/upstream-feature-parity.md` records the current upstream feature-set

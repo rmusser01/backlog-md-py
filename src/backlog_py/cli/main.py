@@ -7,6 +7,7 @@ from typing import Callable, TypeVar
 import click
 
 from backlog_py import __version__
+from backlog_py.browser.service import run_browser_service_foreground
 from backlog_py.cli.completion import CompletionInstallError, install_completion
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
@@ -456,6 +457,23 @@ def overview_command(ctx: click.Context) -> None:
     click.echo("Statuses:")
     for status, tasks in board.items():
         click.echo(f"  {status}: {len(tasks)}")
+
+
+@main.command("browser")
+@click.option("--port", default=None, type=click.IntRange(1, 65535), help="Browser service port.")
+@click.option("--no-open", is_flag=True, help="Do not open the browser after starting the service.")
+@click.pass_context
+def browser_command(ctx: click.Context, port: int | None, no_open: bool) -> None:
+    """Run the read-only browser board service."""
+    project = _project(ctx)
+    selected_port = port if port is not None else project.config.default_port
+    open_browser = project.config.auto_open_browser and not no_open
+    run_browser_service_foreground(
+        project,
+        host="127.0.0.1",
+        port=selected_port,
+        open_browser=open_browser,
+    )
 
 
 @main.command("cleanup")

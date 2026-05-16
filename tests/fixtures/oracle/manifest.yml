@@ -185,7 +185,7 @@ fixtures:
   - name: "browser:custom-port-service"
     command: ["backlog", "browser", "--port", "8080", "--no-open"]
     agent_critical: false
-    classification: "browser-deferred"
+    classification: "browser-implemented"
   - name: "cli:interactive-board"
     command: ["backlog", "board"]
     agent_critical: false
