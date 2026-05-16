@@ -16,7 +16,6 @@ operations are the first compatibility target.
 | Advanced config wizard | Interactive TUI | Intentionally deferred | Non-interactive `config get`, `config set`, and DoD default helpers cover agents; the guided wizard is human-facing workflow parity. |
 | Editor launch | Interactive TUI | Intentionally deferred | Launching `$EDITOR` is environment-dependent and not needed for non-interactive agent workflows. |
 | Extended display/browser config effects | Human-facing config | Intentionally deferred | Config read/write is supported; browser and TUI behavior that consumes `defaultPort`, `autoOpenBrowser`, `defaultEditor`, and date display settings follows the browser/TUI milestones. |
-| onStatusChange | Automation hook | Intentionally deferred | Hook execution can run arbitrary commands, so it remains disabled until a dedicated safety design and tests exist. |
 | auto-commit | Git automation | Intentionally deferred | Automatic commits hide mutation boundaries from reviewers and are outside the first local-file compatibility gate. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
 | Remote operations | Git/network behavior | Intentionally deferred | Remote git behavior introduces network and credential effects that are unnecessary for local Backlog.md compatibility. |
@@ -29,9 +28,9 @@ Any future implementation of these features must provide:
 - Tests proving the feature is opt-in and does not run during normal CLI, MCP,
   or test execution.
 - Clear documentation of environment variables, subprocess behavior, and failure
-  handling.
-- A security review for any behavior that launches editors, runs hooks, bypasses
-  hooks, performs auto-commit, or touches remotes.
+  handling for any process-launching behavior.
+- A security review for any behavior that launches editors, bypasses hooks,
+  performs auto-commit, or touches remotes.
 
 ## Current Runtime Policy
 
@@ -42,7 +41,8 @@ The Python clone keeps these features out of the first cutover path:
   changing `--plain` output.
 - Interactive task/search/config flows remain deferred to human-facing parity work.
 - Browser and TUI effects of extended config keys remain deferred.
-- `onStatusChange` remains disabled by default.
+- `onStatusChange` is supported only when explicitly configured; task-level
+  hooks override the project hook, and hook failures do not block status writes.
 - auto-commit and remote operations are deferred.
 - hook bypass is rejected for first cutover.
 - Rich interactive UI behavior remains later human-operator convenience, not an

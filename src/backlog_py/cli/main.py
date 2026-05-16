@@ -640,6 +640,7 @@ def config_list(ctx: click.Context) -> None:
     click.echo(f"remoteOperations: {_bool_text(config.remote_operations)}")
     click.echo(f"autoCommit: {_bool_text(config.auto_commit)}")
     click.echo(f"bypassGitHooks: {_bool_text(config.bypass_git_hooks)}")
+    click.echo(f"onStatusChange: {config.on_status_change or '(disabled)'}")
     click.echo(f"zeroPaddedIds: {config.zero_padded_ids if config.zero_padded_ids is not None else '(disabled)'}")
     click.echo(f"taskPrefix: {config.task_prefix} (read-only)")
     click.echo(f"checkActiveBranches: {_bool_text(config.check_active_branches)}")

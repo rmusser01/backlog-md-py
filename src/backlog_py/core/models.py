@@ -19,6 +19,7 @@ class BacklogConfig:
     remote_operations: bool = True
     auto_commit: bool = False
     bypass_git_hooks: bool = False
+    on_status_change: str | None = None
     zero_padded_ids: int | None = None
     task_prefix: str = "task"
     check_active_branches: bool = True

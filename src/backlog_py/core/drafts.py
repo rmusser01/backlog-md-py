@@ -101,6 +101,7 @@ class DraftService:
             references=_normalize_metadata_list(references),
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
+            on_status_change=None,
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)

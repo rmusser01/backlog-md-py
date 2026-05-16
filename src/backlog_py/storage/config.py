@@ -29,6 +29,7 @@ _KEY_ALIASES = {
     "remote_operations": ("remote_operations", "remoteOperations"),
     "auto_commit": ("auto_commit", "autoCommit"),
     "bypass_git_hooks": ("bypass_git_hooks", "bypassGitHooks"),
+    "on_status_change": ("on_status_change", "onStatusChange"),
     "zero_padded_ids": ("zero_padded_ids", "zeroPaddedIds"),
     "task_prefix": ("task_prefix", "taskPrefix"),
     "check_active_branches": ("check_active_branches", "checkActiveBranches"),
@@ -75,6 +76,7 @@ def load_config(path: Path) -> BacklogConfig:
         remote_operations=_bool_value(raw, "remote_operations", True),
         auto_commit=_bool_value(raw, "auto_commit", False),
         bypass_git_hooks=_bool_value(raw, "bypass_git_hooks", False),
+        on_status_change=_optional_on_status_change_value(raw, "on_status_change"),
         zero_padded_ids=_optional_positive_int(raw, "zero_padded_ids"),
         task_prefix=_task_prefix_value(raw),
         check_active_branches=_bool_value(raw, "check_active_branches", True),
@@ -107,6 +109,8 @@ def get_config_value(project: BacklogProject, key: str) -> Any:
     if raw_key is not None:
         if normalized_key == "zero_padded_ids":
             return _zero_padded_ids_display(raw[raw_key])
+        if normalized_key == "on_status_change":
+            return _on_status_change_display(raw[raw_key])
         return raw[raw_key]
 
     if normalized_key is None:
@@ -114,6 +118,8 @@ def get_config_value(project: BacklogProject, key: str) -> Any:
     value = getattr(load_config(project.config_path), normalized_key)
     if normalized_key == "zero_padded_ids":
         return _zero_padded_ids_display(value)
+    if normalized_key == "on_status_change":
+        return _on_status_change_display(value)
     return value
 
 
@@ -128,11 +134,15 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
         )
     parsed_value = _parse_config_value(normalized_key, value)
     raw_key = _target_config_key(raw, key, normalized_key)
-    if normalized_key == "zero_padded_ids" and parsed_value is None:
+    if normalized_key in {"zero_padded_ids", "on_status_change"} and parsed_value is None:
         existing_key = _find_existing_config_key(raw, key)
         if existing_key is not None:
             raw.pop(existing_key, None)
-        display_value = _zero_padded_ids_display(parsed_value)
+        display_value = (
+            _zero_padded_ids_display(parsed_value)
+            if normalized_key == "zero_padded_ids"
+            else _on_status_change_display(parsed_value)
+        )
     else:
         raw[raw_key] = parsed_value
         display_value = parsed_value
@@ -203,6 +213,19 @@ def _optional_string_value(raw: dict[Any, Any], normalized_key: str) -> str | No
     if not isinstance(value, str):
         raise ValueError(f"Backlog config value {normalized_key} must be a string")
     return value
+
+
+def _optional_on_status_change_value(raw: dict[Any, Any], normalized_key: str) -> str | None:
+    value = _get(raw, normalized_key, None)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        if value:
+            raise ValueError(f"Backlog config value {normalized_key} must be a command string or false")
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Backlog config value {normalized_key} must be a command string")
+    return _parse_on_status_change_value(value)
 
 
 def _bool_value(raw: dict[Any, Any], normalized_key: str, default: bool) -> bool:
@@ -289,6 +312,8 @@ def _parse_config_value(normalized_key: str | None, value: str) -> Any:
         return _parse_int_config_value(normalized_key, value)
     if normalized_key in _LIST_CONFIG_KEYS:
         return _parse_list_config_value(value)
+    if normalized_key == "on_status_change":
+        return _parse_on_status_change_value(value)
     return value
 
 
@@ -329,6 +354,20 @@ def _zero_padded_ids_display(value: Any) -> Any:
     if isinstance(value, int) and not isinstance(value, bool) and value <= 0:
         return "(disabled)"
     return value
+
+
+def _parse_on_status_change_value(value: str) -> str | None:
+    normalized = value.strip()
+    if normalized.casefold() in {"", "false", "0", "no", "disabled", "(disabled)"}:
+        return None
+    return normalized
+
+
+def _on_status_change_display(value: Any) -> str:
+    if value is None or value is False:
+        return "(disabled)"
+    normalized = str(value).strip()
+    return normalized or "(disabled)"
 
 
 def _parse_list_config_value(value: str) -> list[str]:

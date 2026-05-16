@@ -125,7 +125,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
             references=_optional_string_list(_get_alias(kwargs, "references")),
             documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
             modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
-            on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
+            on_status_change=_optional_status_callback(_get_alias(kwargs, "onStatusChange", "on_status_change")),
         )
         return _task_detail(project, task)
 
@@ -183,7 +183,7 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
             remove_documentation=_optional_string_list(_get_alias(kwargs, "removeDocumentation", "remove_documentation")),
             modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
             status=_optional_string(kwargs.get("status")),
-            on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
+            on_status_change=_optional_status_callback(_get_alias(kwargs, "onStatusChange", "on_status_change")),
         )
         return _task_detail(project, task)
 
@@ -410,6 +410,18 @@ def _optional_string(value: Any) -> str | None:
 
 def _optional_bool(value: Any) -> bool | None:
     return _coerce_bool(value)
+
+
+def _optional_status_callback(value: Any) -> str | bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        if value:
+            raise TypeError("onStatusChange must be a command string, not true")
+        return value
+    if isinstance(value, str):
+        return value.strip()
+    raise TypeError("onStatusChange must be a command string")
 
 
 def _coerce_bool(value: Any) -> bool | None:

@@ -296,6 +296,7 @@ def test_config_list_outputs_safe_defaults():
     assert "defaultEditor: (not set)" in result.output
     assert "defaultPort: 6420" in result.output
     assert "autoOpenBrowser: true" in result.output
+    assert "onStatusChange: (disabled)" in result.output
     assert "zeroPaddedIds: (disabled)" in result.output
     assert "taskPrefix: task (read-only)" in result.output
     assert "autoCommit: false" in result.output
@@ -307,12 +308,13 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 62" in result.output
-    assert "deferred: 10" in result.output
+    assert "implemented: 63" in result.output
+    assert "deferred: 9" in result.output
     assert "total: 72" in result.output
     assert "cli: 38 implemented, 4 deferred, 42 total" in result.output
     assert "browser: 0 implemented, 2 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
+    assert "core: 1 implemented, 0 deferred, 1 total" in result.output
     assert "git: 0 implemented, 3 deferred, 3 total" in result.output
 
 

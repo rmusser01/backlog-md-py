@@ -112,7 +112,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "config:extended-options",
             "config-implemented",
             "ADVANCED-CONFIG.md",
-            "config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, zeroPaddedIds",
+            "config get/set/list defaultAssignee, dateFormat, includeDatetimeInDates, defaultEditor, defaultPort, autoOpenBrowser, onStatusChange, zeroPaddedIds",
         ),
         _implemented(
             "config:task-prefix",
@@ -224,12 +224,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog config interactive advanced wizard",
             "The advanced config wizard is deferred behind non-interactive config get/set helpers.",
         ),
-        _deferred(
+        _implemented(
             "core:on-status-change",
-            "automation-deferred",
+            "automation-implemented",
             "ADVANCED-CONFIG.md",
             "onStatusChange hooks",
-            "Hook execution remains disabled until a separate safety review.",
         ),
         _deferred(
             "git:remote-operations",
