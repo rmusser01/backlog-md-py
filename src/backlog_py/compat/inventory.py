@@ -201,12 +201,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "CLI-INSTRUCTIONS.md",
             "backlog completion install --shell bash, zsh, fish, pwsh",
         ),
-        _deferred(
+        _implemented(
             "cli:interactive-task-view-editor",
-            "interactive-deferred",
+            "interactive-implemented",
             "CLI-INSTRUCTIONS.md",
             "backlog task <id> interactive task view and editor launch",
-            "Interactive task view and editor launch are deferred behind plain task output.",
         ),
         _deferred(
             "cli:interactive-search-filters",

@@ -201,7 +201,7 @@ fixtures:
   - name: "cli:interactive-task-view-editor"
     command: ["backlog", "task", "TASK-1"]
     agent_critical: false
-    classification: "interactive-deferred"
+    classification: "interactive-implemented"
   - name: "cli:interactive-search-filters"
     command: ["backlog", "search", "auth"]
     agent_critical: false

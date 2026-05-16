@@ -8,6 +8,7 @@ from backlog_py.cli.main import main
 from backlog_py.core.decisions import DecisionService
 from backlog_py.core.documents import DocumentService
 from backlog_py.core.repository import MutableRepository
+from backlog_py.storage.config import set_config_value
 from backlog_py.storage.project import discover_project
 
 
@@ -22,8 +23,8 @@ def _invoke_color(*args: str):
     return CliRunner().invoke(main, ["--cwd", str(FIXTURE_REPO), *args], color=True)
 
 
-def _invoke_repo(repo: Path, *args: str):
-    return CliRunner().invoke(main, ["--cwd", str(repo), *args])
+def _invoke_repo(repo: Path, *args: str, input: str | None = None):
+    return CliRunner().invoke(main, ["--cwd", str(repo), *args], input=input)
 
 
 def _metadata_filter_repo(tmp_path: Path) -> Path:
@@ -49,6 +50,12 @@ def _metadata_filter_repo(tmp_path: Path) -> Path:
         modified_files=["src/server/index.py"],
     )
     return repo
+
+
+def _task_file(repo: Path, task_id: str = "task-1") -> Path:
+    matches = sorted((repo / "backlog" / "tasks").glob(f"{task_id} -*.md"))
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_top_level_help_includes_readonly_commands():
@@ -102,6 +109,51 @@ def test_task_view_plain_outputs_task_body():
     assert result.exit_code == 0
     assert "TASK-1" in result.output
     assert "Implement a fixture" in result.output
+
+
+def test_task_view_default_renders_interactive_task_detail():
+    result = _invoke_color("task", "TASK-1")
+
+    assert result.exit_code == 0
+    assert "\x1b[" in result.output
+    assert "Task TASK-1" in result.output
+    assert "Status: In Progress" in result.output
+    assert "File: backlog/tasks/task-1 - Example-task.md" in result.output
+    assert "Actions: [E]dit in editor  [Q]uit" in result.output
+    assert "---" not in result.output
+
+
+def test_task_view_editor_key_launches_default_editor_under_project_lock(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    set_config_value(project, "defaultEditor", "fake-editor --wait")
+    lock_operations = []
+    editor_invocations = []
+
+    from backlog_py.cli import main as cli_main
+
+    original_lock = cli_main.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    def fake_editor(command, path):
+        editor_invocations.append((command, path))
+        path.write_text(path.read_text(encoding="utf-8") + "\nEdited by test.\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli_main, "with_project_write_lock", tracking_lock)
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+    monkeypatch.setattr(cli_main, "_run_editor_command", fake_editor)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code == 0
+    assert lock_operations == [(repo, "task_editor")]
+    assert editor_invocations == [(["fake-editor", "--wait"], _task_file(repo))]
+    assert "Edited TASK-1" in result.output
+    assert "Edited by test." in _task_file(repo).read_text(encoding="utf-8")
 
 
 def test_search_plain_outputs_matching_task():
@@ -309,10 +361,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 67" in result.output
-    assert "deferred: 5" in result.output
+    assert "implemented: 68" in result.output
+    assert "deferred: 4" in result.output
     assert "total: 72" in result.output
-    assert "cli: 39 implemented, 3 deferred, 42 total" in result.output
+    assert "cli: 40 implemented, 2 deferred, 42 total" in result.output
     assert "browser: 2 implemented, 0 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 1 implemented, 0 deferred, 1 total" in result.output
@@ -324,7 +376,7 @@ def test_compat_status_json_outputs_deferred_items():
 
     assert result.exit_code == 0
     assert '"agent_cutover_ready": true' in result.output
-    assert '"browser:kanban-drag-drop"' in result.output
+    assert '"cli:interactive-task-view-editor"' in result.output
     assert '"status": "implemented"' in result.output
 
 
