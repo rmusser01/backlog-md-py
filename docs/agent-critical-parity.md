@@ -80,6 +80,7 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-config-wizard | implemented | backlog config interactive advanced wizard | cli:interactive-config-wizard |
 | cli:interactive-task-view-editor | implemented | backlog task <id> interactive task view and editor launch | cli:interactive-task-view-editor |
 | cli:interactive-search-filters | implemented | interactive search filters and live filtering | cli:interactive-search-filters |
+| cli:interactive-board | implemented | backlog board interactive controls | cli:interactive-board |
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
@@ -89,7 +90,6 @@ do not block the first local-file agent cutover candidate.
 
 | Inventory item | Status | Expected behavior | Deferred reason |
 | --- | --- | --- | --- |
-| cli:interactive-board | deferred | backlog board interactive controls | Interactive terminal controls are deferred behind non-interactive agent workflows. |
 | git:remote-operations | deferred | remote git operations | Remote git behavior is outside the first local-file compatibility gate. |
 | git:hook-bypass | deferred | bypassGitHooks | Hook bypass remains unsupported for safety. |
 

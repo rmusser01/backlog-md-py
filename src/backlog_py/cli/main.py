@@ -594,10 +594,59 @@ def board_command(
         return
     if args and args != ("view",):
         raise click.UsageError("Usage: board [view] | board export [filename]")
-    for status, tasks in _repository(ctx).board().items():
+    _run_interactive_board_view(ctx)
+
+
+def _run_interactive_board_view(ctx: click.Context) -> None:
+    interactive = _stdin_is_interactive()
+    _echo_board(_repository(ctx).board(), show_actions=interactive)
+    if not interactive:
+        return
+    key = _read_interactive_key()
+    if key == "m":
+        _move_board_task(ctx)
+    elif key == "v":
+        _view_board_task(ctx)
+    elif key == "e":
+        _edit_board_task(ctx)
+
+
+def _echo_board(board: dict[str, list[TaskRecord]], *, show_actions: bool = False) -> None:
+    for status, tasks in board.items():
         click.echo(f"{_style_status(status)}:")
         for task_record in tasks:
             click.echo(f"  {_format_board_task_line(task_record)}")
+    if show_actions:
+        click.echo("Actions: [V]iew task  [E]dit task  [M]ove task  [Q]uit")
+
+
+def _move_board_task(ctx: click.Context) -> None:
+    task_id = click.prompt("Task id").strip()
+    status = click.prompt("Status").strip()
+    if not task_id:
+        raise click.ClickException("Task id is required.")
+    if not status:
+        raise click.ClickException("Status is required.")
+    task_record = _locked_write(
+        ctx,
+        "board_move_task",
+        lambda: _mutable_repository(ctx).edit_task(task_id, status=status),
+    )
+    click.echo(f"Moved {task_record.id} to {task_record.status}")
+
+
+def _view_board_task(ctx: click.Context) -> None:
+    task_id = click.prompt("Task id").strip()
+    if not task_id:
+        raise click.ClickException("Task id is required.")
+    click.echo(_format_interactive_task_detail(_project(ctx), _repository(ctx).get_task(task_id)))
+
+
+def _edit_board_task(ctx: click.Context) -> None:
+    task_id = click.prompt("Task id").strip()
+    if not task_id:
+        raise click.ClickException("Task id is required.")
+    _edit_task_in_configured_editor(ctx, _repository(ctx).get_task(task_id))
 
 
 @main.command("overview")

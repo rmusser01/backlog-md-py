@@ -182,12 +182,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "CLI-INSTRUCTIONS.md",
             "backlog browser --port <port> --no-open and browser service lifecycle",
         ),
-        _deferred(
+        _implemented(
             "cli:interactive-board",
-            "interactive-deferred",
+            "interactive-implemented",
             "CLI-INSTRUCTIONS.md",
             "backlog board interactive controls",
-            "Interactive terminal controls are deferred behind non-interactive agent workflows.",
         ),
         _implemented(
             "cli:rich-colored-output",

@@ -189,7 +189,7 @@ fixtures:
   - name: "cli:interactive-board"
     command: ["backlog", "board"]
     agent_critical: false
-    classification: "interactive-deferred"
+    classification: "interactive-implemented"
   - name: "cli:rich-colored-output"
     command: ["backlog", "task", "list"]
     agent_critical: false
