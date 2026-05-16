@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Sequence
 
 from backlog_py.core.models import BacklogProject
-from backlog_py.core.repository import TaskRecord
+from backlog_py.core.repository import TaskRecord, _atomic_write_text
 from backlog_py.security.paths import assert_path_within_base
 
 
@@ -21,9 +21,9 @@ def export_board_to_file(
     """Write a Backlog.md-style board export under the project root."""
     target = _safe_project_output_path(project, output_file or "Backlog.md")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
+    _atomic_write_text(
+        target,
         generate_board_markdown(tasks, project.config.statuses or [], project.config.project_name),
-        encoding="utf-8",
     )
     return target
 
@@ -63,7 +63,7 @@ def update_readme_with_board(
         prefix = existing.rstrip()
         updated = f"{prefix}\n\n{BOARD_START}\n\n{section}\n\n{BOARD_END}\n" if prefix else f"{BOARD_START}\n\n{section}\n\n{BOARD_END}\n"
 
-    readme_path.write_text(updated, encoding="utf-8")
+    _atomic_write_text(readme_path, updated)
     return readme_path
 
 

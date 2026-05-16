@@ -43,9 +43,6 @@ dev = [
   "pytest>=8.0.0",
   "twine>=5.0.0",
 ]
-mcp = [
-  "mcp>=1.0.0",
-]
 
 [project.scripts]
 backlog-py = "backlog_py.cli.main:main"

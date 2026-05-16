@@ -25,7 +25,7 @@ Commands run in a disposable worktree:
 ```bash
 UV_CACHE_DIR=/private/tmp/backlog-md-py-uv-cache \
   uv run --python /Users/macbook-dev/.local/bin/python3.12 \
-  --extra dev --extra mcp python -m pytest -q
+  --extra dev python -m pytest -q
 ```
 
 Result:
@@ -37,7 +37,7 @@ Result:
 ```bash
 UV_CACHE_DIR=/private/tmp/backlog-md-py-uv-cache \
   uv run --python /Users/macbook-dev/.local/bin/python3.12 \
-  --extra dev --extra mcp python -m bandit -r src -q
+  --extra dev python -m bandit -r src -q
 ```
 
 Result: passed with no findings.
@@ -45,7 +45,7 @@ Result: passed with no findings.
 ```bash
 UV_CACHE_DIR=/private/tmp/backlog-md-py-uv-cache \
   uv run --python /Users/macbook-dev/.local/bin/python3.12 \
-  --extra dev --extra mcp python -m build
+  --extra dev python -m build
 ```
 
 Result:
@@ -57,7 +57,7 @@ Successfully built backlog_md_py-0.1.0.tar.gz and backlog_md_py-0.1.0-py3-none-a
 ```bash
 UV_CACHE_DIR=/private/tmp/backlog-md-py-uv-cache \
   uv run --python /Users/macbook-dev/.local/bin/python3.12 \
-  --extra dev --extra mcp python -m twine check dist/*
+  --extra dev python -m twine check dist/*
 ```
 
 Result:
@@ -106,16 +106,16 @@ and Definition of Done.
 
 ## MCP Smoke
 
-FastMCP adapter:
+SDK-free stdio adapter:
 
 ```bash
-python -c "from backlog_py.mcp.server import create_server, is_mcp_sdk_available; assert is_mcp_sdk_available(); server = create_server(); assert type(server).__name__ == 'FastMCP'; print(type(server).__name__)"
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | backlog-py-mcp
 ```
 
 Result:
 
 ```text
-FastMCP
+{"id": 1, "jsonrpc": "2.0", "result": {"capabilities": {"resources": {}, "tools": {}}, "protocolVersion": "2024-11-05", "serverInfo": {"name": "backlog-md-py", "version": "0.1.0"}}}
 ```
 
 Pure helper smoke:

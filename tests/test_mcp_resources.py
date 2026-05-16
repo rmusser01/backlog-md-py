@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import backlog_py.mcp as mcp
 from backlog_py.core.repository import MutableRepository
 from backlog_py.mcp import server as mcp_server
 from backlog_py.mcp import tools as mcp_tools
+from backlog_py.mcp.protocol import handle_jsonrpc_message
 from backlog_py.mcp.resources import read_resource
 from backlog_py.mcp.tools import task_board, task_edit, task_search, task_view
 from backlog_py.storage.project import discover_project
@@ -218,15 +220,25 @@ def test_task_view_returns_fixture_backed_readonly_dict():
     assert "Trailing unowned body content" in result["raw_source"]
 
 
-def test_fastmcp_task_edit_passes_title_to_safe_core(tmp_path):
+def test_sdk_free_tools_call_task_edit_passes_title_to_safe_core(tmp_path):
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
-    fake_server = mcp_server.create_server(fastmcp_cls=FakeFastMCP)
 
-    result = fake_server.tools["task_edit"](project=str(repo), task_id="TASK-1", title="FastMCP renamed task")
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "task_edit",
+                "arguments": {"project": str(repo), "task_id": "TASK-1", "title": "SDK-free renamed task"},
+            },
+        }
+    )
 
-    assert result["title"] == "FastMCP renamed task"
-    assert (repo / "backlog" / "tasks" / "task-1 - FastMCP-renamed-task.md").is_file()
+    result = json.loads(response["result"]["content"][0]["text"])
+    assert result["title"] == "SDK-free renamed task"
+    assert (repo / "backlog" / "tasks" / "task-1 - SDK-free-renamed-task.md").is_file()
 
 
 def test_task_archive_moves_task_to_archive_through_mcp_tool(tmp_path):
@@ -258,38 +270,11 @@ def test_task_complete_moves_done_task_to_completed_through_mcp_tool(tmp_path):
     assert [task["id"] for task in task_search(project, "fixture")] == ["TASK-1"]
 
 
-def test_create_server_registers_resources_and_tools_with_fastmcp_adapter():
-    fake_server = mcp_server.create_server(fastmcp_cls=FakeFastMCP)
+def test_create_server_returns_sdk_free_stdio_facade_with_ignored_legacy_args():
+    server = mcp_server.create_server(object(), legacy_adapter=object())
 
-    assert fake_server.name == "backlog-md-py"
-    assert fake_server.resources["backlog://workflow/overview"]() == read_resource("backlog://workflow/overview")
-    assert fake_server.resources["backlog://docs/task-workflow"]() == read_resource("backlog://docs/task-workflow")
-    assert "task_board" in fake_server.tools
-    assert "task_archive" in fake_server.tools
-    assert "task_complete" in fake_server.tools
-    assert "task_list" in fake_server.tools
-    assert "task_search" in fake_server.tools
-    assert "definition_of_done_defaults_upsert" in fake_server.tools
-
-    board = fake_server.tools["task_board"](project=str(FIXTURE_REPO))
-    assert board["In Progress"][0]["id"] == "TASK-1"
-
-    listed = fake_server.tools["task_list"](project=str(FIXTURE_REPO), status="In Progress")
-    assert listed[0]["id"] == "TASK-1"
-
-    result = fake_server.tools["task_search"](project=str(FIXTURE_REPO), query="parser preservation")
-
-    assert result[0]["id"] == "TASK-1"
-
-
-def test_create_server_reports_missing_sdk_when_no_adapter_is_provided(monkeypatch):
-    def missing_fastmcp():
-        raise RuntimeError("MCP SDK is not installed. Install backlog-md-py[mcp] to run the MCP server.")
-
-    monkeypatch.setattr(mcp_server, "_load_fastmcp", missing_fastmcp)
-
-    with pytest.raises(RuntimeError, match=r"Install backlog-md-py\[mcp\]"):
-        mcp_server.create_server()
+    assert server.name == "backlog-md-py"
+    assert mcp_server.is_mcp_sdk_available() is False
 
 
 def test_mcp_package_exports_document_milestone_and_dod_tools():
@@ -300,28 +285,3 @@ def test_mcp_package_exports_document_milestone_and_dod_tools():
     assert mcp.document_create.__name__ == "document_create"
     assert mcp.milestone_add.__name__ == "milestone_add"
     assert mcp.definition_of_done_defaults_get.__name__ == "definition_of_done_defaults_get"
-
-
-class FakeFastMCP:
-    def __init__(self, name: str):
-        self.name = name
-        self.resources = {}
-        self.tools = {}
-        self.ran = False
-
-    def resource(self, uri: str):
-        def decorator(function):
-            self.resources[uri] = function
-            return function
-
-        return decorator
-
-    def tool(self):
-        def decorator(function):
-            self.tools[function.__name__] = function
-            return function
-
-        return decorator
-
-    def run(self) -> None:
-        self.ran = True

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
+
+T = TypeVar("T")
 
 
 def task_search(
@@ -92,98 +95,110 @@ def task_view(project: BacklogProject, task_id: str) -> dict[str, Any]:
 
 def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
     """Create a task through the safe mutation repository."""
-    task_id = _get_alias(kwargs, "task_id", "id")
-    repository = MutableRepository(_fresh_project(project))
-    task = repository.create_task(
-        title=str(kwargs.get("title") or ""),
-        task_id=None if task_id is None else str(task_id),
-        status=_optional_string(_get_alias(kwargs, "status")),
-        description=str(kwargs.get("description") or ""),
-        plan=str(_get_alias(kwargs, "implementationPlan", "implementation_plan", "plan") or ""),
-        notes=str(kwargs.get("notes") or ""),
-        final_summary=str(_get_alias(kwargs, "finalSummary", "final_summary") or ""),
-        acceptance_criteria=_optional_string_list(_get_alias(kwargs, "acceptanceCriteria", "acceptance_criteria")),
-        definition_of_done=_optional_string_list(_get_alias(kwargs, "definitionOfDone", "definition_of_done")),
-        definition_of_done_add=_optional_string_list(
-            _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
-        ),
-        disable_definition_of_done_defaults=_coerce_bool(
-            _get_alias(kwargs, "disableDefinitionOfDoneDefaults", "disable_definition_of_done_defaults")
+    def mutate() -> dict[str, Any]:
+        task_id = _get_alias(kwargs, "task_id", "id")
+        repository = MutableRepository(_fresh_project(project))
+        task = repository.create_task(
+            title=str(kwargs.get("title") or ""),
+            task_id=None if task_id is None else str(task_id),
+            status=_optional_string(_get_alias(kwargs, "status")),
+            description=str(kwargs.get("description") or ""),
+            plan=str(_get_alias(kwargs, "implementationPlan", "implementation_plan", "plan") or ""),
+            notes=str(kwargs.get("notes") or ""),
+            final_summary=str(_get_alias(kwargs, "finalSummary", "final_summary") or ""),
+            acceptance_criteria=_optional_string_list(_get_alias(kwargs, "acceptanceCriteria", "acceptance_criteria")),
+            definition_of_done=_optional_string_list(_get_alias(kwargs, "definitionOfDone", "definition_of_done")),
+            definition_of_done_add=_optional_string_list(
+                _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
+            ),
+            disable_definition_of_done_defaults=_coerce_bool(
+                _get_alias(kwargs, "disableDefinitionOfDoneDefaults", "disable_definition_of_done_defaults")
+            )
+            or False,
+            dependencies=_optional_string_list(_get_alias(kwargs, "dependencies")),
+            assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
+            labels=_optional_string_list(_get_alias(kwargs, "labels")),
+            priority=_optional_string(_get_alias(kwargs, "priority")),
+            milestone=_optional_string(_get_alias(kwargs, "milestone")),
+            ordinal=_get_alias(kwargs, "ordinal"),
+            parent_task_id=_optional_string(_get_alias(kwargs, "parentTaskId", "parent_task_id", "parent")),
+            references=_optional_string_list(_get_alias(kwargs, "references")),
+            documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
+            modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
+            on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
         )
-        or False,
-        dependencies=_optional_string_list(_get_alias(kwargs, "dependencies")),
-        assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
-        labels=_optional_string_list(_get_alias(kwargs, "labels")),
-        priority=_optional_string(_get_alias(kwargs, "priority")),
-        milestone=_optional_string(_get_alias(kwargs, "milestone")),
-        ordinal=_get_alias(kwargs, "ordinal"),
-        parent_task_id=_optional_string(_get_alias(kwargs, "parentTaskId", "parent_task_id", "parent")),
-        references=_optional_string_list(_get_alias(kwargs, "references")),
-        documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
-        modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
-        on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
-    )
-    return _task_detail(project, task)
+        return _task_detail(project, task)
+
+    return _locked(project, "mcp_task_create", mutate)
 
 
 def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str, Any]:
     """Edit supported task sections through the safe mutation repository."""
-    repository = MutableRepository(project)
-    task = repository.edit_task(
-        task_id,
-        title=_optional_string(kwargs.get("title")),
-        description=_optional_string(kwargs.get("description")),
-        plan=_optional_string(_get_alias(kwargs, "planSet", "implementationPlan", "implementation_plan", "plan")),
-        append_plan=_optional_string_list(_get_alias(kwargs, "planAppend", "append_plan")),
-        clear_plan=_coerce_bool(_get_alias(kwargs, "planClear", "clear_plan")) or False,
-        notes=_optional_string(kwargs.get("notes")),
-        append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
-        acceptance_criteria_add=_optional_string_list(
-            _get_alias(kwargs, "acceptanceCriteriaAdd", "acceptance_criteria_add")
-        ),
-        definition_of_done_add=_optional_string_list(
-            _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
-        ),
-        final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),
-        append_final_summary=_optional_string_list(_get_alias(kwargs, "finalSummaryAppend", "append_final_summary")),
-        clear_final_summary=_coerce_bool(_get_alias(kwargs, "finalSummaryClear", "clear_final_summary")) or False,
-        check_ac=_int_list(_get_alias(kwargs, "checkAc", "check_ac")),
-        check_dod=_int_list(_get_alias(kwargs, "checkDod", "check_dod")),
-        uncheck_ac=_int_list(_get_alias(kwargs, "uncheckAc", "uncheck_ac")),
-        uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod")),
-        remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
-        remove_dod=_int_list(_get_alias(kwargs, "definitionOfDoneRemove", "removeDod", "remove_dod")),
-        dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
-        assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
-        labels=_optional_string_list(_get_alias(kwargs, "labels")),
-        priority=_optional_string(_get_alias(kwargs, "priority")),
-        milestone=_optional_string(_get_alias(kwargs, "milestone")) if "milestone" in kwargs else None,
-        ordinal=_get_alias(kwargs, "ordinal"),
-        clear_milestone=("milestone" in kwargs and kwargs.get("milestone") is None)
-        or (_coerce_bool(_get_alias(kwargs, "clearMilestone", "clear_milestone")) or False),
-        references=_optional_string_list(_get_alias(kwargs, "references")),
-        add_references=_optional_string_list(_get_alias(kwargs, "addReferences", "add_references")),
-        remove_references=_optional_string_list(_get_alias(kwargs, "removeReferences", "remove_references")),
-        documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
-        add_documentation=_optional_string_list(_get_alias(kwargs, "addDocumentation", "add_documentation")),
-        remove_documentation=_optional_string_list(_get_alias(kwargs, "removeDocumentation", "remove_documentation")),
-        modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
-        status=_optional_string(kwargs.get("status")),
-        on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
-    )
-    return _task_detail(project, task)
+    def mutate() -> dict[str, Any]:
+        repository = MutableRepository(project)
+        task = repository.edit_task(
+            task_id,
+            title=_optional_string(kwargs.get("title")),
+            description=_optional_string(kwargs.get("description")),
+            plan=_optional_string(_get_alias(kwargs, "planSet", "implementationPlan", "implementation_plan", "plan")),
+            append_plan=_optional_string_list(_get_alias(kwargs, "planAppend", "append_plan")),
+            clear_plan=_coerce_bool(_get_alias(kwargs, "planClear", "clear_plan")) or False,
+            notes=_optional_string(kwargs.get("notes")),
+            append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
+            acceptance_criteria_add=_optional_string_list(
+                _get_alias(kwargs, "acceptanceCriteriaAdd", "acceptance_criteria_add")
+            ),
+            definition_of_done_add=_optional_string_list(
+                _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
+            ),
+            final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),
+            append_final_summary=_optional_string_list(_get_alias(kwargs, "finalSummaryAppend", "append_final_summary")),
+            clear_final_summary=_coerce_bool(_get_alias(kwargs, "finalSummaryClear", "clear_final_summary")) or False,
+            check_ac=_int_list(_get_alias(kwargs, "checkAc", "check_ac")),
+            check_dod=_int_list(_get_alias(kwargs, "checkDod", "check_dod")),
+            uncheck_ac=_int_list(_get_alias(kwargs, "uncheckAc", "uncheck_ac")),
+            uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod")),
+            remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
+            remove_dod=_int_list(_get_alias(kwargs, "definitionOfDoneRemove", "removeDod", "remove_dod")),
+            dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
+            assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
+            labels=_optional_string_list(_get_alias(kwargs, "labels")),
+            priority=_optional_string(_get_alias(kwargs, "priority")),
+            milestone=_optional_string(_get_alias(kwargs, "milestone")) if "milestone" in kwargs else None,
+            ordinal=_get_alias(kwargs, "ordinal"),
+            clear_milestone=("milestone" in kwargs and kwargs.get("milestone") is None)
+            or (_coerce_bool(_get_alias(kwargs, "clearMilestone", "clear_milestone")) or False),
+            references=_optional_string_list(_get_alias(kwargs, "references")),
+            add_references=_optional_string_list(_get_alias(kwargs, "addReferences", "add_references")),
+            remove_references=_optional_string_list(_get_alias(kwargs, "removeReferences", "remove_references")),
+            documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
+            add_documentation=_optional_string_list(_get_alias(kwargs, "addDocumentation", "add_documentation")),
+            remove_documentation=_optional_string_list(_get_alias(kwargs, "removeDocumentation", "remove_documentation")),
+            modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
+            status=_optional_string(kwargs.get("status")),
+            on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
+        )
+        return _task_detail(project, task)
+
+    return _locked(project, "mcp_task_edit", mutate)
 
 
 def task_archive(project: BacklogProject, task_id: str) -> dict[str, Any]:
     """Move one active task to backlog/archive/tasks."""
-    task = MutableRepository(project).archive_task(task_id)
-    return _task_detail(project, task)
+    return _locked(
+        project,
+        "mcp_task_archive",
+        lambda: _task_detail(project, MutableRepository(project).archive_task(task_id)),
+    )
 
 
 def task_complete(project: BacklogProject, task_id: str) -> dict[str, Any]:
     """Move one Done task to backlog/completed."""
-    task = MutableRepository(project).complete_task(task_id)
-    return _task_detail(project, task)
+    return _locked(
+        project,
+        "mcp_task_complete",
+        lambda: _task_detail(project, MutableRepository(project).complete_task(task_id)),
+    )
 
 
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
@@ -202,23 +217,35 @@ def document_view(project: BacklogProject, path_or_id: str) -> dict[str, Any]:
 
 def document_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
     """Create a document under backlog/docs."""
-    document = DocumentService(project).create_document(
-        str(kwargs.get("path") or ""),
-        title=str(kwargs.get("title") or ""),
-        content=str(kwargs.get("content") or ""),
-        metadata=_dict_value(kwargs.get("metadata")),
+    return _locked(
+        project,
+        "mcp_document_create",
+        lambda: _document_detail(
+            project,
+            DocumentService(project).create_document(
+                str(kwargs.get("path") or ""),
+                title=str(kwargs.get("title") or ""),
+                content=str(kwargs.get("content") or ""),
+                metadata=_dict_value(kwargs.get("metadata")),
+            ),
+        ),
     )
-    return _document_detail(project, document)
 
 
 def document_update(project: BacklogProject, path_or_id: str, **kwargs: Any) -> dict[str, Any]:
     """Update a document while preserving omitted metadata."""
-    document = DocumentService(project).update_document(
-        path_or_id,
-        title=_optional_string(kwargs.get("title")),
-        content=_optional_string(kwargs.get("content")),
+    return _locked(
+        project,
+        "mcp_document_update",
+        lambda: _document_detail(
+            project,
+            DocumentService(project).update_document(
+                path_or_id,
+                title=_optional_string(kwargs.get("title")),
+                content=_optional_string(kwargs.get("content")),
+            ),
+        ),
     )
-    return _document_detail(project, document)
 
 
 def milestone_list(project: BacklogProject) -> list[dict[str, Any]]:
@@ -228,7 +255,11 @@ def milestone_list(project: BacklogProject) -> list[dict[str, Any]]:
 
 def milestone_add(project: BacklogProject, name: str, description: str = "") -> dict[str, Any]:
     """Create a milestone file."""
-    return _milestone_detail(project, MilestoneService(project).add_milestone(name, description=description))
+    return _locked(
+        project,
+        "mcp_milestone_add",
+        lambda: _milestone_detail(project, MilestoneService(project).add_milestone(name, description=description)),
+    )
 
 
 def milestone_rename(
@@ -238,18 +269,32 @@ def milestone_rename(
     update_tasks: bool = False,
 ) -> dict[str, Any]:
     """Rename a milestone file and optionally update task references."""
-    milestone = MilestoneService(project).rename_milestone(old_name, new_name, update_tasks=update_tasks)
-    return _milestone_detail(project, milestone)
+    return _locked(
+        project,
+        "mcp_milestone_rename",
+        lambda: _milestone_detail(
+            project,
+            MilestoneService(project).rename_milestone(old_name, new_name, update_tasks=update_tasks),
+        ),
+    )
 
 
 def milestone_remove(project: BacklogProject, name: str, clear_tasks: bool = False) -> dict[str, Any]:
     """Remove a milestone file and optionally clear task references."""
-    return _milestone_detail(project, MilestoneService(project).remove_milestone(name, clear_tasks=clear_tasks))
+    return _locked(
+        project,
+        "mcp_milestone_remove",
+        lambda: _milestone_detail(project, MilestoneService(project).remove_milestone(name, clear_tasks=clear_tasks)),
+    )
 
 
 def milestone_archive(project: BacklogProject, name: str) -> dict[str, Any]:
     """Archive a milestone file."""
-    return _milestone_detail(project, MilestoneService(project).archive_milestone(name))
+    return _locked(
+        project,
+        "mcp_milestone_archive",
+        lambda: _milestone_detail(project, MilestoneService(project).archive_milestone(name)),
+    )
 
 
 def definition_of_done_defaults_get(project: BacklogProject) -> dict[str, list[str]]:
@@ -259,8 +304,15 @@ def definition_of_done_defaults_get(project: BacklogProject) -> dict[str, list[s
 
 def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]) -> dict[str, list[str]]:
     """Replace project-level Definition of Done default checklist items."""
-    config = replace_definition_of_done_defaults(project, items)
-    return {"items": list(config.definition_of_done or [])}
+    def mutate() -> dict[str, list[str]]:
+        config = replace_definition_of_done_defaults(project, items)
+        return {"items": list(config.definition_of_done or [])}
+
+    return _locked(project, "mcp_definition_of_done_defaults_upsert", mutate)
+
+
+def _locked(project: BacklogProject, operation: str, fn: Callable[[], T]) -> T:
+    return with_project_write_lock(project, operation, fn)
 
 
 def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:

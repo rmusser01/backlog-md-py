@@ -91,7 +91,7 @@ uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
 Run the full local cutover validation with:
 
 ```bash
-uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src -f json -o /tmp/bandit_backlog_py.json
 git diff --check
 ```
