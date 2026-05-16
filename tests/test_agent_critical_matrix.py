@@ -69,7 +69,6 @@ EXPECTED_AGENT_CRITICAL = {
 }
 
 EXPECTED_DEFERRED = {
-    "cli:interactive-board",
     "git:remote-operations",
     "git:hook-bypass",
 }
@@ -131,6 +130,17 @@ def test_agent_critical_inventory_tracks_interactive_search_filter_surface():
     assert item.classification == "interactive-implemented"
     assert item.expected == "interactive search filters and live filtering"
     assert item.fixture == "cli:interactive-search-filters"
+
+
+def test_agent_critical_inventory_tracks_interactive_board_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+    item = by_name["cli:interactive-board"]
+
+    assert item.status == "implemented"
+    assert item.classification == "interactive-implemented"
+    assert item.expected == "backlog board interactive controls"
+    assert item.fixture == "cli:interactive-board"
 
 
 def test_agent_critical_inventory_tracks_status_change_callback_surface():

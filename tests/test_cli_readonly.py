@@ -341,6 +341,95 @@ def test_board_outputs_status_grouping():
     assert "In Progress" in result.output
     assert "TASK-1" in result.output
     assert "Done" in result.output
+    assert "Actions:" not in result.output
+
+
+def test_board_interactive_renders_action_panel(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "board", input="q")
+
+    assert result.exit_code == 0
+    assert "Actions: [V]iew task  [E]dit task  [M]ove task  [Q]uit" in result.output
+
+
+def test_board_interactive_move_updates_task_under_project_lock(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    lock_operations = []
+
+    from backlog_py.cli import main as cli_main
+
+    original_lock = cli_main.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(cli_main, "with_project_write_lock", tracking_lock)
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "board", input="mTASK-1\nDone\n")
+
+    assert result.exit_code == 0
+    assert lock_operations == [(repo, "board_move_task")]
+    assert "Moved TASK-1 to Done" in result.output
+    assert MutableRepository.from_path(repo).get_task("TASK-1").status == "Done"
+
+
+def test_board_interactive_edit_launches_default_editor_under_project_lock(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    set_config_value(project, "defaultEditor", "fake-editor --wait")
+    lock_operations = []
+    editor_invocations = []
+
+    from backlog_py.cli import main as cli_main
+
+    original_lock = cli_main.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    def fake_editor(command, path):
+        editor_invocations.append((command, path))
+        path.write_text(path.read_text(encoding="utf-8") + "\nEdited from board.\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli_main, "with_project_write_lock", tracking_lock)
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+    monkeypatch.setattr(cli_main, "_run_editor_command", fake_editor)
+
+    result = _invoke_repo(repo, "board", input="eTASK-1\n")
+
+    assert result.exit_code == 0
+    assert lock_operations == [(repo, "task_editor")]
+    assert editor_invocations == [(["fake-editor", "--wait"], _task_file(repo))]
+    assert "Edited TASK-1" in result.output
+    assert "Edited from board." in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_board_interactive_view_renders_task_detail(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+    result = _invoke_repo(repo, "board", input="vTASK-1\n")
+
+    assert result.exit_code == 0
+    assert "Task id: TASK-1" in result.output
+    assert "Task TASK-1" in result.output
+    assert "Status: In Progress" in result.output
+    assert "Actions: [E]dit in editor  [Q]uit" in result.output
 
 
 def test_board_and_search_default_use_ansi_color_for_human_output():
@@ -449,10 +538,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 69" in result.output
-    assert "deferred: 3" in result.output
+    assert "implemented: 70" in result.output
+    assert "deferred: 2" in result.output
     assert "total: 72" in result.output
-    assert "cli: 41 implemented, 1 deferred, 42 total" in result.output
+    assert "cli: 42 implemented, 0 deferred, 42 total" in result.output
     assert "browser: 2 implemented, 0 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 1 implemented, 0 deferred, 1 total" in result.output
