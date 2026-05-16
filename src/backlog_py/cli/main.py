@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import subprocess  # nosec B404
 from pathlib import Path
 from typing import Callable, TypeVar
 
@@ -336,7 +339,10 @@ def task_command(
         raise click.UsageError("Missing task id.")
     task_id = args[0]
     task_record = _repository(ctx).get_task(task_id)
-    click.echo(_format_task_detail(task_record, plain=plain))
+    if plain:
+        click.echo(_format_task_detail(task_record, plain=True))
+        return
+    _run_interactive_task_view(ctx, task_record)
 
 
 @main.command("search")
@@ -1162,6 +1168,73 @@ def _format_task_detail(task_record: TaskRecord, *, plain: bool) -> str:
         ]
         return "\n".join(parts).rstrip()
     return task_record.raw_source
+
+
+def _run_interactive_task_view(ctx: click.Context, task_record: TaskRecord) -> None:
+    click.echo(_format_interactive_task_detail(_project(ctx), task_record))
+    if not _stdin_is_interactive():
+        return
+    key = click.getchar().strip().casefold()
+    if key == "e":
+        _edit_task_in_configured_editor(ctx, task_record)
+
+
+def _format_interactive_task_detail(project: BacklogProject, task_record: TaskRecord) -> str:
+    try:
+        path_display = task_record.path.relative_to(project.root).as_posix()
+    except ValueError:
+        path_display = task_record.path.as_posix()
+    description = task_record.description or task_record.body.strip() or "(empty)"
+    lines = [
+        click.style(f"Task {task_record.id}", fg="cyan", bold=True),
+        f"Title: {task_record.title}",
+        f"Status: {task_record.status}",
+        f"File: {path_display}",
+        "",
+        "Description:",
+        description,
+        "",
+        "Actions: [E]dit in editor  [Q]uit",
+    ]
+    return "\n".join(lines).rstrip()
+
+
+def _edit_task_in_configured_editor(ctx: click.Context, task_record: TaskRecord) -> None:
+    project = _project(ctx)
+    editor_command = _configured_editor_command(project)
+
+    def edit_task_file() -> TaskRecord:
+        _run_editor_command(editor_command, task_record.path)
+        return _repository(ctx).get_task(task_record.id)
+
+    edited = _locked_write(ctx, "task_editor", edit_task_file)
+    click.echo(f"Edited {edited.id}")
+
+
+def _configured_editor_command(project: BacklogProject) -> list[str]:
+    editor = project.config.default_editor or os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if editor is None or not editor.strip():
+        raise click.ClickException("No editor configured. Set defaultEditor, VISUAL, or EDITOR.")
+    try:
+        command = shlex.split(editor)
+    except ValueError as exc:
+        raise click.ClickException(f"Invalid editor command: {exc}") from exc
+    if not command:
+        raise click.ClickException("No editor configured. Set defaultEditor, VISUAL, or EDITOR.")
+    return command
+
+
+def _run_editor_command(command: list[str], path: Path) -> None:
+    try:
+        result = subprocess.run([*command, str(path)], check=False)  # nosec B603
+    except FileNotFoundError as exc:
+        raise click.ClickException(f"Editor command not found: {command[0]}") from exc
+    if result.returncode != 0:
+        raise click.ClickException(f"Editor exited with status {result.returncode}: {command[0]}")
+
+
+def _stdin_is_interactive() -> bool:
+    return click.get_text_stream("stdin").isatty()
 
 
 def _format_board_task_line(task_record: TaskRecord) -> str:

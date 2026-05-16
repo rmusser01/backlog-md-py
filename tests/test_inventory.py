@@ -24,4 +24,6 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["browser:custom-port-service"].classification == "browser-implemented"
     assert by_name["browser:custom-port-service"].status == "implemented"
     assert by_name["cli:interactive-board"].classification == "interactive-deferred"
+    assert by_name["cli:interactive-task-view-editor"].classification == "interactive-implemented"
+    assert by_name["cli:interactive-task-view-editor"].status == "implemented"
     assert by_name["cli:rich-colored-output"].classification == "terminal-implemented"
