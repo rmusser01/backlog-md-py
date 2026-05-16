@@ -63,6 +63,31 @@ HTTP-capable MCP clients can call the daemon endpoint directly, but most local
 agent configs should prefer the stdio shim so token discovery stays local to
 the package runtime record.
 
+### No-Restart Legacy Command Shim
+
+Some already-running Codex app-server instances keep cached MCP commands for
+open sessions. If they still relaunch `backlog mcp start`, install an explicit
+compatibility wrapper around the existing `backlog` command:
+
+```bash
+backlog-py integration install-legacy-mcp-shim --target "$(command -v backlog)"
+```
+
+The wrapper only intercepts `backlog mcp start` and forwards it to
+`backlog-py-mcp`. All other `backlog ...` commands delegate to the backed-up
+original command. The install command prints the backup path; restore by moving
+that backup back over the wrapper when no open sessions need the legacy command
+path.
+
+You can pass explicit paths for managed environments:
+
+```bash
+backlog-py integration install-legacy-mcp-shim \
+  --target /Users/example/.bun/bin/backlog \
+  --mcp-command /Users/example/.local/bin/backlog-py-mcp \
+  --backup /Users/example/.bun/bin/backlog.node-shim-backup
+```
+
 ## Local Verification
 
 Run this smoke from the same environment that will run the agent:
