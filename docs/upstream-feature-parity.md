@@ -43,6 +43,8 @@ larger task commands:
 - Task and draft creation now write upstream-compatible `created_date`
   frontmatter, and task edits write `updated_date` only when content or the
   task file path changes.
+- Upstream-style plain task and draft detail output with file path, status
+  icon, created/updated dates, description, and checklist sections.
 - Guided `backlog config` wizard for advanced settings and
   Definition-of-Done defaults.
 - Non-plain `backlog task <id>` task detail view with `defaultEditor`/`VISUAL`/

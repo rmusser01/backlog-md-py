@@ -341,7 +341,7 @@ def task_command(
     task_id = args[0]
     task_record = _repository(ctx).get_task(task_id)
     if plain:
-        click.echo(_format_task_detail(task_record, plain=True))
+        click.echo(_format_task_detail(_project(ctx), task_record, plain=True))
         return
     _run_interactive_task_view(ctx, task_record)
 
@@ -1269,7 +1269,7 @@ def draft_archive_command(ctx: click.Context, draft_id: str) -> None:
 def draft_view_command(ctx: click.Context, draft_id: str, plain: bool) -> None:
     """Print a draft by id."""
     draft = _draft_service(ctx).view_draft(draft_id)
-    click.echo(_format_task_detail(draft, plain=plain))
+    click.echo(_format_task_detail(_project(ctx), draft, plain=plain))
 
 
 @main.group("decision")
@@ -1440,15 +1440,99 @@ def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:
     return f"{_style_identifier(task_record.id)} - {task_record.title} ({_style_status(task_record.status)})"
 
 
-def _format_task_detail(task_record: TaskRecord, *, plain: bool) -> str:
+def _format_task_detail(project: BacklogProject, task_record: TaskRecord, *, plain: bool) -> str:
     if plain:
-        parts = [
-            f"{task_record.id} [{task_record.status}] {task_record.title}",
-            "",
-            task_record.description or task_record.body.strip(),
-        ]
-        return "\n".join(parts).rstrip()
+        return _format_plain_task_detail(project, task_record)
     return task_record.raw_source
+
+
+def _format_plain_task_detail(project: BacklogProject, task_record: TaskRecord) -> str:
+    try:
+        path_display = task_record.path.relative_to(project.root).as_posix()
+    except ValueError:
+        path_display = task_record.path.as_posix()
+
+    lines = [
+        f"File: {path_display}",
+        "",
+        f"Task {task_record.id} - {task_record.title}",
+        "=" * 50,
+        "",
+        f"Status: {_format_status_with_icon(task_record.status)}",
+    ]
+
+    for label, value in _plain_task_metadata(task_record):
+        lines.append(f"{label}: {value}")
+
+    lines.extend(["", "Description:", _plain_task_description(task_record)])
+    _append_plain_section(lines, "Acceptance Criteria", _format_plain_checklist(task_record, "AC"))
+    _append_plain_section(lines, "Implementation Notes", _section_content(task_record, "IMPLEMENTATION_NOTES"))
+    _append_plain_section(lines, "Final Summary", _section_content(task_record, "FINAL_SUMMARY"))
+    _append_plain_section(lines, "Definition of Done", _format_plain_checklist(task_record, "DOD"))
+    return "\n".join(lines).rstrip()
+
+
+def _plain_task_metadata(task_record: TaskRecord) -> list[tuple[str, str]]:
+    frontmatter = task_record.parsed.frontmatter
+    metadata: list[tuple[str, str]] = []
+    scalar_fields = [
+        ("priority", "Priority"),
+        ("ordinal", "Ordinal"),
+        ("created_date", "Created"),
+        ("updated_date", "Updated"),
+        ("milestone", "Milestone"),
+        ("parent_task_id", "Parent"),
+    ]
+    list_fields = [
+        ("assignee", "Assignee"),
+        ("labels", "Labels"),
+        ("dependencies", "Dependencies"),
+        ("references", "References"),
+        ("documentation", "Documentation"),
+        ("modified_files", "Modified files"),
+    ]
+
+    for key, label in scalar_fields:
+        value = frontmatter.get(key)
+        if value is not None and value != "":
+            metadata.append((label, str(value)))
+    for key, label in list_fields:
+        values = _frontmatter_string_list(task_record, key)
+        if values:
+            metadata.append((label, ", ".join(values)))
+    return metadata
+
+
+def _append_plain_section(lines: list[str], heading: str, body: str) -> None:
+    lines.extend(["", f"{heading}:"])
+    lines.append(body or "(none)")
+
+
+def _plain_task_description(task_record: TaskRecord) -> str:
+    return task_record.description or task_record.body.strip() or "(empty)"
+
+
+def _section_content(task_record: TaskRecord, section_name: str) -> str:
+    section = task_record.parsed.sections.get(section_name)
+    return "" if section is None else section.content.strip()
+
+
+def _format_plain_checklist(task_record: TaskRecord, checklist_name: str) -> str:
+    items = task_record.parsed.checklists.get(checklist_name, [])
+    return "\n".join(item.raw_line for item in items)
+
+
+def _format_status_with_icon(status: str) -> str:
+    status_icons = {
+        "Done": "✔",
+        "In Progress": "◒",
+        "Blocked": "●",
+        "To Do": "○",
+        "Review": "◆",
+        "Testing": "▣",
+        "Draft": "○",
+    }
+    return f"{status_icons.get(status, '○')} {status}"
 
 
 def _run_interactive_task_view(ctx: click.Context, task_record: TaskRecord) -> None:

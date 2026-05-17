@@ -229,8 +229,13 @@ def test_cli_draft_create_list_and_view_plain(tmp_path):
 
     view = runner.invoke(main, ["--cwd", str(repo), "draft", "view", "draft-1", "--plain"])
     assert view.exit_code == 0, view.output
-    assert "draft-1 [Draft] Spike GraphQL" in view.output
-    assert "Explore schema." in view.output
+    assert view.output.startswith("File: backlog/drafts/draft-1 - Spike-GraphQL.md\n\n")
+    assert "Task draft-1 - Spike GraphQL" in view.output
+    assert "Status: ○ Draft" in view.output
+    assert re.search(r"Created: \d{4}-\d{2}-\d{2} \d{2}:\d{2}", view.output)
+    assert "Description:\nExplore schema." in view.output
+    assert "Definition of Done:" in view.output
+    assert "---" not in view.output
 
 
 def test_cli_draft_lifecycle_commands_use_safe_service(tmp_path):

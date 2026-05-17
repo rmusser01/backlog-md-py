@@ -183,6 +183,16 @@ def test_agent_critical_inventory_tracks_interactive_config_wizard_surface():
     assert item.expected == "backlog config interactive advanced wizard"
 
 
+def test_agent_critical_inventory_tracks_plain_task_detail_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["cli:task-plain-detail"]
+    assert item.status == "implemented"
+    assert item.classification == "cli-implemented"
+    assert item.expected == "task and draft plain detail output with file path, status, dates, and checklist sections"
+
+
 def test_agent_critical_inventory_tracks_auto_commit_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
