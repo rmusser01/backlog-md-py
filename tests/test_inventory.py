@@ -36,3 +36,5 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["cli:task-plain-detail"].status == "implemented"
     assert by_name["core:task-timestamps"].classification == "core-implemented"
     assert by_name["core:task-timestamps"].status == "implemented"
+    assert by_name["core:date-only-timestamps"].classification == "core-implemented"
+    assert by_name["core:date-only-timestamps"].status == "implemented"

@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from backlog_py.cli.main import main
 from backlog_py.core.drafts import DraftService
-from backlog_py.storage.config import replace_definition_of_done_defaults
+from backlog_py.storage.config import replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
 
 
@@ -69,6 +69,17 @@ def test_create_list_and_view_draft(tmp_path):
     assert [record.id for record in service.list_drafts()] == ["draft-1"]
     assert service.view_draft("1").id == "draft-1"
     assert service.view_draft("draft-1").title == "Spike GraphQL"
+
+
+def test_create_draft_honors_date_only_timestamp_config(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    set_config_value(project, "includeDatetimeInDates", "false")
+    service = DraftService(project)
+
+    draft = service.create_draft(title="Date only draft")
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(draft.parsed.frontmatter["created_date"]))
 
 
 def test_create_draft_inherits_definition_of_done_defaults(tmp_path):
