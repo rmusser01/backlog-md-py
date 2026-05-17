@@ -107,6 +107,6 @@ until:
 - the package gate passes locally,
 - copied-repository smoke diffs are reviewed,
 - MCP or subprocess integration is verified in the consuming project,
-- remaining browser editor/settings gaps, hook-bypass, and remote-git deferrals
-  are acceptable for that workflow, and opt-in `autoCommit` plus task
-  editor/search filter/board/overview policy is acceptable.
+- remaining browser editor/settings gaps and hook-bypass deferral are
+  acceptable for that workflow, and opt-in `autoCommit` plus fetch-only remote
+  operations and task editor/search filter/board/overview policy is acceptable.

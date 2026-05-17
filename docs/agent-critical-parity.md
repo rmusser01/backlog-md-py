@@ -85,13 +85,13 @@ do not block the first local-file agent cutover candidate.
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
+| git:remote-operations | implemented | remote git operations | git:remote-operations |
 | git:auto-commit | implemented | autoCommit | git:auto-commit |
 
 ## Explicit Deferred Blockers
 
 | Inventory item | Status | Expected behavior | Deferred reason |
 | --- | --- | --- | --- |
-| git:remote-operations | deferred | remote git operations | Remote git behavior is outside the first local-file compatibility gate. |
 | git:hook-bypass | deferred | bypassGitHooks | Hook bypass remains unsupported for safety. |
 
 ## Validation Commands

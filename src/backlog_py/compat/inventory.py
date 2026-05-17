@@ -230,12 +230,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "ADVANCED-CONFIG.md",
             "onStatusChange hooks",
         ),
-        _deferred(
+        _implemented(
             "git:remote-operations",
-            "git-deferred",
+            "git-implemented",
             "ADVANCED-CONFIG.md",
             "remote git operations",
-            "Remote git behavior is outside the first local-file compatibility gate.",
         ),
         _implemented(
             "git:auto-commit",

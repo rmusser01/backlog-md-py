@@ -51,7 +51,10 @@ larger task commands:
 - Interactive `backlog overview` project statistics dashboard while preserving
   deterministic non-interactive overview output.
 - Opt-in local `autoCommit` after project write mutations, with dirty-worktree
-  protection, no remote operations, and no hook bypass.
+  protection, no remote push/pull behavior, and no hook bypass.
+- Fetch-only remote operations: when `remoteOperations` and
+  `checkActiveBranches` are enabled, repository reads refresh remote-tracking
+  refs with `git fetch --all --prune` without pulling, merging, or pushing.
 - Loopback `backlog browser` service with `--port <port>`,
   `--no-open`, config-driven default port and auto-open behavior, health and
   board JSON endpoints, and a static board snapshot.
@@ -65,7 +68,7 @@ larger task commands:
 | Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic board service and drag-and-drop status movement are implemented; richer browser UI remains deferred |
 | Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, and static board snapshot are implemented |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects plus task-view `defaultEditor` are implemented; remaining TUI display effects are deferred |
-| Git automation | remote operations, active-branch accuracy behavior, hook bypass | Local auto-commit implemented; remote operations deferred; hook bypass rejected for first cutover |
+| Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 
 ## Recommended Work Order
 

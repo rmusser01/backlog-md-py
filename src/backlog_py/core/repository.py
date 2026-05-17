@@ -15,6 +15,7 @@ from backlog_py.core.ids import format_child_task_id, format_numbered_id
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
 from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.runtime.git import maybe_fetch_remote_refs
 from backlog_py.search.simple import contains_query
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 from backlog_py.storage.config import load_config
@@ -51,6 +52,7 @@ class TaskRecord:
 class ReadOnlyRepository:
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
+        self._remote_refs_refreshed = False
 
     @classmethod
     def from_path(cls, cwd: Path) -> "ReadOnlyRepository":
@@ -134,12 +136,20 @@ class ReadOnlyRepository:
         return board
 
     def _load_tasks(self) -> list[TaskRecord]:
+        self._ensure_remote_refs()
         task_dir = self.project.backlog_dir / "tasks"
         return _load_tasks_from_dir(task_dir)
 
     def _load_completed_tasks(self) -> list[TaskRecord]:
+        self._ensure_remote_refs()
         completed_dir = self.project.backlog_dir / "completed"
         return _load_tasks_from_dir(completed_dir)
+
+    def _ensure_remote_refs(self) -> None:
+        if self._remote_refs_refreshed:
+            return
+        self._remote_refs_refreshed = True
+        maybe_fetch_remote_refs(self.project)
 
 
 def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
