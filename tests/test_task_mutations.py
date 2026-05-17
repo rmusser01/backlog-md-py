@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 import shutil
 from pathlib import Path
@@ -74,6 +75,34 @@ def test_create_task_writes_valid_task_in_fixture_repo(tmp_path):
     assert "- [ ] #1 Task can be viewed" in written
     assert "- [ ] #1 Tests pass" in written
     assert _repository(repo).get_task("TASK-2").description == "Created through the safe mutation core."
+
+
+def test_create_task_writes_created_date_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    task = _repository(repo).create_task(title="Timestamped task", task_id="TASK-2")
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", str(task.parsed.frontmatter["created_date"]))
+    assert "updated_date" not in task.parsed.frontmatter
+
+
+def test_edit_task_writes_updated_date_without_changing_created_date(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    created_date = _repository(repo).get_task("TASK-1").parsed.frontmatter["created_date"]
+
+    edited = _repository(repo).edit_task("TASK-1", title="Timestamp edit")
+
+    assert edited.parsed.frontmatter["created_date"] == created_date
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", str(edited.parsed.frontmatter["updated_date"]))
+
+
+def test_edit_task_section_only_change_writes_updated_date(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    edited = _repository(repo).edit_task("TASK-1", description="Timestamped description.")
+
+    assert edited.description == "Timestamped description."
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", str(edited.parsed.frontmatter["updated_date"]))
 
 
 def test_create_task_writes_metadata_frontmatter(tmp_path):

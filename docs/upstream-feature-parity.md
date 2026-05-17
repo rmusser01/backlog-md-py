@@ -40,6 +40,9 @@ larger task commands:
 - `onStatusChange` shell command execution on status edits, including
   task-level override, upstream-compatible environment variables, and
   non-blocking failure handling.
+- Task and draft creation now write upstream-compatible `created_date`
+  frontmatter, and task edits write `updated_date` only when content or the
+  task file path changes.
 - Guided `backlog config` wizard for advanced settings and
   Definition-of-Done defaults.
 - Non-plain `backlog task <id>` task detail view with `defaultEditor`/`VISUAL`/

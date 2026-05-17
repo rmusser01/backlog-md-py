@@ -163,6 +163,16 @@ def test_agent_critical_inventory_tracks_status_change_callback_surface():
     assert item.expected == "onStatusChange hooks"
 
 
+def test_agent_critical_inventory_tracks_task_timestamp_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["core:task-timestamps"]
+    assert item.status == "implemented"
+    assert item.classification == "core-implemented"
+    assert item.expected == "created_date on task/draft create and updated_date on task edits"
+
+
 def test_agent_critical_inventory_tracks_interactive_config_wizard_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

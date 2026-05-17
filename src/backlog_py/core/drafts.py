@@ -13,6 +13,7 @@ from backlog_py.core.repository import (
     TaskMutationError,
     TaskRecord,
     _atomic_write_text,
+    _current_task_timestamp,
     _definition_of_done_for_create,
     _load_task,
     _mutation_path,
@@ -102,6 +103,7 @@ class DraftService:
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
             on_status_change=None,
+            created_date=_current_task_timestamp(),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)

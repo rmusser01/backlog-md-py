@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -61,6 +62,7 @@ def test_create_list_and_view_draft(tmp_path):
     assert draft.parsed.frontmatter["assignee"] == ["codex"]
     assert draft.parsed.frontmatter["labels"] == ["research"]
     assert draft.parsed.frontmatter["priority"] == "high"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", str(draft.parsed.frontmatter["created_date"]))
     assert _draft_file(repo).name == "draft-1 - Spike-GraphQL.md"
     assert "id: draft-1" in _draft_file(repo).read_text(encoding="utf-8")
 

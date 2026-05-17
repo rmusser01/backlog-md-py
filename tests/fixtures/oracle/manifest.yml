@@ -226,6 +226,10 @@ fixtures:
     command: ["backlog", "task", "edit", "TASK-1", "--status", "Done"]
     agent_critical: false
     classification: "automation-implemented"
+  - name: "core:task-timestamps"
+    command: ["backlog", "task", "create", "Timestamp example"]
+    agent_critical: false
+    classification: "core-implemented"
   - name: "git:remote-operations"
     command: ["backlog", "task", "create", "Remote operation example"]
     agent_critical: false
