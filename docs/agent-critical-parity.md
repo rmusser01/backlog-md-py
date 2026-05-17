@@ -87,6 +87,7 @@ do not block the first local-file agent cutover candidate.
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 | core:task-timestamps | implemented | created_date on task/draft create and updated_date on task edits | core:task-timestamps |
+| core:date-only-timestamps | implemented | includeDatetimeInDates controls created_date and updated_date timestamp precision | core:date-only-timestamps |
 | git:remote-operations | implemented | remote git operations | git:remote-operations |
 | git:auto-commit | implemented | autoCommit | git:auto-commit |
 

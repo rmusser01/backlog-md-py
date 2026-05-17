@@ -103,7 +103,7 @@ class DraftService:
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
             on_status_change=None,
-            created_date=_current_task_timestamp(),
+            created_date=_current_task_timestamp(current_config.include_datetime_in_dates),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)

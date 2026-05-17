@@ -243,7 +243,7 @@ class MutableRepository(ReadOnlyRepository):
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
             on_status_change=normalized_on_status_change,
-            created_date=_current_task_timestamp(),
+            created_date=_current_task_timestamp(current_config.include_datetime_in_dates),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
@@ -435,10 +435,11 @@ class MutableRepository(ReadOnlyRepository):
             source = _replace_frontmatter_values(source, parsed, updates)
             parsed = parse_task_markdown(source)
         if source != original_source or target_path != safe_current_path:
+            include_datetime = load_config(self.project.config_path).include_datetime_in_dates
             source = _replace_frontmatter_values(
                 source,
                 parsed,
-                {"updated_date": _current_task_timestamp()},
+                {"updated_date": _current_task_timestamp(include_datetime)},
             )
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
@@ -970,8 +971,9 @@ def _normalize_task_id(task_id: str, task_prefix: str = "task") -> str:
     return normalized
 
 
-def _current_task_timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+def _current_task_timestamp(include_datetime: bool = True) -> str:
+    timestamp_format = "%Y-%m-%d %H:%M" if include_datetime else "%Y-%m-%d"
+    return datetime.now(timezone.utc).strftime(timestamp_format)
 
 
 def _normalize_dependency_ids(dependencies: Sequence[str] | None, task_prefix: str = "task") -> list[str]:

@@ -243,6 +243,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "created_date on task/draft create and updated_date on task edits",
         ),
         _implemented(
+            "core:date-only-timestamps",
+            "core-implemented",
+            "ADVANCED-CONFIG.md",
+            "includeDatetimeInDates controls created_date and updated_date timestamp precision",
+        ),
+        _implemented(
             "git:remote-operations",
             "git-implemented",
             "ADVANCED-CONFIG.md",

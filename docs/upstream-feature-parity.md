@@ -43,6 +43,8 @@ larger task commands:
 - Task and draft creation now write upstream-compatible `created_date`
   frontmatter, and task edits write `updated_date` only when content or the
   task file path changes.
+- `includeDatetimeInDates: false` writes date-only `created_date` and
+  `updated_date` frontmatter for task and draft mutations.
 - Upstream-style plain task and draft detail output with file path, status
   icon, created/updated dates, description, and checklist sections.
 - Guided `backlog config` wizard for advanced settings and
@@ -72,7 +74,7 @@ larger task commands:
 | --- | --- | --- |
 | Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic board service and drag-and-drop status movement are implemented; richer browser UI remains deferred |
 | Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, and static board snapshot are implemented |
-| Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects plus task-view `defaultEditor` are implemented; remaining TUI display effects are deferred |
+| Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 
 ## Recommended Work Order

@@ -86,6 +86,16 @@ def test_create_task_writes_created_date_frontmatter(tmp_path):
     assert "updated_date" not in task.parsed.frontmatter
 
 
+def test_create_task_honors_date_only_timestamp_config(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    set_config_value(_project(repo), "includeDatetimeInDates", "false")
+
+    task = _repository(repo).create_task(title="Date only task", task_id="TASK-2")
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(task.parsed.frontmatter["created_date"]))
+    assert "updated_date" not in task.parsed.frontmatter
+
+
 def test_edit_task_writes_updated_date_without_changing_created_date(tmp_path):
     repo = _copy_fixture(tmp_path)
     created_date = _repository(repo).get_task("TASK-1").parsed.frontmatter["created_date"]
@@ -94,6 +104,17 @@ def test_edit_task_writes_updated_date_without_changing_created_date(tmp_path):
 
     assert edited.parsed.frontmatter["created_date"] == created_date
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", str(edited.parsed.frontmatter["updated_date"]))
+
+
+def test_edit_task_honors_date_only_timestamp_config(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    set_config_value(_project(repo), "includeDatetimeInDates", "false")
+    created_date = _repository(repo).get_task("TASK-1").parsed.frontmatter["created_date"]
+
+    edited = _repository(repo).edit_task("TASK-1", title="Date only edit")
+
+    assert edited.parsed.frontmatter["created_date"] == created_date
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(edited.parsed.frontmatter["updated_date"]))
 
 
 def test_edit_task_section_only_change_writes_updated_date(tmp_path):

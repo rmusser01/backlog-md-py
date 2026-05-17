@@ -234,6 +234,10 @@ fixtures:
     command: ["backlog", "task", "create", "Timestamp example"]
     agent_critical: false
     classification: "core-implemented"
+  - name: "core:date-only-timestamps"
+    command: ["backlog", "config", "set", "includeDatetimeInDates", "false"]
+    agent_critical: false
+    classification: "core-implemented"
   - name: "git:remote-operations"
     command: ["backlog", "task", "create", "Remote operation example"]
     agent_critical: false
