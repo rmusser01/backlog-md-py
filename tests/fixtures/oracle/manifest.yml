@@ -190,6 +190,10 @@ fixtures:
     command: ["backlog", "board"]
     agent_critical: false
     classification: "interactive-implemented"
+  - name: "cli:interactive-overview"
+    command: ["backlog", "overview"]
+    agent_critical: false
+    classification: "interactive-implemented"
   - name: "cli:rich-colored-output"
     command: ["backlog", "task", "list"]
     agent_critical: false

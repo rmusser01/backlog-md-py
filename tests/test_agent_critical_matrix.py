@@ -143,6 +143,17 @@ def test_agent_critical_inventory_tracks_interactive_board_surface():
     assert item.fixture == "cli:interactive-board"
 
 
+def test_agent_critical_inventory_tracks_interactive_overview_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+    item = by_name["cli:interactive-overview"]
+
+    assert item.status == "implemented"
+    assert item.classification == "interactive-implemented"
+    assert item.expected == "backlog overview interactive project statistics dashboard"
+    assert item.fixture == "cli:interactive-overview"
+
+
 def test_agent_critical_inventory_tracks_status_change_callback_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

@@ -48,6 +48,8 @@ larger task commands:
   result-type, and modified-file refinement while preserving `--plain`.
 - Interactive `backlog board` view/edit/move controls while preserving
   deterministic non-interactive board output.
+- Interactive `backlog overview` project statistics dashboard while preserving
+  deterministic non-interactive overview output.
 - Opt-in local `autoCommit` after project write mutations, with dirty-worktree
   protection, no remote operations, and no hook bypass.
 - Loopback `backlog browser` service with `--port <port>`,
@@ -62,7 +64,6 @@ larger task commands:
 | --- | --- | --- |
 | Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic board service and drag-and-drop status movement are implemented; richer browser UI remains deferred |
 | Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, and static board snapshot are implemented |
-| Terminal UI | Overview TUI | Task detail/editor launch, search filters, and board view/edit/move controls are implemented; remaining TUI controls are deferred behind deterministic plain output |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects plus task-view `defaultEditor` are implemented; remaining TUI display effects are deferred |
 | Git automation | remote operations, active-branch accuracy behavior, hook bypass | Local auto-commit implemented; remote operations deferred; hook bypass rejected for first cutover |
 
@@ -74,7 +75,5 @@ larger task commands:
    should explicitly advertise a headless/agent-focused compatibility scope.
 3. If browser parity is in scope, implement it separately from MCP/CLI runtime
    work and require end-to-end browser tests before claiming support.
-4. Implement remaining overview TUI only after plain output remains stable and
-   covered.
-5. Treat remotes and hook bypass as separate security-sensitive milestones with
+4. Treat remotes and hook bypass as separate security-sensitive milestones with
    explicit opt-in behavior.

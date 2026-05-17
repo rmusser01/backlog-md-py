@@ -7,14 +7,14 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 70,
+        "implemented": 71,
         "deferred": 2,
-        "total": 72,
+        "total": 73,
     }
     assert report["categories"]["cli"] == {
-        "implemented": 42,
+        "implemented": 43,
         "deferred": 0,
-        "total": 42,
+        "total": 43,
     }
     assert report["categories"]["mcp"] == {
         "implemented": 22,
@@ -54,6 +54,7 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["cli:shell-completion-install"]["status"] == "implemented"
     assert items_by_name["cli:rich-colored-output"]["status"] == "implemented"
     assert items_by_name["cli:interactive-board"]["status"] == "implemented"
+    assert items_by_name["cli:interactive-overview"]["status"] == "implemented"
     assert items_by_name["cli:interactive-task-view-editor"]["status"] == "implemented"
     assert items_by_name["cli:interactive-search-filters"]["status"] == "implemented"
     assert items_by_name["cli:interactive-config-wizard"]["status"] == "implemented"

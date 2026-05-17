@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess  # nosec B404
+from collections import Counter
 from pathlib import Path
 from typing import Callable, TypeVar
 
@@ -656,8 +657,23 @@ def overview_command(ctx: click.Context) -> None:
     project = _project(ctx)
     repository = _repository(ctx)
     board = repository.board()
+    completed_tasks = repository.list_completed_tasks()
+    completed_count = len(completed_tasks)
+
+    if _stdin_is_interactive():
+        _echo_overview_dashboard(project, board, completed_tasks)
+        _read_interactive_key()
+        return
+
+    _echo_overview_plain(project, board, completed_count)
+
+
+def _echo_overview_plain(
+    project: BacklogProject,
+    board: dict[str, list[TaskRecord]],
+    completed_count: int,
+) -> None:
     active_count = sum(len(tasks) for tasks in board.values())
-    completed_count = len(repository.list_completed_tasks())
 
     click.echo(f"Project: {project.config.project_name}")
     click.echo(f"Active tasks: {active_count}")
@@ -667,6 +683,67 @@ def overview_command(ctx: click.Context) -> None:
     click.echo("Statuses:")
     for status, tasks in board.items():
         click.echo(f"  {status}: {len(tasks)}")
+
+
+def _echo_overview_dashboard(
+    project: BacklogProject,
+    board: dict[str, list[TaskRecord]],
+    completed_tasks: list[TaskRecord],
+) -> None:
+    active_tasks = [task_record for tasks in board.values() for task_record in tasks]
+    total_count = len(active_tasks) + len(completed_tasks)
+    completion_percent = round((len(completed_tasks) / total_count) * 100) if total_count else 0
+    priority_counts = _overview_priority_counts(active_tasks)
+    blocked_count = sum(
+        1
+        for task_record in active_tasks
+        if _frontmatter_string_list(task_record, "dependencies")
+    )
+
+    click.echo(click.style(f"{project.config.project_name} - Project Overview", fg="cyan", bold=True))
+    click.echo("")
+    click.echo("Status Overview")
+    for status, tasks in board.items():
+        click.echo(f"  {status}: {len(tasks)} tasks")
+    click.echo(f"  Completed: {len(completed_tasks)} tasks")
+    click.echo(f"  Total Tasks: {total_count}")
+    click.echo(f"  Completion: {completion_percent}%")
+    click.echo("")
+    click.echo("Priority Breakdown")
+    if priority_counts:
+        for priority in ("high", "medium", "low", "none"):
+            count = priority_counts.get(priority, 0)
+            if count:
+                click.echo(f"  {_overview_priority_label(priority)}: {count} tasks")
+    else:
+        click.echo("  No active tasks")
+    click.echo("")
+    click.echo("Recent Activity")
+    for task_record in active_tasks[:5]:
+        click.echo(f"  {task_record.id}: {task_record.title}")
+    if not active_tasks:
+        click.echo("  No active tasks")
+    click.echo("")
+    click.echo("Project Health")
+    click.echo(f"  Blocked Tasks: {blocked_count}")
+    if blocked_count == 0:
+        click.echo("  No blocked tasks")
+    click.echo("")
+    click.echo("Actions: [Q]uit")
+
+
+def _overview_priority_counts(tasks: list[TaskRecord]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for task_record in tasks:
+        priority = str(task_record.parsed.frontmatter.get("priority") or "none").strip().casefold()
+        counts[priority or "none"] += 1
+    return counts
+
+
+def _overview_priority_label(priority: str) -> str:
+    if priority == "none":
+        return "None"
+    return priority.title()
 
 
 @main.command("browser")
