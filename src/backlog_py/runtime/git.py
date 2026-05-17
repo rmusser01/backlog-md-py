@@ -58,6 +58,21 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     logger.warning("Skipping auto-commit for {}: git commit failed: {}", operation, _git_error(commit))
 
 
+def maybe_fetch_remote_refs(project: BacklogProject) -> None:
+    """Refresh remote-tracking refs when remote operations are enabled."""
+    if not project.config.remote_operations or not project.config.check_active_branches:
+        return
+    work_dir = project.root
+    if not _is_git_worktree(work_dir):
+        return
+    remotes = _run_git(work_dir, "remote")
+    if remotes.returncode != 0 or not remotes.stdout.strip():
+        return
+    fetch = _run_git(work_dir, "fetch", "--all", "--prune")
+    if fetch.returncode != 0:
+        logger.warning("Skipping remote refresh: git fetch failed: {}", _git_error(fetch))
+
+
 def _auto_commit_enabled(project: BacklogProject) -> bool:
     try:
         return load_config(project.config_path).auto_commit

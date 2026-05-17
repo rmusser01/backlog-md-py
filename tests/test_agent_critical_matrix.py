@@ -69,7 +69,6 @@ EXPECTED_AGENT_CRITICAL = {
 }
 
 EXPECTED_DEFERRED = {
-    "git:remote-operations",
     "git:hook-bypass",
 }
 
@@ -182,6 +181,16 @@ def test_agent_critical_inventory_tracks_auto_commit_surface():
     assert item.status == "implemented"
     assert item.classification == "git-implemented"
     assert item.expected == "autoCommit"
+
+
+def test_agent_critical_inventory_tracks_remote_operations_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["git:remote-operations"]
+    assert item.status == "implemented"
+    assert item.classification == "git-implemented"
+    assert item.expected == "remote git operations"
 
 
 def test_agent_critical_inventory_tracks_browser_service_surface():
