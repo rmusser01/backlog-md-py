@@ -214,6 +214,10 @@ fixtures:
     command: ["backlog", "config"]
     agent_critical: false
     classification: "interactive-implemented"
+  - name: "cli:task-plain-detail"
+    command: ["backlog", "task", "TASK-1", "--plain"]
+    agent_critical: false
+    classification: "cli-implemented"
   - name: "config:extended-options"
     command: ["backlog", "config", "set", "zeroPaddedIds", "3"]
     agent_critical: false

@@ -225,6 +225,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog config interactive advanced wizard",
         ),
         _implemented(
+            "cli:task-plain-detail",
+            "cli-implemented",
+            "CLI-INSTRUCTIONS.md",
+            "task and draft plain detail output with file path, status, dates, and checklist sections",
+        ),
+        _implemented(
             "core:on-status-change",
             "automation-implemented",
             "ADVANCED-CONFIG.md",

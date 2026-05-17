@@ -107,8 +107,38 @@ def test_task_view_plain_outputs_task_body():
     result = _invoke("task", "TASK-1", "--plain")
 
     assert result.exit_code == 0
-    assert "TASK-1" in result.output
-    assert "Implement a fixture" in result.output
+    assert result.output.startswith("File: backlog/tasks/task-1 - Example-task.md\n\n")
+    assert "Task TASK-1 - Example task" in result.output
+    assert "Status: ◒ In Progress" in result.output
+    assert "Created: 2026-05-10 10:00" in result.output
+    assert "Description:\nImplement a fixture" in result.output
+    assert "Acceptance Criteria:" in result.output
+    assert "- [x] #1 Preserve completed acceptance criteria raw line" in result.output
+    assert "Implementation Notes:" in result.output
+    assert "Final Summary:" in result.output
+    assert "Definition of Done:" in result.output
+    assert "---" not in result.output
+
+
+def test_task_view_plain_falls_back_to_legacy_body_without_description_section(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    task_path = _task_file(repo)
+    task_path.write_text(
+        "---\n"
+        "id: TASK-1\n"
+        "title: Legacy task\n"
+        "status: To Do\n"
+        "---\n"
+        "Legacy body only.\n",
+        encoding="utf-8",
+    )
+
+    result = _invoke_repo(repo, "task", "TASK-1", "--plain")
+
+    assert result.exit_code == 0
+    assert "Task TASK-1 - Legacy task" in result.output
+    assert "Description:\nLegacy body only." in result.output
 
 
 def test_task_view_default_renders_interactive_task_detail():
@@ -575,10 +605,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 73" in result.output
+    assert "implemented: 74" in result.output
     assert "deferred: 1" in result.output
-    assert "total: 74" in result.output
-    assert "cli: 43 implemented, 0 deferred, 43 total" in result.output
+    assert "total: 75" in result.output
+    assert "cli: 44 implemented, 0 deferred, 44 total" in result.output
     assert "browser: 2 implemented, 0 deferred, 2 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 2 implemented, 0 deferred, 2 total" in result.output
@@ -592,6 +622,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"agent_cutover_ready": true' in result.output
     assert '"cli:interactive-task-view-editor"' in result.output
     assert '"cli:interactive-overview"' in result.output
+    assert '"cli:task-plain-detail"' in result.output
     assert '"core:task-timestamps"' in result.output
     assert '"status": "implemented"' in result.output
 

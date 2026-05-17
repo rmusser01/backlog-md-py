@@ -7,14 +7,14 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 73,
+        "implemented": 74,
         "deferred": 1,
-        "total": 74,
+        "total": 75,
     }
     assert report["categories"]["cli"] == {
-        "implemented": 43,
+        "implemented": 44,
         "deferred": 0,
-        "total": 43,
+        "total": 44,
     }
     assert report["categories"]["mcp"] == {
         "implemented": 22,
@@ -58,6 +58,7 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["cli:interactive-task-view-editor"]["status"] == "implemented"
     assert items_by_name["cli:interactive-search-filters"]["status"] == "implemented"
     assert items_by_name["cli:interactive-config-wizard"]["status"] == "implemented"
+    assert items_by_name["cli:task-plain-detail"]["status"] == "implemented"
     assert items_by_name["core:on-status-change"]["status"] == "implemented"
     assert items_by_name["core:task-timestamps"]["status"] == "implemented"
     assert items_by_name["git:remote-operations"]["status"] == "implemented"
