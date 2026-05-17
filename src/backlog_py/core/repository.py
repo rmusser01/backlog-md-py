@@ -5,6 +5,7 @@ import re
 import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -242,6 +243,7 @@ class MutableRepository(ReadOnlyRepository):
             documentation=_normalize_metadata_list(documentation),
             modified_files=_normalize_metadata_list(modified_files),
             on_status_change=normalized_on_status_change,
+            created_date=_current_task_timestamp(),
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
@@ -291,6 +293,7 @@ class MutableRepository(ReadOnlyRepository):
             raise TaskMutationError("Cannot set and clear milestone in one edit")
         task = self.get_task(task_id)
         old_status = task.status
+        original_source = task.raw_source
         on_status_change_update = _normalize_on_status_change_update(on_status_change)
         safe_current_path = _mutation_path(task.path.parent, task.path)
         target_path = safe_current_path
@@ -430,6 +433,13 @@ class MutableRepository(ReadOnlyRepository):
             if on_status_change_update is not _NO_STATUS_CALLBACK_UPDATE:
                 updates["onStatusChange"] = on_status_change_update
             source = _replace_frontmatter_values(source, parsed, updates)
+            parsed = parse_task_markdown(source)
+        if source != original_source or target_path != safe_current_path:
+            source = _replace_frontmatter_values(
+                source,
+                parsed,
+                {"updated_date": _current_task_timestamp()},
+            )
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
         _atomic_write_text(target_path, source)
@@ -618,12 +628,15 @@ def _new_task_source(
     documentation: Sequence[str],
     modified_files: Sequence[str],
     on_status_change: str | None,
+    created_date: str | None = None,
 ) -> str:
     frontmatter: dict[str, object] = {
         "id": task_id,
         "title": title,
         "status": status,
     }
+    if created_date:
+        frontmatter["created_date"] = created_date
     if dependencies:
         frontmatter["dependencies"] = list(dependencies)
     if assignees:
@@ -882,9 +895,11 @@ def _replace_frontmatter_values(
             frontmatter.pop(key, None)
         else:
             frontmatter[key] = value
+    newline = "\r\n" if "\r\n" in source else "\n"
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml_text.replace("\n", newline)
     body = parsed.body
-    return f"---\n{yaml_text}\n---\n{body}"
+    return f"---{newline}{yaml_text}{newline}---{newline}{body}"
 
 
 def _extract_marker_block(source: str, marker: str) -> str:
@@ -953,6 +968,10 @@ def _normalize_task_id(task_id: str, task_prefix: str = "task") -> str:
     if _TASK_ID_RE.fullmatch(normalized) is None:
         raise TaskMutationError(f"Invalid task id: {task_id}")
     return normalized
+
+
+def _current_task_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
 def _normalize_dependency_ids(dependencies: Sequence[str] | None, task_prefix: str = "task") -> list[str]:

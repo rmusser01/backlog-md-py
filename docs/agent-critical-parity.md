@@ -85,6 +85,7 @@ do not block the first local-file agent cutover candidate.
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
+| core:task-timestamps | implemented | created_date on task/draft create and updated_date on task edits | core:task-timestamps |
 | git:remote-operations | implemented | remote git operations | git:remote-operations |
 | git:auto-commit | implemented | autoCommit | git:auto-commit |
 

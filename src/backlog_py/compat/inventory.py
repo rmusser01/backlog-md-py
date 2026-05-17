@@ -231,6 +231,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "onStatusChange hooks",
         ),
         _implemented(
+            "core:task-timestamps",
+            "core-implemented",
+            "CLI task serialization",
+            "created_date on task/draft create and updated_date on task edits",
+        ),
+        _implemented(
             "git:remote-operations",
             "git-implemented",
             "ADVANCED-CONFIG.md",
