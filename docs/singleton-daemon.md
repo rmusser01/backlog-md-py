@@ -32,7 +32,12 @@ backlog-py daemon stop --force
 `daemon ensure` reuses a healthy daemon when one is already recorded, otherwise
 it starts a background `python -m backlog_py daemon run --foreground` process.
 The runtime record stores PID, endpoint, token, version, and log path under the
-user state directory. `daemon status --json` omits token material.
+user state directory. `daemon status --json` omits token material and includes
+diagnostic coordination state:
+
+- `known_projects`: canonical project roots seen through project write locks,
+- `locks`: token-safe lock metadata including kind, operation, PID, active
+  state, lock path, and metadata path.
 
 `daemon stop` removes stale runtime records. If a live daemon ignores graceful
 termination, the runtime record is kept so a second daemon is not started over a

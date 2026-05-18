@@ -16,6 +16,7 @@ from backlog_py.runtime.locks import (
     with_init_lock,
     with_project_write_lock,
 )
+import backlog_py.runtime.locks as runtime_locks
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation may require elevated Windows privileges")
@@ -84,6 +85,43 @@ def test_project_write_lock_metadata_does_not_block_after_release(tmp_path, monk
         assert acquired.metadata_path == metadata_path
         assert metadata_path.is_file()
         assert '"task_edit"' in metadata_path.read_text(encoding="utf-8")
+
+
+def test_project_write_lock_metadata_records_canonical_project_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+
+    with ProjectWriteLock(project_root, operation="task_edit").acquire(timeout=0.1):
+        locks = runtime_locks.list_runtime_locks()
+
+    assert locks == [
+        {
+            "acquired_at": locks[0]["acquired_at"],
+            "active": True,
+            "key": project_lock_key(project_root),
+            "kind": "project",
+            "lock_path": str(ProjectWriteLock(project_root, operation="ignored").lock_path),
+            "metadata_path": str(ProjectWriteLock(project_root, operation="ignored").metadata_path),
+            "operation": "task_edit",
+            "pid": os.getpid(),
+            "project_root": str(project_root.resolve()),
+        }
+    ]
+
+
+def test_list_runtime_locks_marks_released_metadata_inactive(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+
+    with ProjectWriteLock(project_root, operation="task_create").acquire(timeout=0.1):
+        pass
+
+    locks = runtime_locks.list_runtime_locks()
+
+    assert locks[0]["kind"] == "project"
+    assert locks[0]["active"] is False
 
 
 def test_daemon_runtime_lock_is_singleton(tmp_path, monkeypatch):

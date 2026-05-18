@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from backlog_py import __version__
 from backlog_py.cli.main import main
 from backlog_py.daemon.lifecycle import daemon_stop
+from backlog_py.runtime.locks import ProjectWriteLock
 from backlog_py.runtime.state import (
     RuntimeRecord,
     ensure_state_layout,
@@ -41,6 +42,34 @@ def test_daemon_status_json_omits_token(tmp_path, monkeypatch):
     payload = json.loads(result.output)
     assert payload["endpoint"] == "http://127.0.0.1:18765/mcp"
     assert payload["version"] == __version__
+
+
+def test_daemon_status_json_reports_known_project_and_lock_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    write_runtime_record(_record(pid=os.getpid(), token="secret-token"), ensure_state_layout())
+
+    with ProjectWriteLock(project_root, operation="task_edit").acquire(timeout=0.1):
+        result = CliRunner().invoke(main, ["daemon", "status", "--json"])
+
+    assert result.exit_code == 0
+    assert "secret-token" not in result.output
+    payload = json.loads(result.output)
+    assert payload["known_projects"] == [str(project_root.resolve())]
+    assert payload["locks"] == [
+        {
+            "acquired_at": payload["locks"][0]["acquired_at"],
+            "active": True,
+            "key": payload["locks"][0]["key"],
+            "kind": "project",
+            "lock_path": payload["locks"][0]["lock_path"],
+            "metadata_path": payload["locks"][0]["metadata_path"],
+            "operation": "task_edit",
+            "pid": os.getpid(),
+            "project_root": str(project_root.resolve()),
+        }
+    ]
 
 
 def test_daemon_status_cleans_stale_runtime_record(tmp_path, monkeypatch):
