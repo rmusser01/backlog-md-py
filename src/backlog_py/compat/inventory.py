@@ -189,6 +189,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "read-only browser task detail endpoint and dialog",
         ),
         _implemented(
+            "browser:task-create-form",
+            "browser-implemented",
+            "web task create form",
+            "basic browser task create endpoint and form",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",

@@ -25,7 +25,7 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
     ),
     MutationSurface(
         "task_create",
-        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        ("backlog_py.cli.main", "backlog_py.mcp.tools", "backlog_py.browser.service"),
         "project",
         "Creates active task markdown and allocates task IDs inside one project.",
     ),
