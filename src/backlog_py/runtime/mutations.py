@@ -37,7 +37,7 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
     ),
     MutationSurface(
         "task_archive",
-        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        ("backlog_py.cli.main", "backlog_py.mcp.tools", "backlog_py.browser.service"),
         "project",
         "Moves active task markdown into the project archive tree.",
     ),

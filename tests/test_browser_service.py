@@ -320,6 +320,100 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert "/api/tasks/" in html
 
 
+def test_browser_task_archive_endpoint_archives_task_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(f"{service.root_url}/api/tasks/TASK-1/archive", {})
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    task = response["body"]["task"]
+    assert lock_operations == [(repo, "browser_task_archive")]
+    assert task["id"] == "TASK-1"
+    assert task["path"] == "backlog/archive/tasks/task-1 - Example-task.md"
+    assert board["columns"]["In Progress"] == []
+    assert _archived_task_file(repo).is_file()
+    assert not _task_file_exists(repo)
+
+
+def test_browser_task_archive_endpoint_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/archive",
+                {},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+    assert not _archived_task_file(repo).exists()
+
+
+def test_browser_task_archive_endpoint_returns_not_found_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/tasks/TASK-404/archive", {})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 404
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+    assert not _archived_task_file(repo).exists()
+
+
+def test_browser_board_html_exposes_task_archive_confirmation_dialog(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="task-archive-dialog"' in html
+    assert 'data-task-archive="TASK-1"' in html
+    assert 'id="task-archive-confirm"' in html
+    assert 'id="task-archive-cancel"' in html
+    assert "submitTaskArchive" in html
+    assert "/api/tasks/" in html
+
+
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -489,6 +583,14 @@ def _task_file(repo: Path) -> Path:
     matches = sorted((repo / "backlog" / "tasks").glob("task-1 -*.md"))
     assert len(matches) == 1
     return matches[0]
+
+
+def _task_file_exists(repo: Path) -> bool:
+    return bool(list((repo / "backlog" / "tasks").glob("task-1 -*.md")))
+
+
+def _archived_task_file(repo: Path) -> Path:
+    return repo / "backlog" / "archive" / "tasks" / "task-1 - Example-task.md"
 
 
 def _created_task_file(repo: Path) -> Path:

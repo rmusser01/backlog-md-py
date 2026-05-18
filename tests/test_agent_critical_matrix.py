@@ -273,6 +273,16 @@ def test_agent_critical_inventory_tracks_browser_task_edit_surface():
     assert item.expected == "basic browser task edit endpoint and form"
 
 
+def test_agent_critical_inventory_tracks_browser_task_archive_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:task-archive-confirmation"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser task archive endpoint and confirmation dialog"
+
+
 def test_agent_critical_inventory_tracks_init_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
