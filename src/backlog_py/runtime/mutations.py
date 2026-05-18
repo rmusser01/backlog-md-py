@@ -36,6 +36,12 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
         "Rewrites active task markdown and may change task status metadata.",
     ),
     MutationSurface(
+        "task_checklist_state",
+        ("backlog_py.browser.service",),
+        "project",
+        "Rewrites active task Acceptance Criteria or Definition of Done checklist markers from the browser UI.",
+    ),
+    MutationSurface(
         "task_archive",
         ("backlog_py.cli.main", "backlog_py.mcp.tools", "backlog_py.browser.service"),
         "project",

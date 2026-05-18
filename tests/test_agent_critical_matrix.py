@@ -283,6 +283,16 @@ def test_agent_critical_inventory_tracks_browser_task_archive_surface():
     assert item.expected == "browser task archive endpoint and confirmation dialog"
 
 
+def test_agent_critical_inventory_tracks_browser_checklist_state_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:checklist-state-controls"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser checklist state endpoint and task detail controls"
+
+
 def test_agent_critical_inventory_tracks_init_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

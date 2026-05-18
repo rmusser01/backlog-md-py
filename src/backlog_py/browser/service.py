@@ -171,6 +171,27 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
             return
 
+        checklist_task_id = _task_checklist_endpoint_task_id(path)
+        if checklist_task_id is not None:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                checklist_kwargs = _task_checklist_kwargs_from_payload(self._read_json_body())
+                task = with_project_write_lock(
+                    self.server.project,
+                    "browser_task_checklist",
+                    lambda: MutableRepository(self.server.project).edit_task(checklist_task_id, **checklist_kwargs),
+                )
+            except KeyError:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {checklist_task_id}"})
+                return
+            except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            return
+
         archive_task_id = _task_archive_endpoint_task_id(path)
         if archive_task_id is not None:
             if not self._origin_allowed():
@@ -469,6 +490,17 @@ def render_board_html(project: BacklogProject) -> str:
       margin: 0;
       padding-left: 20px;
     }}
+    .checklist-item {{
+      margin: 4px 0;
+    }}
+    .checklist-item label {{
+      display: flex;
+      gap: 8px;
+      align-items: start;
+    }}
+    .checklist-item input {{
+      margin-top: 3px;
+    }}
     .task-form {{
       display: grid;
       gap: 12px;
@@ -606,11 +638,11 @@ def render_board_html(project: BacklogProject) -> str:
       </section>
       <section class="dialog-section">
         <h3>Acceptance Criteria</h3>
-        <ul id="task-dialog-acceptance"></ul>
+        <ul id="task-dialog-acceptance" data-checklist-section="acceptanceCriteria"></ul>
       </section>
       <section class="dialog-section">
         <h3>Definition of Done</h3>
-        <ul id="task-dialog-dod"></ul>
+        <ul id="task-dialog-dod" data-checklist-section="definitionOfDone"></ul>
       </section>
     </div>
   </dialog>
@@ -629,7 +661,7 @@ def render_board_html(project: BacklogProject) -> str:
       if (element) element.textContent = value || "—";
     }}
 
-    function renderChecklist(id, items) {{
+    function renderChecklist(id, items, section) {{
       const list = document.getElementById(id);
       if (!list) return;
       list.replaceChildren();
@@ -639,11 +671,22 @@ def render_board_html(project: BacklogProject) -> str:
         list.appendChild(empty);
         return;
       }}
-      items.forEach((item) => {{
+      items.forEach((item, index) => {{
         const li = document.createElement("li");
-        const mark = item.checked ? "[x]" : "[ ]";
+        li.className = "checklist-item";
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = Boolean(item.checked);
+        checkbox.setAttribute("data-checklist-section", section);
+        checkbox.setAttribute("data-checklist-index", String(index + 1));
+        checkbox.addEventListener("change", submitTaskChecklistState);
+        const text = document.createElement("span");
         const itemId = item.itemId ? `#${{item.itemId}} ` : "";
-        li.textContent = `${{mark}} ${{itemId}}${{item.text}}`;
+        text.textContent = `${{itemId}}${{item.text}}`;
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        li.appendChild(label);
         list.appendChild(li);
       }});
     }}
@@ -659,6 +702,7 @@ def render_board_html(project: BacklogProject) -> str:
         return;
       }}
       const task = await response.json();
+      if (taskDialog) taskDialog.dataset.taskId = task.id;
       setText("task-dialog-title", `${{task.id}} - ${{task.title}}`);
       setText("task-dialog-status", task.status);
       setText("task-dialog-path", task.path);
@@ -669,8 +713,8 @@ def render_board_html(project: BacklogProject) -> str:
       setText("task-dialog-labels", (task.labels || []).join(", "));
       setText("task-dialog-milestone", task.milestone);
       setText("task-dialog-description", task.description);
-      renderChecklist("task-dialog-acceptance", task.acceptanceCriteria);
-      renderChecklist("task-dialog-dod", task.definitionOfDone);
+      renderChecklist("task-dialog-acceptance", task.acceptanceCriteria, "acceptanceCriteria");
+      renderChecklist("task-dialog-dod", task.definitionOfDone, "definitionOfDone");
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
       else if (taskDialog) taskDialog.setAttribute("open", "open");
     }}
@@ -763,6 +807,28 @@ def render_board_html(project: BacklogProject) -> str:
         return;
       }}
       window.location.reload();
+    }}
+
+    async function submitTaskChecklistState(event) {{
+      const checkbox = event.currentTarget;
+      const taskId = taskDialog?.dataset.taskId;
+      const section = checkbox?.dataset.checklistSection;
+      const index = Number(checkbox?.dataset.checklistIndex);
+      if (!taskId || !section || !Number.isInteger(index)) return;
+      const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}/checklist`, {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{section, index, checked: checkbox.checked}}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        checkbox.checked = !checkbox.checked;
+        return;
+      }}
+      const payload = await response.json();
+      setText("task-dialog-updated", payload.task.updatedDate);
+      renderChecklist("task-dialog-acceptance", payload.task.acceptanceCriteria, "acceptanceCriteria");
+      renderChecklist("task-dialog-dod", payload.task.definitionOfDone, "definitionOfDone");
     }}
 
     async function submitTaskArchive(event) {{
@@ -989,6 +1055,17 @@ def _task_archive_endpoint_task_id(path: str) -> str | None:
     return unquote(encoded_task_id)
 
 
+def _task_checklist_endpoint_task_id(path: str) -> str | None:
+    prefix = "/api/tasks/"
+    suffix = "/checklist"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    encoded_task_id = path[len(prefix) : -len(suffix)]
+    if not encoded_task_id or "/" in encoded_task_id:
+        return None
+    return unquote(encoded_task_id)
+
+
 def _task_detail_endpoint_task_id(path: str) -> str | None:
     prefix = "/api/tasks/"
     if not path.startswith(prefix):
@@ -1049,6 +1126,23 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
     if not edit_kwargs:
         raise ValueError("Request body must include at least one editable field")
     return edit_kwargs
+
+
+def _task_checklist_kwargs_from_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    section = payload.get("section")
+    if section not in {"acceptanceCriteria", "definitionOfDone"}:
+        raise ValueError("Request body field section must be acceptanceCriteria or definitionOfDone")
+    index = payload.get("index")
+    if isinstance(index, bool) or not isinstance(index, int) or index < 1:
+        raise ValueError("Request body field index must be a positive integer")
+    checked = payload.get("checked")
+    if not isinstance(checked, bool):
+        raise ValueError("Request body field checked must be a boolean")
+    if section == "acceptanceCriteria":
+        return {"check_ac" if checked else "uncheck_ac": [index]}
+    return {"check_dod" if checked else "uncheck_dod": [index]}
 
 
 def _required_string_field(payload: dict[object, object], field: str) -> str:

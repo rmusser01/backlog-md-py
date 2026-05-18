@@ -414,6 +414,149 @@ def test_browser_board_html_exposes_task_archive_confirmation_dialog(tmp_path):
     assert "/api/tasks/" in html
 
 
+def test_browser_task_checklist_endpoint_updates_acceptance_criteria_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/checklist",
+            {"section": "acceptanceCriteria", "index": 2, "checked": True},
+        )
+        task = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert lock_operations == [(repo, "browser_task_checklist")]
+    assert response["body"]["task"]["acceptanceCriteria"][1]["checked"] is True
+    assert task["acceptanceCriteria"][1]["checked"] is True
+    assert "- [x] #2 Preserve incomplete acceptance criteria raw line" in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_browser_task_checklist_endpoint_unchecks_acceptance_criteria(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/checklist",
+            {"section": "acceptanceCriteria", "index": 1, "checked": False},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["task"]["acceptanceCriteria"][0]["checked"] is False
+    assert "- [ ] #1 Preserve completed acceptance criteria raw line" in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_browser_task_checklist_endpoint_updates_definition_of_done_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/checklist",
+            {"section": "definitionOfDone", "index": 2, "checked": True},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert lock_operations == [(repo, "browser_task_checklist")]
+    assert response["body"]["task"]["definitionOfDone"][1]["checked"] is True
+    assert "- [x] #2 Verification recorded" in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_browser_task_checklist_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/checklist",
+                {"section": "acceptanceCriteria", "index": 0, "checked": True},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_task_checklist_endpoint_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/checklist",
+                {"section": "definitionOfDone", "index": 2, "checked": True},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_board_html_exposes_task_checklist_state_controls(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'data-checklist-section="acceptanceCriteria"' in html
+    assert 'data-checklist-section="definitionOfDone"' in html
+    assert "submitTaskChecklistState" in html
+    assert "/checklist" in html
+
+
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
