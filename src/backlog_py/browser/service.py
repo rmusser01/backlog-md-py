@@ -133,6 +133,23 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path in {"/api/tasks", "/api/tasks/"}:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                create_kwargs = _task_create_kwargs_from_payload(self._read_json_body())
+                task = with_project_write_lock(
+                    self.server.project,
+                    "browser_task_create",
+                    lambda: MutableRepository(self.server.project).create_task(**create_kwargs),
+                )
+            except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.CREATED, {"task": _task_detail_payload(task, project=self.server.project)})
+            return
+
         task_id = _status_endpoint_task_id(path)
         if task_id is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
@@ -190,7 +207,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
 
 def render_board_html(project: BacklogProject) -> str:
-    """Render a kanban board with drag-and-drop status movement."""
+    """Render a browser board with basic task creation and status movement."""
     payload = build_board_payload(project)
     project_name = escape(project.config.project_name)
     columns_obj = payload["columns"]
@@ -199,6 +216,7 @@ def render_board_html(project: BacklogProject) -> str:
         _render_column(str(status), tasks)
         for status, tasks in columns.items()
     )
+    status_options = _render_status_options(project.config.statuses or [])
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -233,6 +251,10 @@ def render_board_html(project: BacklogProject) -> str:
       font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }}
     header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
       padding: 20px 24px 12px;
       border-bottom: 1px solid var(--border);
     }}
@@ -313,8 +335,18 @@ def render_board_html(project: BacklogProject) -> str:
       color: inherit;
       font: inherit;
     }}
+    .primary-button {{
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent);
+      color: var(--panel);
+      padding: 6px 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }}
     .details-button,
-    .dialog-close {{
+    .dialog-close,
+    .secondary-button {{
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--panel);
@@ -322,7 +354,8 @@ def render_board_html(project: BacklogProject) -> str:
       cursor: pointer;
     }}
     .details-button:hover,
-    .dialog-close:hover {{
+    .dialog-close:hover,
+    .secondary-button:hover {{
       border-color: var(--accent);
     }}
     .empty {{
@@ -393,16 +426,76 @@ def render_board_html(project: BacklogProject) -> str:
       margin: 0;
       padding-left: 20px;
     }}
+    .task-form {{
+      display: grid;
+      gap: 12px;
+    }}
+    .task-form label {{
+      display: grid;
+      gap: 4px;
+      font-weight: 650;
+    }}
+    .task-form input,
+    .task-form select,
+    .task-form textarea {{
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+      padding: 7px 9px;
+    }}
+    .task-form textarea {{
+      min-height: 88px;
+      resize: vertical;
+    }}
+    .form-actions {{
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }}
   </style>
 </head>
 <body>
   <header>
-    <h1>{project_name}</h1>
-    <div class="subtitle">Backlog.md board with drag-and-drop status movement</div>
+    <div>
+      <h1>{project_name}</h1>
+      <div class="subtitle">Backlog.md board with task creation and drag-and-drop status movement</div>
+    </div>
+    <button class="primary-button" type="button" id="task-create-open">New task</button>
   </header>
   <main class="board">
 {column_markup}
   </main>
+  <dialog id="task-create-dialog" aria-labelledby="task-create-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="task-create-title">New task</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <form class="task-form" id="task-create-form">
+        <label>Title
+          <input name="title" autocomplete="off" required>
+        </label>
+        <label>Status
+          <select name="status">{status_options}</select>
+        </label>
+        <label>Description
+          <textarea name="description"></textarea>
+        </label>
+        <label>Acceptance Criteria
+          <textarea name="acceptanceCriteria"></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="secondary-button" type="button" id="task-create-cancel">Cancel</button>
+          <button class="primary-button" type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-dialog-title">Task details</h2>
@@ -438,6 +531,8 @@ def render_board_html(project: BacklogProject) -> str:
   <script>
     let draggedTaskId = null;
     const taskDialog = document.getElementById("task-dialog");
+    const taskCreateDialog = document.getElementById("task-create-dialog");
+    const taskCreateForm = document.getElementById("task-create-form");
 
     function setText(id, value) {{
       const element = document.getElementById(id);
@@ -485,6 +580,41 @@ def render_board_html(project: BacklogProject) -> str:
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
       else if (taskDialog) taskDialog.setAttribute("open", "open");
     }}
+
+    function openTaskCreate() {{
+      if (taskCreateForm) taskCreateForm.reset();
+      if (taskCreateDialog && taskCreateDialog.showModal) taskCreateDialog.showModal();
+      else if (taskCreateDialog) taskCreateDialog.setAttribute("open", "open");
+    }}
+
+    async function submitTaskCreate(event) {{
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const criteria = String(data.get("acceptanceCriteria") || "")
+        .split("\\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const response = await fetch("/api/tasks", {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{
+          title: String(data.get("title") || ""),
+          status: String(data.get("status") || ""),
+          description: String(data.get("description") || ""),
+          acceptanceCriteria: criteria,
+        }}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      window.location.reload();
+    }}
+
+    document.getElementById("task-create-open")?.addEventListener("click", openTaskCreate);
+    document.getElementById("task-create-cancel")?.addEventListener("click", () => taskCreateDialog?.close());
+    taskCreateForm?.addEventListener("submit", submitTaskCreate);
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{
@@ -558,6 +688,10 @@ def _render_task(raw_task: object) -> str:
 {meta}
         <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button></div>
       </article>"""
+
+
+def _render_status_options(statuses: list[str]) -> str:
+    return "".join(f'<option value="{escape(status)}">{escape(status)}</option>' for status in statuses)
 
 
 def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
@@ -665,3 +799,62 @@ def _status_from_payload(payload: object) -> str:
     if not isinstance(status, str) or not status.strip():
         raise ValueError("Request body field status must be a non-empty string")
     return status
+
+
+def _task_create_kwargs_from_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    title = _required_string_field(payload, "title")
+    create_kwargs: dict[str, object] = {"title": title}
+    for payload_key, repository_key in (
+        ("status", "status"),
+        ("description", "description"),
+        ("priority", "priority"),
+        ("milestone", "milestone"),
+    ):
+        value = _optional_string_field(payload, payload_key)
+        if value is not None:
+            create_kwargs[repository_key] = value
+    for payload_key, repository_key in (
+        ("acceptanceCriteria", "acceptance_criteria"),
+        ("definitionOfDone", "definition_of_done"),
+        ("assignees", "assignees"),
+        ("labels", "labels"),
+    ):
+        value = _optional_string_list_field(payload, payload_key)
+        if value is not None:
+            create_kwargs[repository_key] = value
+    return create_kwargs
+
+
+def _required_string_field(payload: dict[object, object], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Request body field {field} must be a non-empty string")
+    return value.strip()
+
+
+def _optional_string_field(payload: dict[object, object], field: str) -> str | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Request body field {field} must be a string")
+    normalized = value.strip()
+    return normalized or None
+
+
+def _optional_string_list_field(payload: dict[object, object], field: str) -> list[str] | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError(f"Request body field {field} must be a list of strings")
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"Request body field {field} must be a list of strings")
+        stripped = item.strip()
+        if stripped:
+            normalized.append(stripped)
+    return normalized

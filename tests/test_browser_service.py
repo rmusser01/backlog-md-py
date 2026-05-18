@@ -93,6 +93,115 @@ def test_browser_board_html_exposes_readonly_task_detail_dialog(tmp_path):
     assert "/api/tasks/" in html
 
 
+def test_browser_task_create_endpoint_creates_task_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks",
+            {
+                "title": "Browser created task",
+                "status": "To Do",
+                "description": "Created through the browser service.",
+                "acceptanceCriteria": ["Visible on the board"],
+                "assignees": ["codex"],
+                "labels": ["browser"],
+                "priority": "medium",
+            },
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 201
+    task = response["body"]["task"]
+    assert lock_operations == [(repo, "browser_task_create")]
+    assert task["id"] == "TASK-2"
+    assert task["title"] == "Browser created task"
+    assert task["description"] == "Created through the browser service."
+    assert task["acceptanceCriteria"] == [
+        {"checked": False, "itemId": "1", "text": "Visible on the board"}
+    ]
+    assert board["columns"]["To Do"][0]["id"] == "TASK-2"
+    assert "title: Browser created task" in _created_task_file(repo).read_text(encoding="utf-8")
+
+
+def test_browser_task_create_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = sorted(path.name for path in (repo / "backlog" / "tasks").glob("*.md"))
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/tasks", {"title": "   "})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    after = sorted(path.name for path in (repo / "backlog" / "tasks").glob("*.md"))
+    assert after == before
+
+
+def test_browser_task_create_endpoint_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = sorted(path.name for path in (repo / "backlog" / "tasks").glob("*.md"))
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks",
+                {"title": "Rejected browser task"},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    after = sorted(path.name for path in (repo / "backlog" / "tasks").glob("*.md"))
+    assert after == before
+
+
+def test_browser_board_html_exposes_task_create_dialog(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="task-create-dialog"' in html
+    assert 'id="task-create-form"' in html
+    assert 'name="title"' in html
+    assert 'name="status"' in html
+    assert 'name="description"' in html
+    assert "submitTaskCreate" in html
+    assert "/api/tasks" in html
+
+
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -264,6 +373,12 @@ def _task_file(repo: Path) -> Path:
     return matches[0]
 
 
+def _created_task_file(repo: Path) -> Path:
+    matches = sorted((repo / "backlog" / "tasks").glob("task-2 -*.md"))
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _get_json(url: str) -> object:
     return json.loads(_get_text(url))
 
@@ -274,6 +389,10 @@ def _get_text(url: str) -> str:
 
 
 def _post_json(url: str, payload: object, *, origin: str | None = None) -> object:
+    return _post_json_response(url, payload, origin=origin)["body"]
+
+
+def _post_json_response(url: str, payload: object, *, origin: str | None = None) -> dict[str, object]:
     headers = {"Content-Type": "application/json"}
     if origin is not None:
         headers["Origin"] = origin
@@ -284,4 +403,7 @@ def _post_json(url: str, payload: object, *, origin: str | None = None) -> objec
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=2) as response:
-        return json.loads(response.read().decode("utf-8"))
+        return {
+            "status": response.status,
+            "body": json.loads(response.read().decode("utf-8")),
+        }

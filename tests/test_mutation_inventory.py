@@ -43,6 +43,7 @@ def test_mutation_by_name_returns_named_surface():
 
     assert surface.name == "task_create"
     assert "backlog_py.cli.main" in surface.entrypoints
+    assert "backlog_py.browser.service" in surface.entrypoints
 
 
 def test_mutation_by_name_rejects_unknown_surface():
