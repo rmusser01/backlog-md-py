@@ -150,6 +150,27 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.CREATED, {"task": _task_detail_payload(task, project=self.server.project)})
             return
 
+        edit_task_id = _task_edit_endpoint_task_id(path)
+        if edit_task_id is not None:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                edit_kwargs = _task_edit_kwargs_from_payload(self._read_json_body())
+                task = with_project_write_lock(
+                    self.server.project,
+                    "browser_task_edit",
+                    lambda: MutableRepository(self.server.project).edit_task(edit_task_id, **edit_kwargs),
+                )
+            except KeyError:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {edit_task_id}"})
+                return
+            except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            return
+
         task_id = _status_endpoint_task_id(path)
         if task_id is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
@@ -207,7 +228,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
 
 def render_board_html(project: BacklogProject) -> str:
-    """Render a browser board with basic task creation and status movement."""
+    """Render a browser board with basic task creation, editing, and status movement."""
     payload = build_board_payload(project)
     project_name = escape(project.config.project_name)
     columns_obj = payload["columns"]
@@ -329,6 +350,8 @@ def render_board_html(project: BacklogProject) -> str:
     .task-actions {{
       display: flex;
       justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
       margin-top: 10px;
     }}
     button {{
@@ -461,7 +484,7 @@ def render_board_html(project: BacklogProject) -> str:
   <header>
     <div>
       <h1>{project_name}</h1>
-      <div class="subtitle">Backlog.md board with task creation and drag-and-drop status movement</div>
+      <div class="subtitle">Backlog.md board with task creation, editing, and drag-and-drop status movement</div>
     </div>
     <button class="primary-button" type="button" id="task-create-open">New task</button>
   </header>
@@ -492,6 +515,34 @@ def render_board_html(project: BacklogProject) -> str:
         <div class="form-actions">
           <button class="secondary-button" type="button" id="task-create-cancel">Cancel</button>
           <button class="primary-button" type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+  <dialog id="task-edit-dialog" aria-labelledby="task-edit-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="task-edit-title">Edit task</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <form class="task-form" id="task-edit-form">
+        <label>Title
+          <input name="title" autocomplete="off" required>
+        </label>
+        <label>Status
+          <select name="status">{status_options}</select>
+        </label>
+        <label>Description
+          <textarea name="description"></textarea>
+        </label>
+        <label>Acceptance Criteria
+          <textarea name="acceptanceCriteria"></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="secondary-button" type="button" id="task-edit-cancel">Cancel</button>
+          <button class="primary-button" type="submit">Save</button>
         </div>
       </form>
     </div>
@@ -533,6 +584,8 @@ def render_board_html(project: BacklogProject) -> str:
     const taskDialog = document.getElementById("task-dialog");
     const taskCreateDialog = document.getElementById("task-create-dialog");
     const taskCreateForm = document.getElementById("task-create-form");
+    const taskEditDialog = document.getElementById("task-edit-dialog");
+    const taskEditForm = document.getElementById("task-edit-form");
 
     function setText(id, value) {{
       const element = document.getElementById(id);
@@ -558,6 +611,10 @@ def render_board_html(project: BacklogProject) -> str:
       }});
     }}
 
+    function checklistText(items) {{
+      return (items || []).map((item) => item.text || "").filter(Boolean).join("\\n");
+    }}
+
     async function openTaskDetails(taskId) {{
       const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}`);
       if (!response.ok) {{
@@ -579,6 +636,24 @@ def render_board_html(project: BacklogProject) -> str:
       renderChecklist("task-dialog-dod", task.definitionOfDone);
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
       else if (taskDialog) taskDialog.setAttribute("open", "open");
+    }}
+
+    async function openTaskEdit(taskId) {{
+      const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}`);
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const task = await response.json();
+      if (!taskEditForm) return;
+      taskEditForm.dataset.taskId = task.id;
+      taskEditForm.elements.title.value = task.title || "";
+      taskEditForm.elements.status.value = task.status || "";
+      taskEditForm.elements.description.value = task.description || "";
+      taskEditForm.elements.acceptanceCriteria.value = checklistText(task.acceptanceCriteria);
+      setText("task-edit-title", `${{task.id}} - Edit task`);
+      if (taskEditDialog && taskEditDialog.showModal) taskEditDialog.showModal();
+      else if (taskEditDialog) taskEditDialog.setAttribute("open", "open");
     }}
 
     function openTaskCreate() {{
@@ -612,14 +687,49 @@ def render_board_html(project: BacklogProject) -> str:
       window.location.reload();
     }}
 
+    async function submitTaskEdit(event) {{
+      event.preventDefault();
+      const form = event.currentTarget;
+      const taskId = form.dataset.taskId;
+      if (!taskId) return;
+      const data = new FormData(form);
+      const criteria = String(data.get("acceptanceCriteria") || "")
+        .split("\\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}/edit`, {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{
+          title: String(data.get("title") || ""),
+          status: String(data.get("status") || ""),
+          description: String(data.get("description") || ""),
+          acceptanceCriteria: criteria,
+        }}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      window.location.reload();
+    }}
+
     document.getElementById("task-create-open")?.addEventListener("click", openTaskCreate);
     document.getElementById("task-create-cancel")?.addEventListener("click", () => taskCreateDialog?.close());
     taskCreateForm?.addEventListener("submit", submitTaskCreate);
+    document.getElementById("task-edit-cancel")?.addEventListener("click", () => taskEditDialog?.close());
+    taskEditForm?.addEventListener("submit", submitTaskEdit);
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{
         event.stopPropagation();
         openTaskDetails(button.dataset.taskDetails);
+      }});
+    }});
+    document.querySelectorAll("[data-task-edit]").forEach((button) => {{
+      button.addEventListener("click", (event) => {{
+        event.stopPropagation();
+        openTaskEdit(button.dataset.taskEdit);
       }});
     }});
 
@@ -686,7 +796,7 @@ def _render_task(raw_task: object) -> str:
         <div class="task-id">{task_id}</div>
         <div class="task-title">{title}</div>
 {meta}
-        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button></div>
+        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button><button class="details-button" type="button" data-task-edit="{task_id}">Edit</button></div>
       </article>"""
 
 
@@ -782,6 +892,17 @@ def _status_endpoint_task_id(path: str) -> str | None:
     return unquote(encoded_task_id)
 
 
+def _task_edit_endpoint_task_id(path: str) -> str | None:
+    prefix = "/api/tasks/"
+    suffix = "/edit"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    encoded_task_id = path[len(prefix) : -len(suffix)]
+    if not encoded_task_id or "/" in encoded_task_id:
+        return None
+    return unquote(encoded_task_id)
+
+
 def _task_detail_endpoint_task_id(path: str) -> str | None:
     prefix = "/api/tasks/"
     if not path.startswith(prefix):
@@ -827,10 +948,34 @@ def _task_create_kwargs_from_payload(payload: object) -> dict[str, object]:
     return create_kwargs
 
 
+def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    edit_kwargs: dict[str, object] = {}
+    for payload_key, repository_key in (("title", "title"), ("status", "status")):
+        if payload_key in payload:
+            edit_kwargs[repository_key] = _required_string_field(payload, payload_key)
+    if "description" in payload:
+        edit_kwargs["description"] = _required_text_field(payload, "description")
+    value = _optional_string_list_field(payload, "acceptanceCriteria")
+    if value is not None:
+        edit_kwargs["acceptance_criteria"] = value
+    if not edit_kwargs:
+        raise ValueError("Request body must include at least one editable field")
+    return edit_kwargs
+
+
 def _required_string_field(payload: dict[object, object], field: str) -> str:
     value = payload.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Request body field {field} must be a non-empty string")
+    return value.strip()
+
+
+def _required_text_field(payload: dict[object, object], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str):
+        raise ValueError(f"Request body field {field} must be a string")
     return value.strip()
 
 

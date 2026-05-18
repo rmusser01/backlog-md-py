@@ -31,7 +31,7 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
     ),
     MutationSurface(
         "task_edit",
-        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        ("backlog_py.cli.main", "backlog_py.mcp.tools", "backlog_py.browser.service"),
         "project",
         "Rewrites active task markdown and may change task status metadata.",
     ),

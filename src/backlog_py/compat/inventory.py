@@ -195,6 +195,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "basic browser task create endpoint and form",
         ),
         _implemented(
+            "browser:task-edit-form",
+            "browser-implemented",
+            "web task edit form",
+            "basic browser task edit endpoint and form",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",

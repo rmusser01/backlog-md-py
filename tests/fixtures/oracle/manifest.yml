@@ -194,6 +194,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:task-edit-form"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "cli:interactive-board"
     command: ["backlog", "board"]
     agent_critical: false
