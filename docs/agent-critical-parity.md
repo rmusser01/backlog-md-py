@@ -85,6 +85,7 @@ do not block the first local-file agent cutover candidate.
 | cli:task-plain-detail | implemented | task and draft plain detail output with file path, status, dates, and checklist sections | cli:task-plain-detail |
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
+| browser:task-detail-view | implemented | read-only browser task detail endpoint and dialog | browser:task-detail-view |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 | core:task-timestamps | implemented | created_date on task/draft create and updated_date on task edits | core:task-timestamps |
 | core:date-only-timestamps | implemented | includeDatetimeInDates controls created_date and updated_date timestamp precision | core:date-only-timestamps |

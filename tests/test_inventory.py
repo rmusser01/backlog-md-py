@@ -23,6 +23,8 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["browser:kanban-drag-drop"].status == "implemented"
     assert by_name["browser:custom-port-service"].classification == "browser-implemented"
     assert by_name["browser:custom-port-service"].status == "implemented"
+    assert by_name["browser:task-detail-view"].classification == "browser-implemented"
+    assert by_name["browser:task-detail-view"].status == "implemented"
     assert by_name["cli:interactive-board"].classification == "interactive-implemented"
     assert by_name["cli:interactive-board"].status == "implemented"
     assert by_name["cli:interactive-overview"].classification == "interactive-implemented"

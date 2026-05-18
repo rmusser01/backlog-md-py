@@ -117,6 +117,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
             return
+        task_id = _task_detail_endpoint_task_id(path)
+        if task_id is not None:
+            try:
+                task = ReadOnlyRepository(self.server.project).get_task(task_id)
+            except KeyError:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
+                return
+            self._send_json(HTTPStatus.OK, _task_detail_payload(task, project=self.server.project))
+            return
         if path in {"", "/", "/index.html"}:
             self._send_html(HTTPStatus.OK, render_board_html(self.server.project))
             return
@@ -281,11 +290,108 @@ def render_board_html(project: BacklogProject) -> str:
       margin-top: 4px;
       overflow-wrap: anywhere;
     }}
+    .task-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .badge {{
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+    }}
+    .task-actions {{
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }}
+    button {{
+      color: inherit;
+      font: inherit;
+    }}
+    .details-button,
+    .dialog-close {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 4px 9px;
+      cursor: pointer;
+    }}
+    .details-button:hover,
+    .dialog-close:hover {{
+      border-color: var(--accent);
+    }}
     .empty {{
       color: var(--muted);
       border: 1px dashed var(--border);
       border-radius: 8px;
       padding: 12px;
+    }}
+    dialog {{
+      max-width: min(720px, calc(100vw - 32px));
+      width: 720px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 0;
+    }}
+    dialog::backdrop {{
+      background: rgb(0 0 0 / 0.35);
+    }}
+    .dialog-header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+      border-bottom: 1px solid var(--border);
+      padding: 16px;
+    }}
+    .dialog-title {{
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+    }}
+    .dialog-body {{
+      padding: 16px;
+    }}
+    .dialog-meta {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px 16px;
+      margin: 0 0 16px;
+      color: var(--muted);
+    }}
+    .dialog-meta dt {{
+      font-weight: 650;
+      color: var(--text);
+    }}
+    .dialog-meta dd {{
+      margin: 0;
+    }}
+    .dialog-section {{
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      margin-top: 12px;
+    }}
+    .dialog-section h3 {{
+      margin: 0 0 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: 0;
+    }}
+    .dialog-section p {{
+      margin: 0;
+      white-space: pre-wrap;
+    }}
+    .dialog-section ul {{
+      margin: 0;
+      padding-left: 20px;
     }}
   </style>
 </head>
@@ -297,8 +403,96 @@ def render_board_html(project: BacklogProject) -> str:
   <main class="board">
 {column_markup}
   </main>
+  <dialog id="task-dialog" aria-labelledby="task-dialog-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="task-dialog-title">Task details</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <dl class="dialog-meta">
+        <div><dt>Status</dt><dd id="task-dialog-status"></dd></div>
+        <div><dt>File</dt><dd id="task-dialog-path"></dd></div>
+        <div><dt>Created</dt><dd id="task-dialog-created"></dd></div>
+        <div><dt>Updated</dt><dd id="task-dialog-updated"></dd></div>
+        <div><dt>Priority</dt><dd id="task-dialog-priority"></dd></div>
+        <div><dt>Assignees</dt><dd id="task-dialog-assignees"></dd></div>
+        <div><dt>Labels</dt><dd id="task-dialog-labels"></dd></div>
+        <div><dt>Milestone</dt><dd id="task-dialog-milestone"></dd></div>
+      </dl>
+      <section class="dialog-section">
+        <h3>Description</h3>
+        <p id="task-dialog-description"></p>
+      </section>
+      <section class="dialog-section">
+        <h3>Acceptance Criteria</h3>
+        <ul id="task-dialog-acceptance"></ul>
+      </section>
+      <section class="dialog-section">
+        <h3>Definition of Done</h3>
+        <ul id="task-dialog-dod"></ul>
+      </section>
+    </div>
+  </dialog>
   <script>
     let draggedTaskId = null;
+    const taskDialog = document.getElementById("task-dialog");
+
+    function setText(id, value) {{
+      const element = document.getElementById(id);
+      if (element) element.textContent = value || "—";
+    }}
+
+    function renderChecklist(id, items) {{
+      const list = document.getElementById(id);
+      if (!list) return;
+      list.replaceChildren();
+      if (!items || items.length === 0) {{
+        const empty = document.createElement("li");
+        empty.textContent = "No items";
+        list.appendChild(empty);
+        return;
+      }}
+      items.forEach((item) => {{
+        const li = document.createElement("li");
+        const mark = item.checked ? "[x]" : "[ ]";
+        const itemId = item.itemId ? `#${{item.itemId}} ` : "";
+        li.textContent = `${{mark}} ${{itemId}}${{item.text}}`;
+        list.appendChild(li);
+      }});
+    }}
+
+    async function openTaskDetails(taskId) {{
+      const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}`);
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const task = await response.json();
+      setText("task-dialog-title", `${{task.id}} - ${{task.title}}`);
+      setText("task-dialog-status", task.status);
+      setText("task-dialog-path", task.path);
+      setText("task-dialog-created", task.createdDate);
+      setText("task-dialog-updated", task.updatedDate);
+      setText("task-dialog-priority", task.priority);
+      setText("task-dialog-assignees", (task.assignees || []).join(", "));
+      setText("task-dialog-labels", (task.labels || []).join(", "));
+      setText("task-dialog-milestone", task.milestone);
+      setText("task-dialog-description", task.description);
+      renderChecklist("task-dialog-acceptance", task.acceptanceCriteria);
+      renderChecklist("task-dialog-dod", task.definitionOfDone);
+      if (taskDialog && taskDialog.showModal) taskDialog.showModal();
+      else if (taskDialog) taskDialog.setAttribute("open", "open");
+    }}
+
+    document.querySelectorAll("[data-task-details]").forEach((button) => {{
+      button.addEventListener("click", (event) => {{
+        event.stopPropagation();
+        openTaskDetails(button.dataset.taskDetails);
+      }});
+    }});
+
     document.querySelectorAll("[data-task-id]").forEach((task) => {{
       task.addEventListener("dragstart", (event) => {{
         draggedTaskId = task.dataset.taskId;
@@ -350,9 +544,19 @@ def _render_task(raw_task: object) -> str:
     task = raw_task if isinstance(raw_task, dict) else {}
     task_id = escape(str(task.get("id", "")))
     title = escape(str(task.get("title", "")))
+    priority = _metadata_string(task.get("priority"))
+    assignees = task.get("assignees")
+    labels = task.get("labels")
+    meta = _render_task_meta(
+        priority=priority,
+        assignees=assignees if isinstance(assignees, list) else [],
+        labels=labels if isinstance(labels, list) else [],
+    )
     return f"""      <article class="task" data-task-id="{task_id}" draggable="true">
         <div class="task-id">{task_id}</div>
         <div class="task-title">{title}</div>
+{meta}
+        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button></div>
       </article>"""
 
 
@@ -367,7 +571,52 @@ def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, obj
         "labels": _metadata_list(frontmatter.get("labels")),
         "priority": _metadata_string(frontmatter.get("priority")),
         "milestone": _metadata_string(frontmatter.get("milestone")),
+        "createdDate": _metadata_string(frontmatter.get("created_date")),
+        "updatedDate": _metadata_string(frontmatter.get("updated_date")),
     }
+
+
+def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
+    payload = _task_payload(task, project=project)
+    payload.update(
+        {
+            "description": task.description or task.body.strip(),
+            "implementationNotes": _section_content(task, "IMPLEMENTATION_NOTES"),
+            "finalSummary": _section_content(task, "FINAL_SUMMARY"),
+            "acceptanceCriteria": _checklist_payload(task, "AC"),
+            "definitionOfDone": _checklist_payload(task, "DOD"),
+        }
+    )
+    return payload
+
+
+def _checklist_payload(task: TaskRecord, marker: str) -> list[dict[str, object]]:
+    return [
+        {
+            "checked": item.checked,
+            "itemId": item.item_id,
+            "text": item.text,
+        }
+        for item in task.parsed.checklists.get(marker, [])
+    ]
+
+
+def _section_content(task: TaskRecord, section_name: str) -> str:
+    section = task.parsed.sections.get(section_name)
+    return "" if section is None else section.content.strip()
+
+
+def _render_task_meta(*, priority: str | None, assignees: list[object], labels: list[object]) -> str:
+    badges: list[str] = []
+    if priority:
+        badges.append(f'<span class="badge">Priority: {escape(priority)}</span>')
+    for assignee in assignees[:2]:
+        badges.append(f'<span class="badge">@{escape(str(assignee).lstrip("@"))}</span>')
+    for label in labels[:2]:
+        badges.append(f'<span class="badge">{escape(str(label))}</span>')
+    if not badges:
+        return ""
+    return f'        <div class="task-meta">{"".join(badges)}</div>'
 
 
 def _metadata_list(value: object) -> list[str]:
@@ -395,6 +644,16 @@ def _status_endpoint_task_id(path: str) -> str | None:
         return None
     encoded_task_id = path[len(prefix) : -len(suffix)]
     if not encoded_task_id:
+        return None
+    return unquote(encoded_task_id)
+
+
+def _task_detail_endpoint_task_id(path: str) -> str | None:
+    prefix = "/api/tasks/"
+    if not path.startswith(prefix):
+        return None
+    encoded_task_id = path[len(prefix):]
+    if not encoded_task_id or "/" in encoded_task_id:
         return None
     return unquote(encoded_task_id)
 

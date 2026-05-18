@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 75,
+        "implemented": 76,
         "deferred": 1,
-        "total": 76,
+        "total": 77,
     }
     assert report["categories"]["cli"] == {
         "implemented": 44,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 2,
+        "implemented": 3,
         "deferred": 0,
-        "total": 2,
+        "total": 3,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -66,4 +66,5 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["git:auto-commit"]["status"] == "implemented"
     assert items_by_name["browser:custom-port-service"]["status"] == "implemented"
     assert items_by_name["browser:kanban-drag-drop"]["status"] == "implemented"
+    assert items_by_name["browser:task-detail-view"]["status"] == "implemented"
     assert deferred_by_name["git:hook-bypass"]["reason"] == "Hook bypass remains unsupported for safety."

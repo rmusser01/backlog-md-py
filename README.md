@@ -142,9 +142,9 @@ Browser editor/settings gaps and the remaining hook-bypass decision are
 tracked separately from the first agent cutover candidate:
 
 - `docs/browser-parity.md` records browser requirements such as rich Markdown
-  editing and mobile behavior. The custom-port browser service and drag/drop
-  status movement are implemented, but interactive browser editing remains
-  deferred.
+  editing and mobile behavior. The custom-port browser service, drag/drop
+  status movement, and read-only task detail dialog are implemented, but
+  interactive browser editing remains deferred.
 - `docs/interactive-deferrals.md` records the implemented task detail/editor,
   search filter, board, and overview flows, remaining CLI/TUI deferrals, hook
   bypass, fetch-only remote operations, and the opt-in auto-commit runtime policy.

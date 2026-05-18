@@ -47,8 +47,8 @@ The Python clone keeps these features out of the first cutover path:
   without changing non-interactive `overview` output.
 - `backlog config` now provides the guided config wizard for human operators.
 - Browser `defaultPort` and `autoOpenBrowser` effects are implemented for the
-  loopback browser service; remaining TUI effects of extended config keys stay
-  deferred.
+  loopback browser service; the browser also exposes read-only task detail
+  inspection; remaining TUI effects of extended config keys stay deferred.
 - `onStatusChange` is supported only when explicitly configured; task-level
   hooks override the project hook, and hook failures do not block status writes.
 - `autoCommit` is opt-in and local-only. It runs after project write mutations

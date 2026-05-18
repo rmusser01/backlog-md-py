@@ -40,6 +40,59 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "Example task" in html
 
 
+def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert task["id"] == "TASK-1"
+    assert task["title"] == "Example task"
+    assert task["path"] == "backlog/tasks/task-1 - Example-task.md"
+    assert task["createdDate"] == "2026-05-10 10:00"
+    assert task["description"].startswith("Implement a fixture")
+    assert task["acceptanceCriteria"][0] == {
+        "checked": True,
+        "itemId": "1",
+        "text": "Preserve completed acceptance criteria raw line",
+    }
+    assert task["acceptanceCriteria"][2] == {
+        "checked": False,
+        "itemId": None,
+        "text": "Plain checklist item without an id",
+    }
+    assert task["definitionOfDone"][1] == {
+        "checked": False,
+        "itemId": "2",
+        "text": "Verification recorded",
+    }
+
+
+def test_browser_board_html_exposes_readonly_task_detail_dialog(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="task-dialog"' in html
+    assert 'data-task-details="TASK-1"' in html
+    assert "openTaskDetails" in html
+    assert "Acceptance Criteria" in html
+    assert "/api/tasks/" in html
+
+
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
