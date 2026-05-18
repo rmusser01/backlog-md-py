@@ -12,6 +12,7 @@ Supported resources:
 - backlog://docs/task-workflow
 
 Supported tools:
+- project_status(project, recentLimit=5)
 - task_board(project)
 - task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, parentTaskId=None, search=None)
 - task_search(project, query="", limit=10, *, status=None, priority=None, modified_files=None)

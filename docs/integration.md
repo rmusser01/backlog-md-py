@@ -81,11 +81,22 @@ a Python process:
 ```python
 from pathlib import Path
 
-from backlog_py.mcp import read_resource, task_archive, task_board, task_complete, task_edit, task_list, task_search, task_view
+from backlog_py.mcp import (
+    project_status,
+    read_resource,
+    task_archive,
+    task_board,
+    task_complete,
+    task_edit,
+    task_list,
+    task_search,
+    task_view,
+)
 from backlog_py.storage.project import discover_project
 
 project = discover_project(Path("/path/to/copied/project"))
 print(read_resource("backlog://workflow/overview"))
+print(project_status(project))
 print(task_board(project))
 print(task_list(project, status="In Progress", assignee="codex", labels=["implementation"], priority="high", milestone="Release 1", search="release", limit=10))
 print(task_search(project, "release", status="In Progress", priority="high", modified_files=["src/api.py"], limit=5))

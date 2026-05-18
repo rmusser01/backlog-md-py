@@ -68,6 +68,10 @@ HTTP-capable MCP clients can call the daemon endpoint directly, but most local
 agent configs should prefer the stdio shim so token discovery stays local to
 the package runtime record.
 
+Agents that need a cheap overlap check before writing can call the read-only
+`project_status` MCP tool. It reports the canonical project root, Backlog paths,
+task counts, recent task activity, and token-safe project lock metadata.
+
 ### No-Restart Legacy Command Shim
 
 Some already-running Codex app-server instances keep cached MCP commands for
