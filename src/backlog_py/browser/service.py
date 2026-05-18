@@ -171,6 +171,26 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
             return
 
+        archive_task_id = _task_archive_endpoint_task_id(path)
+        if archive_task_id is not None:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                task = with_project_write_lock(
+                    self.server.project,
+                    "browser_task_archive",
+                    lambda: MutableRepository(self.server.project).archive_task(archive_task_id),
+                )
+            except KeyError:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {archive_task_id}"})
+                return
+            except (TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            return
+
         task_id = _status_endpoint_task_id(path)
         if task_id is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
@@ -547,6 +567,21 @@ def render_board_html(project: BacklogProject) -> str:
       </form>
     </div>
   </dialog>
+  <dialog id="task-archive-dialog" aria-labelledby="task-archive-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="task-archive-title">Archive task</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <p>Archive <strong id="task-archive-name"></strong>?</p>
+      <div class="form-actions">
+        <button class="secondary-button" type="button" id="task-archive-cancel">Cancel</button>
+        <button class="primary-button" type="button" id="task-archive-confirm">Archive</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-dialog-title">Task details</h2>
@@ -586,6 +621,8 @@ def render_board_html(project: BacklogProject) -> str:
     const taskCreateForm = document.getElementById("task-create-form");
     const taskEditDialog = document.getElementById("task-edit-dialog");
     const taskEditForm = document.getElementById("task-edit-form");
+    const taskArchiveDialog = document.getElementById("task-archive-dialog");
+    const taskArchiveConfirm = document.getElementById("task-archive-confirm");
 
     function setText(id, value) {{
       const element = document.getElementById(id);
@@ -656,6 +693,20 @@ def render_board_html(project: BacklogProject) -> str:
       else if (taskEditDialog) taskEditDialog.setAttribute("open", "open");
     }}
 
+    async function openTaskArchive(taskId) {{
+      const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}`);
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const task = await response.json();
+      if (taskArchiveConfirm) taskArchiveConfirm.dataset.taskId = task.id;
+      setText("task-archive-title", `${{task.id}} - Archive task`);
+      setText("task-archive-name", task.title);
+      if (taskArchiveDialog && taskArchiveDialog.showModal) taskArchiveDialog.showModal();
+      else if (taskArchiveDialog) taskArchiveDialog.setAttribute("open", "open");
+    }}
+
     function openTaskCreate() {{
       if (taskCreateForm) taskCreateForm.reset();
       if (taskCreateDialog && taskCreateDialog.showModal) taskCreateDialog.showModal();
@@ -714,11 +765,29 @@ def render_board_html(project: BacklogProject) -> str:
       window.location.reload();
     }}
 
+    async function submitTaskArchive(event) {{
+      event.preventDefault();
+      const taskId = taskArchiveConfirm?.dataset.taskId;
+      if (!taskId) return;
+      const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}/archive`, {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{}}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      window.location.reload();
+    }}
+
     document.getElementById("task-create-open")?.addEventListener("click", openTaskCreate);
     document.getElementById("task-create-cancel")?.addEventListener("click", () => taskCreateDialog?.close());
     taskCreateForm?.addEventListener("submit", submitTaskCreate);
     document.getElementById("task-edit-cancel")?.addEventListener("click", () => taskEditDialog?.close());
     taskEditForm?.addEventListener("submit", submitTaskEdit);
+    document.getElementById("task-archive-cancel")?.addEventListener("click", () => taskArchiveDialog?.close());
+    taskArchiveConfirm?.addEventListener("click", submitTaskArchive);
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{
@@ -730,6 +799,12 @@ def render_board_html(project: BacklogProject) -> str:
       button.addEventListener("click", (event) => {{
         event.stopPropagation();
         openTaskEdit(button.dataset.taskEdit);
+      }});
+    }});
+    document.querySelectorAll("[data-task-archive]").forEach((button) => {{
+      button.addEventListener("click", (event) => {{
+        event.stopPropagation();
+        openTaskArchive(button.dataset.taskArchive);
       }});
     }});
 
@@ -796,7 +871,7 @@ def _render_task(raw_task: object) -> str:
         <div class="task-id">{task_id}</div>
         <div class="task-title">{title}</div>
 {meta}
-        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button><button class="details-button" type="button" data-task-edit="{task_id}">Edit</button></div>
+        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button><button class="details-button" type="button" data-task-edit="{task_id}">Edit</button><button class="details-button" type="button" data-task-archive="{task_id}">Archive</button></div>
       </article>"""
 
 
@@ -895,6 +970,17 @@ def _status_endpoint_task_id(path: str) -> str | None:
 def _task_edit_endpoint_task_id(path: str) -> str | None:
     prefix = "/api/tasks/"
     suffix = "/edit"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    encoded_task_id = path[len(prefix) : -len(suffix)]
+    if not encoded_task_id or "/" in encoded_task_id:
+        return None
+    return unquote(encoded_task_id)
+
+
+def _task_archive_endpoint_task_id(path: str) -> str | None:
+    prefix = "/api/tasks/"
+    suffix = "/archive"
     if not path.startswith(prefix) or not path.endswith(suffix):
         return None
     encoded_task_id = path[len(prefix) : -len(suffix)]

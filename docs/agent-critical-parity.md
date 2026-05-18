@@ -88,6 +88,7 @@ do not block the first local-file agent cutover candidate.
 | browser:task-detail-view | implemented | read-only browser task detail endpoint and dialog | browser:task-detail-view |
 | browser:task-create-form | implemented | basic browser task create endpoint and form | browser:task-create-form |
 | browser:task-edit-form | implemented | basic browser task edit endpoint and form | browser:task-edit-form |
+| browser:task-archive-confirmation | implemented | browser task archive endpoint and confirmation dialog | browser:task-archive-confirmation |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 | core:task-timestamps | implemented | created_date on task/draft create and updated_date on task edits | core:task-timestamps |
 | core:date-only-timestamps | implemented | includeDatetimeInDates controls created_date and updated_date timestamp precision | core:date-only-timestamps |

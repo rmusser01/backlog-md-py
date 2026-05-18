@@ -605,11 +605,11 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 78" in result.output
+    assert "implemented: 79" in result.output
     assert "deferred: 1" in result.output
-    assert "total: 79" in result.output
+    assert "total: 80" in result.output
     assert "cli: 44 implemented, 0 deferred, 44 total" in result.output
-    assert "browser: 5 implemented, 0 deferred, 5 total" in result.output
+    assert "browser: 6 implemented, 0 deferred, 6 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 3 implemented, 0 deferred, 3 total" in result.output
     assert "git: 2 implemented, 1 deferred, 3 total" in result.output
@@ -626,6 +626,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"browser:task-detail-view"' in result.output
     assert '"browser:task-create-form"' in result.output
     assert '"browser:task-edit-form"' in result.output
+    assert '"browser:task-archive-confirmation"' in result.output
     assert '"core:task-timestamps"' in result.output
     assert '"core:date-only-timestamps"' in result.output
     assert '"status": "implemented"' in result.output

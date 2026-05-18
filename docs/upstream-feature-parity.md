@@ -74,13 +74,15 @@ larger task commands:
 - Basic browser task editing through the loopback service and in-page form for
   title, status, description, and Acceptance Criteria replacement, backed by
   the project write lock.
+- Browser task archiving through a confirmation dialog and locked loopback
+  service endpoint.
 
 ## Remaining Full-Parity Work
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, archive confirmations, settings, live updates | Basic board service, drag-and-drop status movement, basic task creation/editing, and read-only task detail dialogs are implemented; richer browser editing and settings UI remain deferred |
-| Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, task create/edit/detail JSON, and static board snapshot are implemented |
+| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, settings, live updates | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, and read-only task detail dialogs are implemented; richer browser editing and settings UI remain deferred |
+| Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, task create/edit/archive/detail JSON, and static board snapshot are implemented |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 

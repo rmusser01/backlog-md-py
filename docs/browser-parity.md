@@ -23,7 +23,7 @@ full clone unless explicitly rejected.
 | Acceptance criteria editor | Required for full clone | Basic replacement implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer; rich AC check-state editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Not required for agent cutover | DoD defaults exist through config helpers, CLI, and MCP; browser settings can layer on the same safe core later. |
 | Real-time updates | Required for full clone | Intentionally deferred | Live browser state needs a service process or polling contract and concurrent mutation tests. |
-| Archive confirmations | Required for full clone | Not required for agent cutover | Agents use explicit archive/complete operations; browser confirmation UX belongs to a later human UI milestone. |
+| Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
 | Rich Markdown editing | Required for full clone | Intentionally deferred | Rich editing must preserve unknown Markdown and frontmatter exactly, so it needs round-trip visual and parser tests. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
 | Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
@@ -34,9 +34,9 @@ full clone unless explicitly rejected.
 
 A later browser milestone should not be marked complete until it has:
 
-- End-to-end browser tests for archive confirmation, settings, rich edit, and
-  checklist-state flows beyond the implemented drag-and-drop status movement,
-  basic create/edit forms, and read-only task detail inspection.
+- End-to-end browser tests for settings, rich edit, and checklist-state flows
+  beyond the implemented drag-and-drop status movement, basic create/edit
+  forms, archive confirmation, and read-only task detail inspection.
 - Responsive checks for desktop and mobile viewports.
 - A clear service mode lifecycle for any richer browser UI behavior, including
   logging and live-update shutdown policy.

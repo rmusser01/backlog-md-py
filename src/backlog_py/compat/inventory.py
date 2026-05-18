@@ -201,6 +201,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "basic browser task edit endpoint and form",
         ),
         _implemented(
+            "browser:task-archive-confirmation",
+            "browser-implemented",
+            "web task archive confirmation",
+            "browser task archive endpoint and confirmation dialog",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",
