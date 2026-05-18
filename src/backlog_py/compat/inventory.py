@@ -207,6 +207,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser task archive endpoint and confirmation dialog",
         ),
         _implemented(
+            "browser:checklist-state-controls",
+            "browser-implemented",
+            "web task checklist controls",
+            "browser checklist state endpoint and task detail controls",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",

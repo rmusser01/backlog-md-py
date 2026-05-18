@@ -31,6 +31,8 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["browser:task-edit-form"].status == "implemented"
     assert by_name["browser:task-archive-confirmation"].classification == "browser-implemented"
     assert by_name["browser:task-archive-confirmation"].status == "implemented"
+    assert by_name["browser:checklist-state-controls"].classification == "browser-implemented"
+    assert by_name["browser:checklist-state-controls"].status == "implemented"
     assert by_name["cli:interactive-board"].classification == "interactive-implemented"
     assert by_name["cli:interactive-board"].status == "implemented"
     assert by_name["cli:interactive-overview"].classification == "interactive-implemented"
