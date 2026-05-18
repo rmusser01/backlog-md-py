@@ -46,6 +46,13 @@ def test_mutation_by_name_returns_named_surface():
     assert "backlog_py.browser.service" in surface.entrypoints
 
 
+def test_task_edit_mutation_records_browser_entrypoint():
+    surface = mutation_by_name("task_edit")
+
+    assert surface.lock_scope == "project"
+    assert "backlog_py.browser.service" in surface.entrypoints
+
+
 def test_mutation_by_name_rejects_unknown_surface():
     try:
         mutation_by_name("unknown")

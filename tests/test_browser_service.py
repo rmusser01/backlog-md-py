@@ -202,6 +202,124 @@ def test_browser_board_html_exposes_task_create_dialog(tmp_path):
     assert "/api/tasks" in html
 
 
+def test_browser_task_edit_endpoint_updates_owned_fields_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/edit",
+            {
+                "title": "Browser edited task",
+                "status": "To Do",
+                "description": "Edited through the browser service.",
+                "acceptanceCriteria": ["Edited criterion"],
+            },
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    task = response["body"]["task"]
+    assert lock_operations == [(repo, "browser_task_edit")]
+    assert task["id"] == "TASK-1"
+    assert task["title"] == "Browser edited task"
+    assert task["status"] == "To Do"
+    assert task["description"] == "Edited through the browser service."
+    assert task["acceptanceCriteria"] == [
+        {"checked": False, "itemId": "1", "text": "Edited criterion"}
+    ]
+    assert detail["title"] == "Browser edited task"
+    assert board["columns"]["In Progress"] == []
+    assert board["columns"]["To Do"][0]["id"] == "TASK-1"
+    edited_source = _task_file(repo).read_text(encoding="utf-8")
+    assert "title: Browser edited task" in edited_source
+    assert "status: To Do" in edited_source
+    assert "Edited through the browser service." in edited_source
+    assert "- [ ] #1 Edited criterion" in edited_source
+    assert "Preserve completed acceptance criteria raw line" not in edited_source
+
+
+def test_browser_task_edit_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/edit",
+                {"title": "", "acceptanceCriteria": "Edited criterion"},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_task_edit_endpoint_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/edit",
+                {"title": "Rejected browser edit"},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="task-edit-dialog"' in html
+    assert 'id="task-edit-form"' in html
+    assert 'data-task-edit="TASK-1"' in html
+    assert 'name="title"' in html
+    assert 'name="status"' in html
+    assert 'name="description"' in html
+    assert 'name="acceptanceCriteria"' in html
+    assert "submitTaskEdit" in html
+    assert "/api/tasks/" in html
+
+
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
