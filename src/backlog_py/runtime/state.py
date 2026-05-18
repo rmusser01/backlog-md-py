@@ -125,6 +125,16 @@ def delete_runtime_record(layout: StateLayout) -> None:
 
 def runtime_status(record: RuntimeRecord) -> dict[str, object]:
     """Return a JSON-safe runtime status mapping without token material."""
+    from backlog_py.runtime.locks import list_runtime_locks
+
+    locks = list_runtime_locks()
+    known_projects = sorted(
+        {
+            str(lock["project_root"])
+            for lock in locks
+            if lock.get("kind") == "project" and isinstance(lock.get("project_root"), str)
+        }
+    )
     return {
         "pid": record.pid,
         "host": record.host,
@@ -133,6 +143,8 @@ def runtime_status(record: RuntimeRecord) -> dict[str, object]:
         "started_at": record.started_at,
         "version": record.version,
         "log_path": str(record.log_path),
+        "known_projects": known_projects,
+        "locks": locks,
     }
 
 

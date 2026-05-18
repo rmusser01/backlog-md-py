@@ -1666,6 +1666,15 @@ def _echo_daemon_status(record: RuntimeRecord, *, as_json: bool) -> None:
     click.echo(f"Daemon running at {status['endpoint']}")
     click.echo(f"PID: {status['pid']}")
     click.echo(f"Log: {status['log_path']}")
+    known_projects = status.get("known_projects")
+    if isinstance(known_projects, list) and known_projects:
+        click.echo("Known projects:")
+        for project_root in known_projects:
+            click.echo(f"  - {project_root}")
+    locks = status.get("locks")
+    if isinstance(locks, list) and locks:
+        active_count = sum(1 for lock in locks if isinstance(lock, dict) and lock.get("active") is True)
+        click.echo(f"Locks: {active_count} active / {len(locks)} tracked")
 
 
 def _format_task_metadata_lines(task_record: TaskRecord) -> list[str]:

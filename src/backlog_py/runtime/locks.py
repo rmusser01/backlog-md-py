@@ -9,7 +9,7 @@ import time
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, TextIO, TypeVar
+from typing import Callable, Mapping, TextIO, TypeVar
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.runtime.git import maybe_auto_commit, prepare_auto_commit
@@ -32,6 +32,7 @@ class ProjectWriteLock:
             key=project_lock_key(self.project_root),
             kind="project",
             operation=operation,
+            metadata={"project_root": str(self.project_root)},
         )
 
     @property
@@ -86,16 +87,30 @@ def with_project_write_lock(project: BacklogProject, operation: str, fn: Callabl
 
 def with_init_lock(target_root: Path, operation: str, fn: Callable[[], T]) -> T:
     """Run a callback while holding the init-root lock."""
-    lock = _RuntimeFileLock(key=init_lock_key(target_root), kind="init-root", operation=operation)
+    resolved_target = _resolve_path(target_root)
+    lock = _RuntimeFileLock(
+        key=init_lock_key(resolved_target),
+        kind="init-root",
+        operation=operation,
+        metadata={"target_root": str(resolved_target)},
+    )
     with lock.acquire():
         return fn()
 
 
 class _RuntimeFileLock:
-    def __init__(self, *, key: str, kind: str, operation: str) -> None:
+    def __init__(
+        self,
+        *,
+        key: str,
+        kind: str,
+        operation: str,
+        metadata: Mapping[str, object] | None = None,
+    ) -> None:
         self.key = key
         self.kind = kind
         self.operation = operation
+        self.metadata = dict(metadata or {})
         layout = ensure_state_layout()
         self.lock_path = layout.locks_dir / f"{key}.lock"
         self.metadata_path = layout.locks_dir / f"{key}.json"
@@ -128,12 +143,25 @@ class _RuntimeFileLock:
     def _write_metadata(self) -> None:
         metadata = {
             "acquired_at": datetime.now(timezone.utc).isoformat(),
+            "active": True,
             "kind": self.kind,
             "key": self.key,
             "operation": self.operation,
             "pid": os.getpid(),
+            **self.metadata,
         }
         _write_json(self.metadata_path, metadata)
+
+    def _write_released_metadata(self) -> None:
+        try:
+            raw = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(raw, dict):
+            return
+        raw["active"] = False
+        raw["released_at"] = datetime.now(timezone.utc).isoformat()
+        _write_json(self.metadata_path, raw)
 
 
 class _HeldRuntimeLock:
@@ -155,9 +183,64 @@ class _HeldRuntimeLock:
             return
         self._closed = True
         try:
+            with suppress(OSError, json.JSONDecodeError):
+                self.lock._write_released_metadata()
             _unlock(self._handle)
         finally:
             self._handle.close()
+
+
+def list_runtime_locks() -> list[dict[str, object]]:
+    """Return token-safe runtime lock metadata for daemon diagnostics."""
+    layout = ensure_state_layout()
+    locks: list[dict[str, object]] = []
+    for metadata_path in sorted(layout.locks_dir.glob("*.json")):
+        metadata = _read_lock_metadata(metadata_path)
+        if metadata is None:
+            continue
+        key = str(metadata.get("key") or metadata_path.stem)
+        lock_path = layout.locks_dir / f"{key}.lock"
+        metadata["lock_path"] = str(lock_path)
+        metadata["metadata_path"] = str(metadata_path)
+        metadata["active"] = _metadata_lock_is_active(metadata, lock_path)
+        locks.append(metadata)
+    return locks
+
+
+def _read_lock_metadata(path: Path) -> dict[str, object] | None:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return {str(key): value for key, value in raw.items() if _is_json_scalar_or_null(value)}
+
+
+def _metadata_lock_is_active(metadata: dict[str, object], lock_path: Path) -> bool:
+    if metadata.get("active") is not True:
+        return False
+    if metadata.get("pid") == os.getpid():
+        return True
+    return _lock_file_is_active(lock_path)
+
+
+def _lock_file_is_active(path: Path) -> bool:
+    try:
+        with path.open("a+", encoding="utf-8") as handle:
+            _prepare_lock_file(handle)
+            try:
+                _try_lock(handle)
+            except BlockingIOError:
+                return True
+            _unlock(handle)
+            return False
+    except OSError:
+        return False
+
+
+def _is_json_scalar_or_null(value: object) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
 
 
 def _path_digest(path: Path) -> str:
