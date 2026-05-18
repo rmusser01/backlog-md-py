@@ -18,6 +18,7 @@ full clone unless explicitly rejected.
 | --- | --- | --- | --- |
 | Responsive Kanban board | Required for full clone | Not required for agent cutover | Agents use `board`, task listing, and MCP tools; responsive browser layout is a human UI requirement. |
 | drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
+| Read-only task detail dialog | Required for full clone | Implemented for inspection | Browser cards can open a read-only detail dialog backed by `/api/tasks/<id>` for metadata, description, Acceptance Criteria, and Definition of Done. |
 | Task create/edit forms | Required for full clone | Not required for agent cutover | CLI and MCP task create/edit cover agent workflows; browser forms can follow after API and storage parity stabilize. |
 | Acceptance criteria editor | Required for full clone | Not required for agent cutover | Agent workflows already mutate AC checks through safe CLI/MCP paths; rich browser editing is later UI work. |
 | Definition of Done settings | Required for full clone | Not required for agent cutover | DoD defaults exist through config helpers, CLI, and MCP; browser settings can layer on the same safe core later. |
@@ -34,7 +35,8 @@ full clone unless explicitly rejected.
 A later browser milestone should not be marked complete until it has:
 
 - End-to-end browser tests for create/edit, archive confirmation, and settings
-  flows beyond the implemented drag-and-drop status movement.
+  flows beyond the implemented drag-and-drop status movement and read-only task
+  detail inspection.
 - Responsive checks for desktop and mobile viewports.
 - A clear service mode lifecycle for any richer browser UI behavior, including
   logging and live-update shutdown policy.

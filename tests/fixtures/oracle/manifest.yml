@@ -186,6 +186,10 @@ fixtures:
     command: ["backlog", "browser", "--port", "8080", "--no-open"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:task-detail-view"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "cli:interactive-board"
     command: ["backlog", "board"]
     agent_critical: false

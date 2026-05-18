@@ -183,6 +183,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog browser --port <port> --no-open and browser service lifecycle",
         ),
         _implemented(
+            "browser:task-detail-view",
+            "browser-implemented",
+            "web TaskDetailsModal",
+            "read-only browser task detail endpoint and dialog",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",
