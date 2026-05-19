@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 86,
+        "implemented": 87,
         "deferred": 1,
-        "total": 87,
+        "total": 88,
     }
     assert report["categories"]["cli"] == {
         "implemented": 44,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 13,
+        "implemented": 14,
         "deferred": 0,
-        "total": 13,
+        "total": 14,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -70,6 +70,7 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:kanban-drag-drop"]["status"] == "implemented"
     assert items_by_name["browser:task-detail-view"]["status"] == "implemented"
     assert items_by_name["browser:markdown-detail-rendering"]["status"] == "implemented"
+    assert items_by_name["browser:rich-section-editing"]["status"] == "implemented"
     assert items_by_name["browser:task-create-form"]["status"] == "implemented"
     assert items_by_name["browser:task-edit-form"]["status"] == "implemented"
     assert items_by_name["browser:task-archive-confirmation"]["status"] == "implemented"

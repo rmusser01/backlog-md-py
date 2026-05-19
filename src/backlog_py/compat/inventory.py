@@ -207,6 +207,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "safe browser Markdown rendering for task detail description, implementation notes, and final summary",
         ),
         _implemented(
+            "browser:rich-section-editing",
+            "browser-implemented",
+            "web task edit form",
+            "browser edit form updates Implementation Notes and Final Summary Markdown sections",
+        ),
+        _implemented(
             "browser:task-create-form",
             "browser-implemented",
             "web task create form",
