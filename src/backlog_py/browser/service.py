@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import webbrowser
 from dataclasses import dataclass
@@ -567,6 +568,40 @@ def render_board_html(project: BacklogProject) -> str:
       margin: 0;
       white-space: pre-wrap;
     }}
+    .markdown-body > :first-child {{
+      margin-top: 0;
+    }}
+    .markdown-body > :last-child {{
+      margin-bottom: 0;
+    }}
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {{
+      margin: 0 0 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }}
+    .markdown-body p {{
+      margin: 0 0 10px;
+      white-space: normal;
+    }}
+    .markdown-body ul {{
+      margin: 0 0 10px;
+      padding-left: 20px;
+    }}
+    .markdown-body code {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }}
+    .markdown-code {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      margin: 0 0 10px;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre;
+    }}
     .dialog-section ul {{
       margin: 0;
       padding-left: 20px;
@@ -793,7 +828,15 @@ def render_board_html(project: BacklogProject) -> str:
       </dl>
       <section class="dialog-section">
         <h3>Description</h3>
-        <p id="task-dialog-description"></p>
+        <div class="markdown-body" id="task-dialog-description-html"></div>
+      </section>
+      <section class="dialog-section">
+        <h3>Implementation Notes</h3>
+        <div class="markdown-body" id="task-dialog-implementation-notes"></div>
+      </section>
+      <section class="dialog-section">
+        <h3>Final Summary</h3>
+        <div class="markdown-body" id="task-dialog-final-summary"></div>
       </section>
       <section class="dialog-section">
         <h3>Acceptance Criteria</h3>
@@ -826,6 +869,11 @@ def render_board_html(project: BacklogProject) -> str:
     function setText(id, value) {{
       const element = document.getElementById(id);
       if (element) element.textContent = value || "—";
+    }}
+
+    function setHtml(id, value) {{
+      const element = document.getElementById(id);
+      if (element) element.innerHTML = value || '<p class="markdown-empty">No content</p>';
     }}
 
     function hasOpenDialog() {{
@@ -906,7 +954,9 @@ def render_board_html(project: BacklogProject) -> str:
       setText("task-dialog-assignees", (task.assignees || []).join(", "));
       setText("task-dialog-labels", (task.labels || []).join(", "));
       setText("task-dialog-milestone", task.milestone);
-      setText("task-dialog-description", task.description);
+      setHtml("task-dialog-description-html", task.descriptionHtml);
+      setHtml("task-dialog-implementation-notes", task.implementationNotesHtml);
+      setHtml("task-dialog-final-summary", task.finalSummaryHtml);
       renderChecklist("task-dialog-acceptance", task.acceptanceCriteria, "acceptanceCriteria");
       renderChecklist("task-dialog-dod", task.definitionOfDone, "definitionOfDone");
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
@@ -1261,11 +1311,17 @@ def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, obj
 
 def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
     payload = _task_payload(task, project=project)
+    description = task.description or task.body.strip()
+    implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
+    final_summary = _section_content(task, "FINAL_SUMMARY")
     payload.update(
         {
-            "description": task.description or task.body.strip(),
-            "implementationNotes": _section_content(task, "IMPLEMENTATION_NOTES"),
-            "finalSummary": _section_content(task, "FINAL_SUMMARY"),
+            "description": description,
+            "descriptionHtml": _markdown_to_html(description),
+            "implementationNotes": implementation_notes,
+            "implementationNotesHtml": _markdown_to_html(implementation_notes),
+            "finalSummary": final_summary,
+            "finalSummaryHtml": _markdown_to_html(final_summary),
             "acceptanceCriteria": _checklist_payload(task, "AC"),
             "definitionOfDone": _checklist_payload(task, "DOD"),
         }
@@ -1287,6 +1343,108 @@ def _checklist_payload(task: TaskRecord, marker: str) -> list[dict[str, object]]
 def _section_content(task: TaskRecord, section_name: str) -> str:
     section = task.parsed.sections.get(section_name)
     return "" if section is None else section.content.strip()
+
+
+def _markdown_to_html(text: str) -> str:
+    source = text.strip()
+    if not source:
+        return '<p class="markdown-empty">No content</p>'
+
+    blocks: list[str] = []
+    paragraph_lines: list[str] = []
+    list_items: list[str] = []
+    code_lines: list[str] = []
+    code_language = ""
+    in_code_block = False
+
+    def flush_paragraph() -> None:
+        if paragraph_lines:
+            paragraph = " ".join(paragraph_lines).strip()
+            if paragraph:
+                blocks.append(f"<p>{_render_inline_markdown(paragraph)}</p>")
+            paragraph_lines.clear()
+
+    def flush_list() -> None:
+        if list_items:
+            items = "".join(f"<li>{_render_inline_markdown(item)}</li>" for item in list_items)
+            blocks.append(f"<ul>{items}</ul>")
+            list_items.clear()
+
+    def flush_text_blocks() -> None:
+        flush_paragraph()
+        flush_list()
+
+    def flush_code_block() -> None:
+        language_class = _markdown_language_class(code_language)
+        code = escape("\n".join(code_lines))
+        blocks.append(f'<pre class="markdown-code{language_class}"><code>{code}</code></pre>')
+        code_lines.clear()
+
+    for line in source.splitlines():
+        stripped = line.strip()
+        if in_code_block:
+            if stripped.startswith("```"):
+                flush_code_block()
+                in_code_block = False
+                code_language = ""
+            else:
+                code_lines.append(line)
+            continue
+
+        if stripped.startswith("```"):
+            flush_text_blocks()
+            in_code_block = True
+            code_language = stripped[3:].strip().split(maxsplit=1)[0] if stripped[3:].strip() else ""
+            continue
+
+        if not stripped:
+            flush_text_blocks()
+            continue
+
+        heading = _markdown_heading(stripped)
+        if heading is not None:
+            flush_text_blocks()
+            level, content = heading
+            blocks.append(f"<h{level}>{_render_inline_markdown(content)}</h{level}>")
+            continue
+
+        if stripped.startswith(("- ", "* ")):
+            flush_paragraph()
+            list_items.append(stripped[2:].strip())
+            continue
+
+        flush_list()
+        paragraph_lines.append(stripped)
+
+    if in_code_block:
+        flush_code_block()
+    flush_text_blocks()
+    return "\n".join(blocks)
+
+
+def _markdown_heading(line: str) -> tuple[int, str] | None:
+    marker_length = len(line) - len(line.lstrip("#"))
+    if marker_length < 1 or marker_length > 3:
+        return None
+    if len(line) <= marker_length or line[marker_length] != " ":
+        return None
+    content = line[marker_length:].strip()
+    if not content:
+        return None
+    return marker_length, content
+
+
+def _markdown_language_class(language: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9_-]", "", language.strip().lower())
+    return f" language-{normalized}" if normalized else ""
+
+
+def _render_inline_markdown(text: str) -> str:
+    rendered = escape(text)
+    rendered = re.sub(r"`([^`]+)`", r"<code>\1</code>", rendered)
+    rendered = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", rendered)
+    rendered = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", rendered)
+    return rendered
 
 
 def _render_task_meta(*, priority: str | None, assignees: list[object], labels: list[object]) -> str:

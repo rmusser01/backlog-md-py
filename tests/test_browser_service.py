@@ -142,6 +142,75 @@ def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
     }
 
 
+def test_browser_task_detail_endpoint_returns_markdown_html_sections(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    task_file = _task_file(repo)
+    task_file.write_text(
+        task_file.read_text(encoding="utf-8").replace(
+            "Implement a fixture that exercises parser preservation behavior.\n"
+            "This paragraph must remain untouched by a no-op render.",
+            "## Rendered heading\n\n"
+            "- First bullet\n"
+            "- **Second** bullet\n\n"
+            "```mermaid\n"
+            "graph TD\n"
+            "  A --> B\n"
+            "```",
+        ),
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert "<h2>Rendered heading</h2>" in task["descriptionHtml"]
+    assert "<li>First bullet</li>" in task["descriptionHtml"]
+    assert "<strong>Second</strong>" in task["descriptionHtml"]
+    assert 'class="markdown-code language-mermaid"' in task["descriptionHtml"]
+    assert "<li>Keep frontmatter order stable.</li>" in task["implementationNotesHtml"]
+    assert task["finalSummaryHtml"] == "<p>No final summary yet.</p>"
+
+
+def test_browser_task_detail_markdown_html_escapes_unsafe_content(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    task_file = _task_file(repo)
+    task_file.write_text(
+        task_file.read_text(encoding="utf-8").replace(
+            "Implement a fixture that exercises parser preservation behavior.\n"
+            "This paragraph must remain untouched by a no-op render.",
+            "<img src=x onerror=alert(1)>\n"
+            "<script>alert('x')</script>\n\n"
+            "```mermaid\n"
+            "graph TD\n"
+            "  A[\"<script>\"] --> B\n"
+            "```",
+        ),
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    html = task["descriptionHtml"]
+    assert "<script" not in html
+    assert "<img" not in html
+    assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html
+    assert 'class="markdown-code language-mermaid"' in html
+    assert "A[&quot;&lt;script&gt;&quot;] --&gt; B" in html
+
+
 def test_browser_board_html_exposes_readonly_task_detail_dialog(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -159,6 +228,27 @@ def test_browser_board_html_exposes_readonly_task_detail_dialog(tmp_path):
     assert "openTaskDetails" in html
     assert "Acceptance Criteria" in html
     assert "/api/tasks/" in html
+
+
+def test_browser_board_html_exposes_markdown_detail_sections(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="task-dialog-description-html"' in html
+    assert 'id="task-dialog-implementation-notes"' in html
+    assert 'id="task-dialog-final-summary"' in html
+    assert "setHtml" in html
+    assert "descriptionHtml" in html
+    assert "implementationNotesHtml" in html
+    assert "finalSummaryHtml" in html
 
 
 def test_browser_task_create_endpoint_creates_task_under_project_lock(tmp_path, monkeypatch):
