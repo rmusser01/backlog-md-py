@@ -51,8 +51,9 @@ class TaskRecord:
 
 
 class ReadOnlyRepository:
-    def __init__(self, project: BacklogProject) -> None:
+    def __init__(self, project: BacklogProject, *, refresh_remote_refs: bool = True) -> None:
         self.project = project
+        self._refresh_remote_refs = refresh_remote_refs
         self._remote_refs_refreshed = False
 
     @classmethod
@@ -147,6 +148,8 @@ class ReadOnlyRepository:
         return _load_tasks_from_dir(completed_dir)
 
     def _ensure_remote_refs(self) -> None:
+        if not self._refresh_remote_refs:
+            return
         if self._remote_refs_refreshed:
             return
         self._remote_refs_refreshed = True

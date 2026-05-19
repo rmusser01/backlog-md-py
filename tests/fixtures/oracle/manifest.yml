@@ -210,6 +210,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:live-refresh-polling"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "cli:interactive-board"
     command: ["backlog", "board"]
     agent_critical: false
