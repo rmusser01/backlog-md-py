@@ -19,7 +19,7 @@ full clone unless explicitly rejected.
 | Responsive Kanban board | Required for full clone | Not required for agent cutover | Agents use `board`, task listing, and MCP tools; responsive browser layout is a human UI requirement. |
 | drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
 | Task detail dialog | Required for full clone | Implemented for inspection, Markdown rendering, and checklist state | Browser cards can open a detail dialog backed by `/api/tasks/<id>` for metadata, safe Markdown-rendered description, Implementation Notes, Final Summary, Acceptance Criteria, and Definition of Done. Checklist controls update AC/DoD check state through a locked `/api/tasks/<id>/checklist` endpoint. |
-| Task create/edit forms | Required for full clone | Basic create/edit plus rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including raw Markdown replacement for Implementation Notes and Final Summary. Broader rich edit flows remain deferred. |
+| Task create/edit forms | Required for full clone | Basic create/edit plus metadata and rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including assignees, labels, priority, milestone, and raw Markdown replacement for Implementation Notes and Final Summary. Broader rich edit flows remain deferred. |
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
 | General project settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, `zeroPaddedIds`, and `statuses` through a locked settings endpoint. Shell-hook and git automation settings remain outside the browser surface. |
@@ -39,8 +39,8 @@ A later browser milestone should not be marked complete until it has:
   implemented drag-and-drop status movement, basic create/edit forms, archive
   confirmation, checklist-state controls, task detail inspection, safe
   Markdown rendering, raw Markdown Implementation Notes/Final Summary
-  replacement, Definition of Done default settings, and safe general project
-  settings.
+  replacement, metadata editing, Definition of Done default settings, and safe
+  general project settings.
 - Responsive checks for desktop and mobile viewports.
 - A clear service mode lifecycle for any richer browser UI behavior, including
   live-update shutdown policy beyond the implemented local stop action and

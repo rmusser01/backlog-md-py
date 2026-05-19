@@ -601,6 +601,73 @@ def test_browser_task_edit_endpoint_updates_rich_markdown_sections_under_project
     assert "Browser summary with `code`." in edited_source
 
 
+def test_browser_task_edit_endpoint_updates_metadata_fields_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/edit",
+            {
+                "assignees": ["codex", "reviewer"],
+                "labels": ["browser", "metadata"],
+                "priority": "high",
+                "milestone": "Release 1",
+            },
+        )
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert lock_operations == [(repo, "browser_task_edit")]
+    assert response["body"]["task"]["assignees"] == ["codex", "reviewer"]
+    assert response["body"]["task"]["labels"] == ["browser", "metadata"]
+    assert response["body"]["task"]["priority"] == "high"
+    assert response["body"]["task"]["milestone"] == "Release 1"
+    assert detail["assignees"] == ["codex", "reviewer"]
+    assert detail["labels"] == ["browser", "metadata"]
+    assert board["columns"]["In Progress"][0]["priority"] == "high"
+    edited_source = _task_file(repo).read_text(encoding="utf-8")
+    assert "assignee:\n- codex\n- reviewer" in edited_source
+    assert "labels:\n- browser\n- metadata" in edited_source
+    assert "priority: high" in edited_source
+    assert "milestone: Release 1" in edited_source
+
+
+def test_browser_task_edit_endpoint_clears_milestone_with_empty_string(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _post_json_response(f"{service.root_url}/api/tasks/TASK-1/edit", {"milestone": "Release 1"})
+        response = _post_json_response(f"{service.root_url}/api/tasks/TASK-1/edit", {"milestone": ""})
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["task"]["milestone"] is None
+    assert detail["milestone"] is None
+    assert "milestone:" not in _task_file(repo).read_text(encoding="utf-8")
+
+
 def test_browser_task_edit_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -614,6 +681,27 @@ def test_browser_task_edit_endpoint_rejects_invalid_payload_without_mutation(tmp
             _post_json(
                 f"{service.root_url}/api/tasks/TASK-1/edit",
                 {"title": "", "acceptanceCriteria": "Edited criterion"},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_task_edit_endpoint_rejects_invalid_metadata_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/edit",
+                {"title": "Should not write", "assignees": "codex"},
             )
     finally:
         service.shutdown()
@@ -680,16 +768,32 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert 'id="task-edit-dialog"' in html
     assert 'id="task-edit-form"' in html
     assert 'data-task-edit="TASK-1"' in html
+    edit_submit = html.split("async function submitTaskEdit", maxsplit=1)[1].split(
+        "async function submitTaskChecklistState",
+        maxsplit=1,
+    )[0]
     assert 'name="title"' in html
     assert 'name="status"' in html
     assert 'name="description"' in html
     assert 'name="acceptanceCriteria"' in html
     assert 'name="implementationNotes"' in html
     assert 'name="finalSummary"' in html
+    assert 'name="assignees"' in html
+    assert 'name="labels"' in html
+    assert 'name="priority"' in html
+    assert 'name="milestone"' in html
     assert "taskEditForm.elements.implementationNotes.value" in html
     assert "taskEditForm.elements.finalSummary.value" in html
-    assert "implementationNotes: String(data.get(\"implementationNotes\") || \"\")" in html
-    assert "finalSummary: String(data.get(\"finalSummary\") || \"\")" in html
+    assert "taskEditForm.elements.assignees.value" in html
+    assert "taskEditForm.elements.labels.value" in html
+    assert "taskEditForm.elements.priority.value" in html
+    assert "taskEditForm.elements.milestone.value" in html
+    assert "implementationNotes: String(data.get(\"implementationNotes\") || \"\")" in edit_submit
+    assert "finalSummary: String(data.get(\"finalSummary\") || \"\")" in edit_submit
+    assert "assignees: metadataList(data.get(\"assignees\"))" in edit_submit
+    assert "labels: metadataList(data.get(\"labels\"))" in edit_submit
+    assert "priority: String(data.get(\"priority\") || \"\")" in edit_submit
+    assert "milestone: String(data.get(\"milestone\") || \"\")" in edit_submit
     assert "submitTaskEdit" in html
     assert "/api/tasks/" in html
 

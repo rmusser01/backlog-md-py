@@ -774,6 +774,18 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Status
           <{select_tag} class="task-form-select" name="status">{status_options}</{select_tag}>
         </label>
+        <label>Priority
+          <input name="priority" autocomplete="off">
+        </label>
+        <label>Milestone
+          <input name="milestone" autocomplete="off">
+        </label>
+        <label>Assignees
+          <textarea name="assignees"></textarea>
+        </label>
+        <label>Labels
+          <textarea name="labels"></textarea>
+        </label>
         <label>Description
           <textarea name="description"></textarea>
         </label>
@@ -1058,6 +1070,10 @@ def render_board_html(project: BacklogProject) -> str:
       return (items || []).map((item) => item.text || "").filter(Boolean).join("\\n");
     }}
 
+    function metadataList(value) {{
+      return String(value || "").split(/[\\n,]/).map((item) => item.trim()).filter(Boolean);
+    }}
+
     async function openTaskDetails(taskId) {{
       const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}`);
       if (!response.ok) {{
@@ -1095,6 +1111,10 @@ def render_board_html(project: BacklogProject) -> str:
       taskEditForm.dataset.taskId = task.id;
       taskEditForm.elements.title.value = task.title || "";
       taskEditForm.elements.status.value = task.status || "";
+      taskEditForm.elements.priority.value = task.priority || "";
+      taskEditForm.elements.milestone.value = task.milestone || "";
+      taskEditForm.elements.assignees.value = (task.assignees || []).join(", ");
+      taskEditForm.elements.labels.value = (task.labels || []).join(", ");
       taskEditForm.elements.description.value = task.description || "";
       taskEditForm.elements.acceptanceCriteria.value = checklistText(task.acceptanceCriteria);
       taskEditForm.elements.implementationNotes.value = task.implementationNotes || "";
@@ -1258,8 +1278,6 @@ def render_board_html(project: BacklogProject) -> str:
           status: String(data.get("status") || ""),
           description: String(data.get("description") || ""),
           acceptanceCriteria: criteria,
-          implementationNotes: String(data.get("implementationNotes") || ""),
-          finalSummary: String(data.get("finalSummary") || ""),
         }}),
       }});
       if (!response.ok) {{
@@ -1285,8 +1303,14 @@ def render_board_html(project: BacklogProject) -> str:
         body: JSON.stringify({{
           title: String(data.get("title") || ""),
           status: String(data.get("status") || ""),
+          priority: String(data.get("priority") || ""),
+          milestone: String(data.get("milestone") || ""),
+          assignees: metadataList(data.get("assignees")),
+          labels: metadataList(data.get("labels")),
           description: String(data.get("description") || ""),
           acceptanceCriteria: criteria,
+          implementationNotes: String(data.get("implementationNotes") || ""),
+          finalSummary: String(data.get("finalSummary") || ""),
         }}),
       }});
       if (!response.ok) {{
@@ -1793,6 +1817,24 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
     value = _optional_string_list_field(payload, "acceptanceCriteria")
     if value is not None:
         edit_kwargs["acceptance_criteria"] = value
+    for payload_key, repository_key in (("assignees", "assignees"), ("labels", "labels")):
+        value = _optional_string_list_field(payload, payload_key)
+        if value is not None:
+            edit_kwargs[repository_key] = value
+    if "priority" in payload:
+        value = _optional_string_field(payload, "priority")
+        if value is not None:
+            edit_kwargs["priority"] = value
+    if "milestone" in payload:
+        value = payload.get("milestone")
+        if value is None:
+            edit_kwargs["clear_milestone"] = True
+        elif not isinstance(value, str):
+            raise ValueError("Request body field milestone must be a string")
+        elif value.strip():
+            edit_kwargs["milestone"] = value.strip()
+        else:
+            edit_kwargs["clear_milestone"] = True
     if not edit_kwargs:
         raise ValueError("Request body must include at least one editable field")
     return edit_kwargs
