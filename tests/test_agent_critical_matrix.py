@@ -293,6 +293,16 @@ def test_agent_critical_inventory_tracks_browser_rich_section_editing_surface():
     assert item.expected == "browser edit form updates Implementation Notes and Final Summary Markdown sections"
 
 
+def test_agent_critical_inventory_tracks_browser_metadata_editing_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:metadata-editing"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser edit form updates assignees, labels, priority, and milestone"
+
+
 def test_agent_critical_inventory_tracks_browser_task_edit_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

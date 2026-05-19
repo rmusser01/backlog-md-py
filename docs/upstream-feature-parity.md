@@ -78,6 +78,8 @@ larger task commands:
 - Basic browser task editing through the loopback service and in-page form for
   title, status, description, and Acceptance Criteria replacement, backed by
   the project write lock.
+- Browser edit form replacement for assignees, labels, priority, and
+  milestone metadata, backed by the project write lock.
 - Browser edit form replacement for raw Markdown Implementation Notes and
   Final Summary sections, backed by the project write lock and existing safe
   detail rendering.
@@ -103,7 +105,7 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | responsive Kanban polish, richer Markdown editing, executable mermaid rendering, git/shell settings, richer live-update transports | Basic board service, drag-and-drop status movement, basic task creation/editing, raw Markdown Implementation Notes/Final Summary editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, polling-based live refresh, and service status/shutdown/logging dialog controls are implemented; richer browser editing beyond textarea-backed owned sections and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
+| Browser UI | responsive Kanban polish, richer Markdown editing, executable mermaid rendering, git/shell settings, richer live-update transports | Basic board service, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, polling-based live refresh, and service status/shutdown/logging dialog controls are implemented; richer browser editing beyond textarea-backed owned sections and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
 | Browser service | advanced service shutdown behavior | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, bounded request logging, board JSON with deterministic revisions, task create/edit/archive/checklist/detail JSON, static board snapshot, and polling refresh are implemented; richer live-update shutdown behavior remains deferred |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
