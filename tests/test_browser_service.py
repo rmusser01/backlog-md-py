@@ -697,6 +697,146 @@ def test_browser_dod_defaults_update_rejects_cross_origin_without_mutation(tmp_p
     assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
 
 
+def test_browser_config_settings_endpoint_returns_safe_values(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    set_config_value(project, "defaultAssignee", "codex")
+    set_config_value(project, "defaultPort", "6543")
+    set_config_value(project, "autoOpenBrowser", "false")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _get_json(f"{service.root_url}/api/settings/config")
+    finally:
+        service.shutdown()
+
+    assert response == {
+        "settings": {
+            "autoOpenBrowser": False,
+            "dateFormat": "yyyy-mm-dd",
+            "defaultAssignee": "codex",
+            "defaultPort": 6543,
+            "defaultStatus": "To Do",
+            "includeDatetimeInDates": True,
+            "projectName": "basic-fixture",
+            "statuses": ["To Do", "In Progress", "Done"],
+            "zeroPaddedIds": None,
+        }
+    }
+
+
+def test_browser_config_settings_update_endpoint_writes_safe_values_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/settings/config",
+            {
+                "settings": {
+                    "projectName": "Browser project",
+                    "defaultAssignee": "codex",
+                    "defaultStatus": "Ready",
+                    "dateFormat": "yyyy-mm-dd",
+                    "includeDatetimeInDates": False,
+                    "defaultPort": 6543,
+                    "autoOpenBrowser": False,
+                    "zeroPaddedIds": 4,
+                    "statuses": ["Ready", "In Progress", "Done"],
+                }
+            },
+        )
+        updated = _get_json(f"{service.root_url}/api/settings/config")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["settings"]["projectName"] == "Browser project"
+    assert response["body"]["settings"]["defaultPort"] == 6543
+    assert response["body"]["settings"]["statuses"] == ["Ready", "In Progress", "Done"]
+    assert updated["settings"]["includeDatetimeInDates"] is False
+    assert updated["settings"]["zeroPaddedIds"] == 4
+    assert lock_operations == [(repo, "browser_config_settings_update")]
+
+
+def test_browser_config_settings_update_refreshes_server_project(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _post_json_response(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"statuses": ["Ready", "In Progress", "Done"], "defaultStatus": "Ready"}},
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert board["statuses"][:3] == ["Ready", "In Progress", "Done"]
+    assert '<option value="Ready">Ready</option>' in html
+
+
+def test_browser_config_settings_update_rejects_invalid_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"onStatusChange": "echo unsafe", "projectName": "Mutated"}},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
+
+
+def test_browser_config_settings_update_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"projectName": "Rejected browser settings"}},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
+
+
 def test_browser_board_html_exposes_task_checklist_state_controls(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -734,6 +874,29 @@ def test_browser_board_html_exposes_dod_defaults_settings_dialog(tmp_path):
     assert "openDodDefaultsSettings" in html
     assert "submitDodDefaultsSettings" in html
     assert "/api/settings/dod-defaults" in html
+
+
+def test_browser_board_html_exposes_general_settings_dialog(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="config-settings-open"' in html
+    assert 'id="config-settings-dialog"' in html
+    assert 'id="config-settings-form"' in html
+    assert 'name="projectName"' in html
+    assert 'name="defaultPort"' in html
+    assert 'name="statuses"' in html
+    assert "openConfigSettings" in html
+    assert "submitConfigSettings" in html
+    assert "/api/settings/config" in html
 
 
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):

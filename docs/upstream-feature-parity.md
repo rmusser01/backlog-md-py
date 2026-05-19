@@ -81,6 +81,9 @@ larger task commands:
   of Done check/uncheck state, backed by the project write lock.
 - Browser Definition of Done defaults settings dialog and loopback endpoint,
   backed by the project write lock and safe config writer.
+- Browser general project settings dialog and loopback endpoint for safe
+  non-shell, non-git config values, backed by the project write lock and safe
+  config writer.
 - Browser board live-refresh polling through a deterministic `/api/board`
   revision, allowing open pages to detect external CLI, MCP, or browser-tab
   task changes and reload when no dialog is open.
@@ -89,7 +92,7 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, broader settings, richer live-update transports | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, task detail dialogs, AC/DoD checklist state controls, DoD defaults settings, and polling-based live refresh are implemented; richer browser editing and broader settings UI remain deferred |
+| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, git/shell settings, richer live-update transports | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, task detail dialogs, AC/DoD checklist state controls, DoD defaults settings, safe general settings, and polling-based live refresh are implemented; richer browser editing remains deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
 | Browser service | advanced service logging and shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON with deterministic revisions, task create/edit/archive/checklist/detail JSON, static board snapshot, and polling refresh are implemented |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |

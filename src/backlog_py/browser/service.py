@@ -11,12 +11,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
 from urllib.parse import unquote, urlparse
 
-from backlog_py.core.models import BacklogProject
+from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
 from backlog_py.runtime.locks import with_project_write_lock
-from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
+from backlog_py.storage.config import (
+    get_definition_of_done_defaults,
+    load_config,
+    replace_definition_of_done_defaults,
+    set_config_value,
+)
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+_BROWSER_CONFIG_SETTING_KEYS = frozenset(
+    (
+        "autoOpenBrowser",
+        "dateFormat",
+        "defaultAssignee",
+        "defaultPort",
+        "defaultStatus",
+        "includeDatetimeInDates",
+        "projectName",
+        "statuses",
+        "zeroPaddedIds",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +139,12 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
             return
+        if path == "/api/settings/config":
+            self._send_json(
+                HTTPStatus.OK,
+                {"settings": _config_settings_payload(load_config(self.server.project.config_path))},
+            )
+            return
         if path == "/api/settings/dod-defaults":
             self._send_json(
                 HTTPStatus.OK,
@@ -143,6 +167,35 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/settings/config":
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                settings = _config_settings_from_payload(self._read_json_body())
+
+                def update_project() -> BacklogProject:
+                    project = self.server.project
+                    for key, value in settings.items():
+                        set_config_value(project, key, value)
+                    return BacklogProject(
+                        root=project.root,
+                        backlog_dir=project.backlog_dir,
+                        config_path=project.config_path,
+                        config=load_config(project.config_path),
+                    )
+
+                self.server.project = with_project_write_lock(
+                    self.server.project,
+                    "browser_config_settings_update",
+                    update_project,
+                )
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"settings": _config_settings_payload(self.server.project.config)})
+            return
+
         if path == "/api/settings/dod-defaults":
             if not self._origin_allowed():
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
@@ -553,6 +606,10 @@ def render_board_html(project: BacklogProject) -> str:
       min-height: 88px;
       resize: vertical;
     }}
+    .task-form input[type="checkbox"] {{
+      width: auto;
+      justify-self: start;
+    }}
     .form-actions {{
       display: flex;
       justify-content: flex-end;
@@ -573,7 +630,8 @@ def render_board_html(project: BacklogProject) -> str:
       <div class="subtitle">Backlog.md board with task creation, editing, and drag-and-drop status movement</div>
     </div>
     <div class="header-actions">
-      <button class="secondary-button" type="button" id="dod-defaults-open">Settings</button>
+      <button class="secondary-button" type="button" id="config-settings-open">Project settings</button>
+      <button class="secondary-button" type="button" id="dod-defaults-open">Definition of Done</button>
       <button class="primary-button" type="button" id="task-create-open">New task</button>
     </div>
   </header>
@@ -651,6 +709,51 @@ def render_board_html(project: BacklogProject) -> str:
       </div>
     </div>
   </dialog>
+  <dialog id="config-settings-dialog" aria-labelledby="config-settings-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="config-settings-title">Project settings</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <form class="task-form" id="config-settings-form">
+        <label>Project name
+          <input name="projectName" autocomplete="off" required>
+        </label>
+        <label>Default assignee
+          <input name="defaultAssignee" autocomplete="off">
+        </label>
+        <label>Default status
+          <input name="defaultStatus" autocomplete="off" required>
+        </label>
+        <label>Date format
+          <input name="dateFormat" autocomplete="off" required>
+        </label>
+        <label>Default browser port
+          <input name="defaultPort" type="number" min="1" max="65535" step="1" required>
+        </label>
+        <label>Zero-padded ID width
+          <input name="zeroPaddedIds" type="number" min="0" step="1">
+        </label>
+        <label>Statuses
+          <textarea name="statuses"></textarea>
+        </label>
+        <label>
+          <input name="includeDatetimeInDates" type="checkbox">
+          Include time in dates
+        </label>
+        <label>
+          <input name="autoOpenBrowser" type="checkbox">
+          Open browser automatically
+        </label>
+        <div class="form-actions">
+          <button class="secondary-button" type="button" id="config-settings-cancel">Cancel</button>
+          <button class="primary-button" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
   <dialog id="dod-defaults-dialog" aria-labelledby="dod-defaults-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="dod-defaults-title">Definition of Done defaults</h2>
@@ -711,6 +814,8 @@ def render_board_html(project: BacklogProject) -> str:
     const taskEditForm = document.getElementById("task-edit-form");
     const taskArchiveDialog = document.getElementById("task-archive-dialog");
     const taskArchiveConfirm = document.getElementById("task-archive-confirm");
+    const configSettingsDialog = document.getElementById("config-settings-dialog");
+    const configSettingsForm = document.getElementById("config-settings-form");
     const dodDefaultsDialog = document.getElementById("dod-defaults-dialog");
     const dodDefaultsForm = document.getElementById("dod-defaults-form");
     const boardElement = document.querySelector("[data-board-revision]");
@@ -846,6 +951,29 @@ def render_board_html(project: BacklogProject) -> str:
       else if (taskCreateDialog) taskCreateDialog.setAttribute("open", "open");
     }}
 
+    async function openConfigSettings() {{
+      const response = await fetch("/api/settings/config");
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const payload = await response.json();
+      const settings = payload.settings || {{}};
+      if (configSettingsForm) {{
+        configSettingsForm.elements.projectName.value = settings.projectName || "";
+        configSettingsForm.elements.defaultAssignee.value = settings.defaultAssignee || "";
+        configSettingsForm.elements.defaultStatus.value = settings.defaultStatus || "";
+        configSettingsForm.elements.dateFormat.value = settings.dateFormat || "";
+        configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
+        configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
+        configSettingsForm.elements.statuses.value = (settings.statuses || []).join("\\n");
+        configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
+        configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
+      }}
+      if (configSettingsDialog && configSettingsDialog.showModal) configSettingsDialog.showModal();
+      else if (configSettingsDialog) configSettingsDialog.setAttribute("open", "open");
+    }}
+
     async function openDodDefaultsSettings() {{
       const response = await fetch("/api/settings/dod-defaults");
       if (!response.ok) {{
@@ -950,6 +1078,38 @@ def render_board_html(project: BacklogProject) -> str:
       window.location.reload();
     }}
 
+    async function submitConfigSettings(event) {{
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const statuses = String(data.get("statuses") || "")
+        .split("\\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const response = await fetch("/api/settings/config", {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{
+          settings: {{
+            projectName: String(data.get("projectName") || ""),
+            defaultAssignee: String(data.get("defaultAssignee") || ""),
+            defaultStatus: String(data.get("defaultStatus") || ""),
+            dateFormat: String(data.get("dateFormat") || ""),
+            defaultPort: Number(data.get("defaultPort") || 0),
+            zeroPaddedIds: String(data.get("zeroPaddedIds") || ""),
+            statuses,
+            includeDatetimeInDates: Boolean(form.elements.includeDatetimeInDates?.checked),
+            autoOpenBrowser: Boolean(form.elements.autoOpenBrowser?.checked),
+          }},
+        }}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      window.location.reload();
+    }}
+
     async function submitDodDefaultsSettings(event) {{
       event.preventDefault();
       const form = event.currentTarget;
@@ -977,6 +1137,9 @@ def render_board_html(project: BacklogProject) -> str:
     taskEditForm?.addEventListener("submit", submitTaskEdit);
     document.getElementById("task-archive-cancel")?.addEventListener("click", () => taskArchiveDialog?.close());
     taskArchiveConfirm?.addEventListener("click", submitTaskArchive);
+    document.getElementById("config-settings-open")?.addEventListener("click", openConfigSettings);
+    document.getElementById("config-settings-cancel")?.addEventListener("click", () => configSettingsDialog?.close());
+    configSettingsForm?.addEventListener("submit", submitConfigSettings);
     document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
     dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);
@@ -1284,6 +1447,120 @@ def _dod_defaults_items_from_payload(payload: object) -> list[str]:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
     return _required_string_list_field(payload, "items")
+
+
+def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:
+    return {
+        "autoOpenBrowser": config.auto_open_browser,
+        "dateFormat": config.date_format,
+        "defaultAssignee": config.default_assignee,
+        "defaultPort": config.default_port,
+        "defaultStatus": config.default_status,
+        "includeDatetimeInDates": config.include_datetime_in_dates,
+        "projectName": config.project_name,
+        "statuses": list(config.statuses or []),
+        "zeroPaddedIds": config.zero_padded_ids,
+    }
+
+
+def _config_settings_from_payload(payload: object) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    settings = payload.get("settings")
+    if not isinstance(settings, dict):
+        raise ValueError("Request body field settings must be a JSON object")
+
+    updates: dict[str, str] = {}
+    for raw_key, raw_value in settings.items():
+        if not isinstance(raw_key, str) or raw_key not in _BROWSER_CONFIG_SETTING_KEYS:
+            raise ValueError(f"Unsupported browser config setting: {raw_key}")
+        if raw_key in {"projectName", "defaultStatus", "dateFormat"}:
+            updates[raw_key] = _required_string_setting(raw_value, raw_key)
+        elif raw_key == "defaultAssignee":
+            updates[raw_key] = _optional_string_setting(raw_value, raw_key)
+        elif raw_key in {"autoOpenBrowser", "includeDatetimeInDates"}:
+            updates[raw_key] = _boolean_setting(raw_value, raw_key)
+        elif raw_key == "defaultPort":
+            updates[raw_key] = _port_setting(raw_value, raw_key)
+        elif raw_key == "zeroPaddedIds":
+            updates[raw_key] = _zero_padded_ids_setting(raw_value, raw_key)
+        elif raw_key == "statuses":
+            updates[raw_key] = _statuses_setting(raw_value, raw_key)
+    if not updates:
+        raise ValueError("Request body field settings must include at least one setting")
+    return updates
+
+
+def _required_string_setting(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Request body setting {field} must be a non-empty string")
+    return value.strip()
+
+
+def _optional_string_setting(value: object, field: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"Request body setting {field} must be a string")
+    return value.strip()
+
+
+def _boolean_setting(value: object, field: str) -> str:
+    if not isinstance(value, bool):
+        raise ValueError(f"Request body setting {field} must be a boolean")
+    return "true" if value else "false"
+
+
+def _port_setting(value: object, field: str) -> str:
+    parsed = _integer_setting(value, field)
+    if parsed < 1 or parsed > 65535:
+        raise ValueError(f"Request body setting {field} must be a valid port number (1-65535)")
+    return str(parsed)
+
+
+def _zero_padded_ids_setting(value: object, field: str) -> str:
+    if value is None:
+        return "0"
+    if isinstance(value, str) and not value.strip():
+        return "0"
+    parsed = _integer_setting(value, field)
+    if parsed < 0:
+        raise ValueError(f"Request body setting {field} must be a non-negative integer")
+    return str(parsed)
+
+
+def _integer_setting(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"Request body setting {field} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 10)
+        except ValueError as exc:
+            raise ValueError(f"Request body setting {field} must be an integer") from exc
+    raise ValueError(f"Request body setting {field} must be an integer")
+
+
+def _statuses_setting(value: object, field: str) -> str:
+    if isinstance(value, str):
+        separator = "\n" if "\n" in value else ","
+        raw_items: list[object] = value.split(separator)
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raise ValueError(f"Request body setting {field} must be a list of strings")
+
+    statuses: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, str):
+            raise ValueError(f"Request body setting {field} must be a list of strings")
+        status = item.strip()
+        if status:
+            statuses.append(status)
+    if not statuses:
+        raise ValueError(f"Request body setting {field} must include at least one status")
+    return json.dumps(statuses)
 
 
 def _required_string_field(payload: dict[object, object], field: str) -> str:
