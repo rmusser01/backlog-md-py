@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import deque
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -59,6 +61,9 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
     """Threading HTTP server carrying the Backlog project context."""
 
     project: BacklogProject
+    request_log: deque[dict[str, object]]
+    request_log_limit: int
+    request_log_lock: threading.Lock
 
 
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
@@ -67,6 +72,9 @@ def create_browser_server(*, project: BacklogProject, host: str, port: int) -> B
         raise ValueError("Browser service only supports loopback hosts")
     server = BrowserThreadingHTTPServer((host, port), _BrowserHttpHandler)
     server.project = project
+    server.request_log_limit = 50
+    server.request_log = deque(maxlen=server.request_log_limit)
+    server.request_log_lock = threading.Lock()
     return server
 
 
@@ -143,6 +151,38 @@ def _service_status_payload(server: BrowserThreadingHTTPServer) -> dict[str, obj
     }
 
 
+def _service_requests_payload(server: BrowserThreadingHTTPServer) -> dict[str, object]:
+    with server.request_log_lock:
+        requests = list(server.request_log)
+    return {
+        "limit": server.request_log_limit,
+        "requests": requests,
+    }
+
+
+def _record_service_request(
+    server: BrowserThreadingHTTPServer,
+    *,
+    method: str,
+    raw_path: str,
+    status: HTTPStatus,
+    content_type: str,
+) -> None:
+    entry = {
+        "method": method,
+        "path": urlparse(raw_path).path or "/",
+        "status": int(status),
+        "contentType": content_type,
+        "timestamp": _utc_timestamp(),
+    }
+    with server.request_log_lock:
+        server.request_log.append(entry)
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 def _schedule_server_shutdown(server: BrowserThreadingHTTPServer) -> None:
     thread = threading.Thread(
         target=server.shutdown,
@@ -162,6 +202,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/service/status":
             self._send_json(HTTPStatus.OK, _service_status_payload(self.server))
+            return
+        if path == "/api/service/requests":
+            self._send_json(HTTPStatus.OK, _service_requests_payload(self.server))
             return
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
@@ -381,6 +424,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        _record_service_request(
+            self.server,
+            method=self.command,
+            raw_path=self.path,
+            status=status,
+            content_type=content_type,
+        )
 
 
 def render_board_html(project: BacklogProject) -> str:
@@ -861,6 +911,10 @@ def render_board_html(project: BacklogProject) -> str:
         <div><dt>URL</dt><dd id="service-status-url"></dd></div>
       </dl>
       <p id="service-status-message"></p>
+      <section class="dialog-section">
+        <h3>Recent requests</h3>
+        <ul id="service-request-log"></ul>
+      </section>
       <div class="form-actions">
         <button class="secondary-button" type="button" id="service-status-refresh">Refresh</button>
         <button class="primary-button" type="button" id="service-shutdown-confirm">Stop server</button>
@@ -1119,8 +1173,46 @@ def render_board_html(project: BacklogProject) -> str:
       return true;
     }}
 
-    async function openServiceStatus() {{
+    function renderServiceRequestLog(requests) {{
+      const list = document.getElementById("service-request-log");
+      if (!list) return;
+      list.replaceChildren();
+      if (!requests || requests.length === 0) {{
+        const empty = document.createElement("li");
+        empty.textContent = "No requests recorded";
+        list.appendChild(empty);
+        return;
+      }}
+      requests.slice(-10).reverse().forEach((request) => {{
+        const item = document.createElement("li");
+        item.textContent = `${{request.timestamp}} ${{request.method}} ${{request.path}} ${{request.status}}`;
+        list.appendChild(item);
+      }});
+    }}
+
+    async function refreshServiceRequests() {{
+      const response = await fetch("/api/service/requests", {{
+        headers: {{"Accept": "application/json"}},
+        cache: "no-store",
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return false;
+      }}
+      const payload = await response.json();
+      renderServiceRequestLog(payload.requests || []);
+      return true;
+    }}
+
+    async function refreshServicePanel() {{
       const loaded = await refreshServiceStatus();
+      if (!loaded) return false;
+      await refreshServiceRequests();
+      return true;
+    }}
+
+    async function openServiceStatus() {{
+      const loaded = await refreshServicePanel();
       if (!loaded) return;
       if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = false;
       if (serviceStatusDialog && serviceStatusDialog.showModal) serviceStatusDialog.showModal();
@@ -1298,7 +1390,7 @@ def render_board_html(project: BacklogProject) -> str:
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
     dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);
     document.getElementById("service-status-open")?.addEventListener("click", openServiceStatus);
-    document.getElementById("service-status-refresh")?.addEventListener("click", refreshServiceStatus);
+    document.getElementById("service-status-refresh")?.addEventListener("click", refreshServicePanel);
     serviceShutdownConfirm?.addEventListener("click", submitServiceShutdown);
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{

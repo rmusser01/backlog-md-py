@@ -104,6 +104,66 @@ def test_browser_service_shutdown_endpoint_stops_service(tmp_path):
             service.server.server_close()
 
 
+def test_browser_service_request_log_endpoint_records_recent_requests_without_query_strings(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _get_json(f"{service.root_url}health?token=secret")
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _get_text(f"{service.root_url}missing?secret=hidden")
+        request_log = _get_json(f"{service.root_url}api/service/requests")
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 404
+    assert request_log["limit"] == 50
+    assert request_log["requests"][-2:] == [
+        {
+            "method": "GET",
+            "path": "/health",
+            "status": 200,
+            "contentType": "application/json",
+            "timestamp": request_log["requests"][-2]["timestamp"],
+        },
+        {
+            "method": "GET",
+            "path": "/missing",
+            "status": 404,
+            "contentType": "application/json",
+            "timestamp": request_log["requests"][-1]["timestamp"],
+        },
+    ]
+    assert request_log["requests"][-2]["timestamp"].endswith("Z")
+    assert request_log["requests"][-1]["timestamp"].endswith("Z")
+    assert "secret" not in json.dumps(request_log)
+    assert "hidden" not in json.dumps(request_log)
+
+
+def test_browser_service_request_log_keeps_bounded_recent_entries(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _get_text(service.root_url)
+        for index in range(60):
+            _get_json(f"{service.root_url}health?index={index}")
+        request_log = _get_json(f"{service.root_url}api/service/requests")
+    finally:
+        service.shutdown()
+
+    assert request_log["limit"] == 50
+    assert len(request_log["requests"]) == 50
+    assert {entry["path"] for entry in request_log["requests"]} == {"/health"}
+    assert all(entry["status"] == 200 for entry in request_log["requests"])
+
+
 def test_browser_board_payload_revision_changes_after_external_task_file_update(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -187,9 +247,13 @@ def test_browser_board_html_exposes_service_lifecycle_controls(tmp_path):
     assert 'id="service-status-open"' in html
     assert 'id="service-status-dialog"' in html
     assert 'id="service-shutdown-confirm"' in html
+    assert 'id="service-request-log"' in html
     assert "openServiceStatus" in html
+    assert "refreshServiceRequests" in html
+    assert "renderServiceRequestLog" in html
     assert "submitServiceShutdown" in html
     assert "/api/service/status" in html
+    assert "/api/service/requests" in html
     assert "/api/service/shutdown" in html
 
 
