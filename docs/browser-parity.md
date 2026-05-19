@@ -28,7 +28,7 @@ full clone unless explicitly rejected.
 | Rich Markdown editing | Required for full clone | Rendering implemented; editing deferred | Task detail Markdown is rendered through a dependency-free safe HTML renderer. Rich editing must preserve unknown Markdown and frontmatter exactly, so it still needs round-trip visual and parser tests. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
 | Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
-| service mode | Required for full clone | Implemented for status and guarded local shutdown | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Richer logging and live-update shutdown policy remain part of the browser milestone. |
+| service mode | Required for full clone | Implemented for status, request logging, and guarded local shutdown | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Richer live-update shutdown policy remains part of the browser milestone. |
 | Mobile behavior | Required for full clone | Intentionally deferred | Mobile layout should be verified with real browser screenshots after the browser implementation exists. |
 
 ## Acceptance For Full Browser Clone
@@ -42,8 +42,8 @@ A later browser milestone should not be marked complete until it has:
   project settings.
 - Responsive checks for desktop and mobile viewports.
 - A clear service mode lifecycle for any richer browser UI behavior, including
-  logging and live-update shutdown policy beyond the implemented local stop
-  action.
+  live-update shutdown policy beyond the implemented local stop action and
+  bounded request log.
 - Round-trip tests proving rich Markdown editing does not damage frontmatter,
   owned sections, unknown body text, mermaid blocks, or checklist markers.
 - Documentation for any future move beyond the implemented polling/reload

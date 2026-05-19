@@ -243,6 +243,16 @@ def test_agent_critical_inventory_tracks_browser_lifecycle_surface():
     assert item.expected == "browser service status endpoint and guarded local shutdown dialog"
 
 
+def test_agent_critical_inventory_tracks_browser_service_request_log_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:service-request-log"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "bounded browser service request log endpoint and Service dialog list"
+
+
 def test_agent_critical_inventory_tracks_browser_drag_drop_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

@@ -605,11 +605,11 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 85" in result.output
+    assert "implemented: 86" in result.output
     assert "deferred: 1" in result.output
-    assert "total: 86" in result.output
+    assert "total: 87" in result.output
     assert "cli: 44 implemented, 0 deferred, 44 total" in result.output
-    assert "browser: 12 implemented, 0 deferred, 12 total" in result.output
+    assert "browser: 13 implemented, 0 deferred, 13 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 3 implemented, 0 deferred, 3 total" in result.output
     assert "git: 2 implemented, 1 deferred, 3 total" in result.output
@@ -624,6 +624,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"cli:interactive-overview"' in result.output
     assert '"cli:task-plain-detail"' in result.output
     assert '"browser:service-lifecycle"' in result.output
+    assert '"browser:service-request-log"' in result.output
     assert '"browser:task-detail-view"' in result.output
     assert '"browser:markdown-detail-rendering"' in result.output
     assert '"browser:task-create-form"' in result.output

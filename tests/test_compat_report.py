@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 85,
+        "implemented": 86,
         "deferred": 1,
-        "total": 86,
+        "total": 87,
     }
     assert report["categories"]["cli"] == {
         "implemented": 44,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 12,
+        "implemented": 13,
         "deferred": 0,
-        "total": 12,
+        "total": 13,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -66,6 +66,7 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["git:auto-commit"]["status"] == "implemented"
     assert items_by_name["browser:custom-port-service"]["status"] == "implemented"
     assert items_by_name["browser:service-lifecycle"]["status"] == "implemented"
+    assert items_by_name["browser:service-request-log"]["status"] == "implemented"
     assert items_by_name["browser:kanban-drag-drop"]["status"] == "implemented"
     assert items_by_name["browser:task-detail-view"]["status"] == "implemented"
     assert items_by_name["browser:markdown-detail-rendering"]["status"] == "implemented"
