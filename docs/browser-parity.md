@@ -22,6 +22,7 @@ full clone unless explicitly rejected.
 | Task create/edit forms | Required for full clone | Basic create/edit implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint. Rich edit flows remain deferred. |
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
+| General project settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, `zeroPaddedIds`, and `statuses` through a locked settings endpoint. Shell-hook and git automation settings remain outside the browser surface. |
 | Real-time updates | Required for full clone | Implemented with conservative polling | The browser page polls `/api/board` for a deterministic board revision and reloads when external CLI, MCP, or browser-tab edits change task state. Richer SSE/WebSocket updates remain out of scope. |
 | Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
 | Rich Markdown editing | Required for full clone | Intentionally deferred | Rich editing must preserve unknown Markdown and frontmatter exactly, so it needs round-trip visual and parser tests. |
@@ -37,7 +38,7 @@ A later browser milestone should not be marked complete until it has:
 - End-to-end browser tests for rich edit flows beyond the
   implemented drag-and-drop status movement, basic create/edit forms, archive
   confirmation, checklist-state controls, task detail inspection, and
-  Definition of Done default settings.
+  Definition of Done default settings, and safe general project settings.
 - Responsive checks for desktop and mobile viewports.
 - A clear service mode lifecycle for any richer browser UI behavior, including
   logging and live-update shutdown policy.

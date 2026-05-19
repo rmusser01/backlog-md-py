@@ -91,6 +91,7 @@ do not block the first local-file agent cutover candidate.
 | browser:task-archive-confirmation | implemented | browser task archive endpoint and confirmation dialog | browser:task-archive-confirmation |
 | browser:checklist-state-controls | implemented | browser checklist state endpoint and task detail controls | browser:checklist-state-controls |
 | browser:dod-defaults-settings | implemented | browser Definition of Done defaults settings dialog and endpoint | browser:dod-defaults-settings |
+| browser:general-settings | implemented | browser safe general project settings dialog and endpoint | browser:general-settings |
 | browser:live-refresh-polling | implemented | browser board revision polling detects external task changes | browser:live-refresh-polling |
 | core:on-status-change | implemented | onStatusChange hooks | core:on-status-change |
 | core:task-timestamps | implemented | created_date on task/draft create and updated_date on task edits | core:task-timestamps |
