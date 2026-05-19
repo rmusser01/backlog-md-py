@@ -40,6 +40,70 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "Example task" in html
 
 
+def test_browser_service_status_endpoint_returns_runtime_metadata(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        status = _get_json(f"{service.root_url}api/service/status")
+    finally:
+        service.shutdown()
+
+    assert status == {
+        "ok": True,
+        "projectName": "basic-fixture",
+        "projectRoot": str(repo),
+        "backlogDir": str(repo / "backlog"),
+        "host": "127.0.0.1",
+        "port": service.port,
+        "rootUrl": service.root_url,
+        "shutdownSupported": True,
+    }
+
+
+def test_browser_service_shutdown_endpoint_rejects_cross_origin(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json_response(f"{service.root_url}api/service/shutdown", {}, origin="https://example.com")
+        health = _get_json(f"{service.root_url}health")
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert health == {"ok": True, "projectName": "basic-fixture"}
+
+
+def test_browser_service_shutdown_endpoint_stops_service(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(f"{service.root_url}api/service/shutdown", {})
+        service.thread.join(timeout=2)
+        assert response == {
+            "status": 202,
+            "body": {"ok": True, "message": "Shutdown scheduled"},
+        }
+        assert not service.thread.is_alive()
+    finally:
+        if service.thread.is_alive():
+            service.shutdown()
+        else:
+            service.server.server_close()
+
+
 def test_browser_board_payload_revision_changes_after_external_task_file_update(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -106,6 +170,27 @@ def test_browser_board_html_exposes_live_refresh_polling_contract(tmp_path):
     assert "hasOpenDialog" in html
     assert "setInterval" in html
     assert "/api/board" in html
+
+
+def test_browser_board_html_exposes_service_lifecycle_controls(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="service-status-open"' in html
+    assert 'id="service-status-dialog"' in html
+    assert 'id="service-shutdown-confirm"' in html
+    assert "openServiceStatus" in html
+    assert "submitServiceShutdown" in html
+    assert "/api/service/status" in html
+    assert "/api/service/shutdown" in html
 
 
 def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
