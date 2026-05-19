@@ -6,6 +6,7 @@ import pytest
 
 import backlog_py.mcp as mcp
 from backlog_py.core.repository import MutableRepository
+from backlog_py.runtime.locks import ProjectWriteLock
 from backlog_py.mcp import server as mcp_server
 from backlog_py.mcp import tools as mcp_tools
 from backlog_py.mcp.protocol import handle_jsonrpc_message
@@ -30,6 +31,7 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
     assert "document_create" in content
     assert "milestone_add" in content
     assert "definition_of_done_defaults_get" in content
+    assert "project_status(project, recentLimit=5)" in content
     assert "task_create(project, ordinal=None" in content
     assert "task_edit(project, task_id, ordinal=None" in content
 
@@ -58,6 +60,35 @@ def test_task_list_honors_status_and_limit():
 
     assert mcp_tools.task_list(_project(), status="To Do") == []
     assert mcp_tools.task_list(_project(), limit=0) == []
+
+
+def test_project_status_reports_counts_recent_activity_and_project_locks(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.create_task(title="New coordination task", task_id="TASK-2", status="To Do")
+    repository.edit_task("TASK-2", title="Recently updated coordination task")
+
+    with ProjectWriteLock(project.root, operation="task_edit").acquire(timeout=0.1):
+        status = mcp_tools.project_status(project)
+
+    assert status["projectRoot"] == str(repo.resolve())
+    assert status["backlogDir"] == str((repo / "backlog").resolve())
+    assert status["configPath"] == str((repo / "backlog" / "config.yml").resolve())
+    assert status["taskCounts"] == {
+        "active": 2,
+        "completed": 0,
+        "total": 2,
+        "byStatus": {"In Progress": 1, "To Do": 1},
+    }
+    assert status["recentActivity"][0]["id"] == "TASK-2"
+    assert status["recentActivity"][0]["timestampField"] == "updated_date"
+    assert status["recentActivity"][1]["id"] == "TASK-1"
+    assert status["recentActivity"][1]["timestamp"] == "2026-05-10 10:00"
+    assert status["locks"][0]["active"] is True
+    assert status["locks"][0]["operation"] == "task_edit"
+    assert status["locks"][0]["project_root"] == str(repo.resolve())
 
 
 def test_task_list_honors_frontmatter_metadata_filters(tmp_path):
@@ -278,6 +309,7 @@ def test_create_server_returns_sdk_free_stdio_facade_with_ignored_legacy_args():
 
 
 def test_mcp_package_exports_document_milestone_and_dod_tools():
+    assert mcp.project_status.__name__ == "project_status"
     assert mcp.task_archive.__name__ == "task_archive"
     assert mcp.task_complete.__name__ == "task_complete"
     assert mcp.task_board.__name__ == "task_board"

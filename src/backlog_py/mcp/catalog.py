@@ -65,6 +65,12 @@ def _string_array_schema(description: str) -> dict[str, Any]:
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        "project_status",
+        "Return read-only project coordination status for overlap checks.",
+        _project_schema({"recentLimit": {"type": "integer"}}),
+        tool_registry.project_status,
+    ),
     ToolDefinition("task_board", "Return tasks grouped by board status.", _project_schema(), tool_registry.task_board),
     ToolDefinition("task_list", "List tasks in a Backlog.md project.", _project_schema(), tool_registry.task_list),
     ToolDefinition(

@@ -1,15 +1,44 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Callable, TypeVar
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
-from backlog_py.runtime.locks import with_project_write_lock
+from backlog_py.runtime.locks import list_runtime_locks, with_project_write_lock
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
 
 T = TypeVar("T")
+
+
+def project_status(project: BacklogProject, recent_limit: int = 5, recentLimit: int | None = None) -> dict[str, Any]:
+    """Return read-only project coordination status for multi-agent overlap checks."""
+    limit = recentLimit if recentLimit is not None else recent_limit
+    repository = ReadOnlyRepository(project)
+    active_tasks = repository.list_tasks()
+    completed_tasks = repository.list_completed_tasks()
+    tasks = [*active_tasks, *completed_tasks]
+    by_status = Counter(task.status for task in tasks)
+    project_root = project.root.resolve()
+    return {
+        "projectRoot": str(project_root),
+        "backlogDir": str(project.backlog_dir.resolve()),
+        "configPath": str(project.config_path.resolve()),
+        "taskCounts": {
+            "active": len(active_tasks),
+            "completed": len(completed_tasks),
+            "total": len(tasks),
+            "byStatus": dict(sorted(by_status.items())),
+        },
+        "recentActivity": _recent_activity(project, tasks, limit=max(int(limit), 0)),
+        "locks": [
+            lock
+            for lock in list_runtime_locks()
+            if lock.get("kind") == "project" and lock.get("project_root") == str(project_root)
+        ],
+    }
 
 
 def task_search(
@@ -320,6 +349,38 @@ def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]
 
 def _locked(project: BacklogProject, operation: str, fn: Callable[[], T]) -> T:
     return with_project_write_lock(project, operation, fn)
+
+
+def _recent_activity(project: BacklogProject, tasks: list[TaskRecord], *, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    activity = [_activity_summary(project, task) for task in tasks]
+    activity.sort(
+        key=lambda item: (
+            str(item.get("timestamp") or ""),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
+    )
+    return activity[:limit]
+
+
+def _activity_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:
+    summary = _task_summary(project, task)
+    timestamp, timestamp_field = _task_activity_timestamp(task)
+    summary["timestamp"] = timestamp
+    summary["timestampField"] = timestamp_field
+    return summary
+
+
+def _task_activity_timestamp(task: TaskRecord) -> tuple[str | None, str | None]:
+    updated = task.parsed.frontmatter.get("updated_date")
+    if updated is not None:
+        return str(updated), "updated_date"
+    created = task.parsed.frontmatter.get("created_date")
+    if created is not None:
+        return str(created), "created_date"
+    return None, None
 
 
 def _task_summary(project: BacklogProject, task: TaskRecord) -> dict[str, Any]:

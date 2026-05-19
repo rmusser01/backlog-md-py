@@ -35,9 +35,12 @@ def test_tools_list_contains_existing_task_search_tool():
 
     tools = response["result"]["tools"]
     names = {tool["name"] for tool in tools}
+    project_status = next(tool for tool in tools if tool["name"] == "project_status")
     task_search = next(tool for tool in tools if tool["name"] == "task_search")
+    assert "project_status" in names
     assert "task_search" in names
     assert "task_create" in names
+    assert "project" in project_status["inputSchema"]["required"]
     assert task_search["inputSchema"]["type"] == "object"
     assert "project" in task_search["inputSchema"]["required"]
 
