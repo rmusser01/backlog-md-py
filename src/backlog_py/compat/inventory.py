@@ -213,6 +213,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser checklist state endpoint and task detail controls",
         ),
         _implemented(
+            "browser:dod-defaults-settings",
+            "browser-implemented",
+            "web settings",
+            "browser Definition of Done defaults settings dialog and endpoint",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",

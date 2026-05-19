@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlparse
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
 from backlog_py.runtime.locks import with_project_write_lock
+from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
 
@@ -117,6 +118,12 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
             return
+        if path == "/api/settings/dod-defaults":
+            self._send_json(
+                HTTPStatus.OK,
+                {"items": get_definition_of_done_defaults(self.server.project)},
+            )
+            return
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
             try:
@@ -133,6 +140,23 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/settings/dod-defaults":
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                items = _dod_defaults_items_from_payload(self._read_json_body())
+                config = with_project_write_lock(
+                    self.server.project,
+                    "browser_dod_defaults_update",
+                    lambda: replace_definition_of_done_defaults(self.server.project, items),
+                )
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"items": config.definition_of_done or []})
+            return
+
         if path in {"/api/tasks", "/api/tasks/"}:
             if not self._origin_allowed():
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
@@ -530,6 +554,12 @@ def render_board_html(project: BacklogProject) -> str:
       justify-content: flex-end;
       gap: 8px;
     }}
+    .header-actions {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }}
   </style>
 </head>
 <body>
@@ -538,7 +568,10 @@ def render_board_html(project: BacklogProject) -> str:
       <h1>{project_name}</h1>
       <div class="subtitle">Backlog.md board with task creation, editing, and drag-and-drop status movement</div>
     </div>
-    <button class="primary-button" type="button" id="task-create-open">New task</button>
+    <div class="header-actions">
+      <button class="secondary-button" type="button" id="dod-defaults-open">Settings</button>
+      <button class="primary-button" type="button" id="task-create-open">New task</button>
+    </div>
   </header>
   <main class="board">
 {column_markup}
@@ -614,6 +647,25 @@ def render_board_html(project: BacklogProject) -> str:
       </div>
     </div>
   </dialog>
+  <dialog id="dod-defaults-dialog" aria-labelledby="dod-defaults-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="dod-defaults-title">Definition of Done defaults</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <form class="task-form" id="dod-defaults-form">
+        <label>Definition of Done
+          <textarea name="items"></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="secondary-button" type="button" id="dod-defaults-cancel">Cancel</button>
+          <button class="primary-button" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-dialog-title">Task details</h2>
@@ -655,6 +707,8 @@ def render_board_html(project: BacklogProject) -> str:
     const taskEditForm = document.getElementById("task-edit-form");
     const taskArchiveDialog = document.getElementById("task-archive-dialog");
     const taskArchiveConfirm = document.getElementById("task-archive-confirm");
+    const dodDefaultsDialog = document.getElementById("dod-defaults-dialog");
+    const dodDefaultsForm = document.getElementById("dod-defaults-form");
 
     function setText(id, value) {{
       const element = document.getElementById(id);
@@ -757,6 +811,20 @@ def render_board_html(project: BacklogProject) -> str:
       else if (taskCreateDialog) taskCreateDialog.setAttribute("open", "open");
     }}
 
+    async function openDodDefaultsSettings() {{
+      const response = await fetch("/api/settings/dod-defaults");
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const payload = await response.json();
+      if (dodDefaultsForm) {{
+        dodDefaultsForm.elements.items.value = (payload.items || []).join("\\n");
+      }}
+      if (dodDefaultsDialog && dodDefaultsDialog.showModal) dodDefaultsDialog.showModal();
+      else if (dodDefaultsDialog) dodDefaultsDialog.setAttribute("open", "open");
+    }}
+
     async function submitTaskCreate(event) {{
       event.preventDefault();
       const form = event.currentTarget;
@@ -847,6 +915,26 @@ def render_board_html(project: BacklogProject) -> str:
       window.location.reload();
     }}
 
+    async function submitDodDefaultsSettings(event) {{
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const items = String(data.get("items") || "")
+        .split("\\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const response = await fetch("/api/settings/dod-defaults", {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{items}}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      window.location.reload();
+    }}
+
     document.getElementById("task-create-open")?.addEventListener("click", openTaskCreate);
     document.getElementById("task-create-cancel")?.addEventListener("click", () => taskCreateDialog?.close());
     taskCreateForm?.addEventListener("submit", submitTaskCreate);
@@ -854,6 +942,9 @@ def render_board_html(project: BacklogProject) -> str:
     taskEditForm?.addEventListener("submit", submitTaskEdit);
     document.getElementById("task-archive-cancel")?.addEventListener("click", () => taskArchiveDialog?.close());
     taskArchiveConfirm?.addEventListener("click", submitTaskArchive);
+    document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
+    document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
+    dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{
@@ -1145,6 +1236,12 @@ def _task_checklist_kwargs_from_payload(payload: object) -> dict[str, object]:
     return {"check_dod" if checked else "uncheck_dod": [index]}
 
 
+def _dod_defaults_items_from_payload(payload: object) -> list[str]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    return _required_string_list_field(payload, "items")
+
+
 def _required_string_field(payload: dict[object, object], field: str) -> str:
     value = payload.get(field)
     if not isinstance(value, str) or not value.strip():
@@ -1157,6 +1254,22 @@ def _required_text_field(payload: dict[object, object], field: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"Request body field {field} must be a string")
     return value.strip()
+
+
+def _required_string_list_field(payload: dict[object, object], field: str) -> list[str]:
+    if field not in payload:
+        raise ValueError(f"Request body field {field} must be a list of strings")
+    value = payload.get(field)
+    if not isinstance(value, list):
+        raise ValueError(f"Request body field {field} must be a list of strings")
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"Request body field {field} must be a list of strings")
+        stripped = item.strip()
+        if stripped:
+            normalized.append(stripped)
+    return normalized
 
 
 def _optional_string_field(payload: dict[object, object], field: str) -> str | None:
