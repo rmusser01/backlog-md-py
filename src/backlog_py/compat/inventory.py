@@ -219,6 +219,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser Definition of Done defaults settings dialog and endpoint",
         ),
         _implemented(
+            "browser:live-refresh-polling",
+            "browser-implemented",
+            "web live updates",
+            "browser board revision polling detects external task changes",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",

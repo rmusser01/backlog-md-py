@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import webbrowser
@@ -91,9 +92,9 @@ def run_browser_service_foreground(
 
 def build_board_payload(project: BacklogProject) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service."""
-    repository = ReadOnlyRepository(project)
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     board = repository.board()
-    return {
+    payload: dict[str, object] = {
         "project": {
             "name": project.config.project_name,
             "root": str(project.root),
@@ -105,6 +106,8 @@ def build_board_payload(project: BacklogProject) -> dict[str, object]:
             for status, tasks in board.items()
         },
     }
+    payload["revision"] = _board_revision(payload)
+    return payload
 
 
 class _BrowserHttpHandler(BaseHTTPRequestHandler):
@@ -296,6 +299,7 @@ def render_board_html(project: BacklogProject) -> str:
     """Render a browser board with basic task creation, editing, and status movement."""
     payload = build_board_payload(project)
     project_name = escape(project.config.project_name)
+    board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
     columns = columns_obj if isinstance(columns_obj, dict) else {}
     column_markup = "\n".join(
@@ -573,7 +577,7 @@ def render_board_html(project: BacklogProject) -> str:
       <button class="primary-button" type="button" id="task-create-open">New task</button>
     </div>
   </header>
-  <main class="board">
+  <main class="board" data-board-revision="{board_revision}">
 {column_markup}
   </main>
   <dialog id="task-create-dialog" aria-labelledby="task-create-title">
@@ -709,10 +713,41 @@ def render_board_html(project: BacklogProject) -> str:
     const taskArchiveConfirm = document.getElementById("task-archive-confirm");
     const dodDefaultsDialog = document.getElementById("dod-defaults-dialog");
     const dodDefaultsForm = document.getElementById("dod-defaults-form");
+    const boardElement = document.querySelector("[data-board-revision]");
+    const boardRefreshIntervalMs = 5000;
+    let currentBoardRevision = boardElement?.dataset.boardRevision || "";
+    let boardRefreshInFlight = false;
 
     function setText(id, value) {{
       const element = document.getElementById(id);
       if (element) element.textContent = value || "—";
+    }}
+
+    function hasOpenDialog() {{
+      return Boolean(document.querySelector("dialog[open]"));
+    }}
+
+    async function pollBoardRevision() {{
+      if (!currentBoardRevision || boardRefreshInFlight) return;
+      boardRefreshInFlight = true;
+      try {{
+        const response = await fetch("/api/board", {{
+          headers: {{"Accept": "application/json"}},
+          cache: "no-store",
+        }});
+        if (!response.ok) {{
+          console.error(await response.text());
+          return;
+        }}
+        const payload = await response.json();
+        if (payload.revision && payload.revision !== currentBoardRevision && !hasOpenDialog()) {{
+          window.location.reload();
+        }}
+      }} catch (error) {{
+        console.error(error);
+      }} finally {{
+        boardRefreshInFlight = false;
+      }}
     }}
 
     function renderChecklist(id, items, section) {{
@@ -995,6 +1030,10 @@ def render_board_html(project: BacklogProject) -> str:
         window.location.reload();
       }});
     }});
+    window.setInterval(pollBoardRevision, boardRefreshIntervalMs);
+    document.addEventListener("visibilitychange", () => {{
+      if (!document.hidden) pollBoardRevision();
+    }});
   </script>
 </body>
 </html>
@@ -1030,6 +1069,11 @@ def _render_task(raw_task: object) -> str:
 {meta}
         <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button><button class="details-button" type="button" data-task-edit="{task_id}">Edit</button><button class="details-button" type="button" data-task-archive="{task_id}">Archive</button></div>
       </article>"""
+
+
+def _board_revision(payload: Mapping[str, object]) -> str:
+    revision_source = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(revision_source.encode("utf-8")).hexdigest()
 
 
 def _render_status_options(statuses: list[str]) -> str:

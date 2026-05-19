@@ -22,7 +22,7 @@ full clone unless explicitly rejected.
 | Task create/edit forms | Required for full clone | Basic create/edit implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint. Rich edit flows remain deferred. |
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
-| Real-time updates | Required for full clone | Intentionally deferred | Live browser state needs a service process or polling contract and concurrent mutation tests. |
+| Real-time updates | Required for full clone | Implemented with conservative polling | The browser page polls `/api/board` for a deterministic board revision and reloads when external CLI, MCP, or browser-tab edits change task state. Richer SSE/WebSocket updates remain out of scope. |
 | Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
 | Rich Markdown editing | Required for full clone | Intentionally deferred | Rich editing must preserve unknown Markdown and frontmatter exactly, so it needs round-trip visual and parser tests. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
@@ -43,8 +43,8 @@ A later browser milestone should not be marked complete until it has:
   logging and live-update shutdown policy.
 - Round-trip tests proving rich Markdown editing does not damage frontmatter,
   owned sections, unknown body text, mermaid blocks, or checklist markers.
-- Documentation that states whether the browser uses polling, server-sent
-  events, WebSockets, or static reloads for real-time updates.
+- Documentation for any future move beyond the implemented polling/reload
+  contract, such as server-sent events or WebSockets.
 
 ## Rejected For Agent Cutover
 

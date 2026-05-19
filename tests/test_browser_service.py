@@ -40,6 +40,74 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "Example task" in html
 
 
+def test_browser_board_payload_revision_changes_after_external_task_file_update(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before = _get_json(f"{service.root_url}/api/board")
+        task_file = _task_file(repo)
+        task_file.write_text(
+            task_file.read_text(encoding="utf-8").replace(
+                "title: Example task",
+                "title: Externally updated task",
+            ),
+            encoding="utf-8",
+        )
+        after = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert before["revision"] != after["revision"]
+    assert after["columns"]["In Progress"][0]["title"] == "Externally updated task"
+
+
+def test_browser_board_endpoint_does_not_refresh_remote_refs_during_polling(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    remote_refreshes = []
+
+    from backlog_py.core import repository as repository_module
+    from backlog_py.browser.service import start_browser_service
+
+    monkeypatch.setattr(
+        repository_module,
+        "maybe_fetch_remote_refs",
+        lambda project: remote_refreshes.append(project.root),
+    )
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _get_json(f"{service.root_url}/api/board")
+        _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert remote_refreshes == []
+
+
+def test_browser_board_html_exposes_live_refresh_polling_contract(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'data-board-revision="' in html
+    assert "pollBoardRevision" in html
+    assert "hasOpenDialog" in html
+    assert "setInterval" in html
+    assert "/api/board" in html
+
+
 def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
