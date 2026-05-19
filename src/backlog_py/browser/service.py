@@ -808,6 +808,12 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Acceptance Criteria
           <textarea name="acceptanceCriteria"></textarea>
         </label>
+        <label>Implementation Notes
+          <textarea name="implementationNotes"></textarea>
+        </label>
+        <label>Final Summary
+          <textarea name="finalSummary"></textarea>
+        </label>
         <div class="form-actions">
           <button class="secondary-button" type="button" id="task-edit-cancel">Cancel</button>
           <button class="primary-button" type="submit">Save</button>
@@ -1091,6 +1097,8 @@ def render_board_html(project: BacklogProject) -> str:
       taskEditForm.elements.status.value = task.status || "";
       taskEditForm.elements.description.value = task.description || "";
       taskEditForm.elements.acceptanceCriteria.value = checklistText(task.acceptanceCriteria);
+      taskEditForm.elements.implementationNotes.value = task.implementationNotes || "";
+      taskEditForm.elements.finalSummary.value = task.finalSummary || "";
       setText("task-edit-title", `${{task.id}} - Edit task`);
       if (taskEditDialog && taskEditDialog.showModal) taskEditDialog.showModal();
       else if (taskEditDialog) taskEditDialog.setAttribute("open", "open");
@@ -1250,6 +1258,8 @@ def render_board_html(project: BacklogProject) -> str:
           status: String(data.get("status") || ""),
           description: String(data.get("description") || ""),
           acceptanceCriteria: criteria,
+          implementationNotes: String(data.get("implementationNotes") || ""),
+          finalSummary: String(data.get("finalSummary") || ""),
         }}),
       }});
       if (!response.ok) {{
@@ -1773,8 +1783,13 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
     for payload_key, repository_key in (("title", "title"), ("status", "status")):
         if payload_key in payload:
             edit_kwargs[repository_key] = _required_string_field(payload, payload_key)
-    if "description" in payload:
-        edit_kwargs["description"] = _required_text_field(payload, "description")
+    for payload_key, repository_key in (
+        ("description", "description"),
+        ("implementationNotes", "notes"),
+        ("finalSummary", "final_summary"),
+    ):
+        if payload_key in payload:
+            edit_kwargs[repository_key] = _required_text_field(payload, payload_key)
     value = _optional_string_list_field(payload, "acceptanceCriteria")
     if value is not None:
         edit_kwargs["acceptance_criteria"] = value

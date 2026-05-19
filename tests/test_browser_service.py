@@ -561,6 +561,46 @@ def test_browser_task_edit_endpoint_updates_owned_fields_under_project_lock(tmp_
     assert "Preserve completed acceptance criteria raw line" not in edited_source
 
 
+def test_browser_task_edit_endpoint_updates_rich_markdown_sections_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/edit",
+            {
+                "implementationNotes": "## Browser notes\n\n- **Keep** parser sections",
+                "finalSummary": "Browser summary with `code`.",
+            },
+        )
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert lock_operations == [(repo, "browser_task_edit")]
+    assert response["body"]["task"]["implementationNotes"] == "## Browser notes\n\n- **Keep** parser sections"
+    assert response["body"]["task"]["finalSummary"] == "Browser summary with `code`."
+    assert "<h2>Browser notes</h2>" in detail["implementationNotesHtml"]
+    assert "<strong>Keep</strong>" in detail["implementationNotesHtml"]
+    assert "<code>code</code>" in detail["finalSummaryHtml"]
+    edited_source = _task_file(repo).read_text(encoding="utf-8")
+    assert "## Browser notes" in edited_source
+    assert "Browser summary with `code`." in edited_source
+
+
 def test_browser_task_edit_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -574,6 +614,27 @@ def test_browser_task_edit_endpoint_rejects_invalid_payload_without_mutation(tmp
             _post_json(
                 f"{service.root_url}/api/tasks/TASK-1/edit",
                 {"title": "", "acceptanceCriteria": "Edited criterion"},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
+def test_browser_task_edit_endpoint_rejects_invalid_rich_section_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/edit",
+                {"title": "Should not write", "implementationNotes": ["not", "a", "string"]},
             )
     finally:
         service.shutdown()
@@ -623,6 +684,12 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert 'name="status"' in html
     assert 'name="description"' in html
     assert 'name="acceptanceCriteria"' in html
+    assert 'name="implementationNotes"' in html
+    assert 'name="finalSummary"' in html
+    assert "taskEditForm.elements.implementationNotes.value" in html
+    assert "taskEditForm.elements.finalSummary.value" in html
+    assert "implementationNotes: String(data.get(\"implementationNotes\") || \"\")" in html
+    assert "finalSummary: String(data.get(\"finalSummary\") || \"\")" in html
     assert "submitTaskEdit" in html
     assert "/api/tasks/" in html
 
