@@ -79,12 +79,14 @@ larger task commands:
   service endpoint.
 - Browser task detail checklist controls for Acceptance Criteria and Definition
   of Done check/uncheck state, backed by the project write lock.
+- Browser Definition of Done defaults settings dialog and loopback endpoint,
+  backed by the project write lock and safe config writer.
 
 ## Remaining Full-Parity Work
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, settings, live updates | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, task detail dialogs, and AC/DoD checklist state controls are implemented; richer browser editing and settings UI remain deferred |
+| Browser UI | responsive Kanban polish, rich Markdown editing, mermaid rendering, broader settings, live updates | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, task detail dialogs, AC/DoD checklist state controls, and DoD defaults settings are implemented; richer browser editing and broader settings UI remain deferred |
 | Browser service | advanced service logging and live-update shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |

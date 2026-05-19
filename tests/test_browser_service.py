@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
-from backlog_py.storage.config import set_config_value
+from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
 
 
@@ -539,6 +539,96 @@ def test_browser_task_checklist_endpoint_rejects_cross_origin_without_mutation(t
     assert _task_file(repo).read_text(encoding="utf-8") == before
 
 
+def test_browser_dod_defaults_endpoint_returns_configured_defaults(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    replace_definition_of_done_defaults(project, ["Tests pass", "Docs updated"])
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _get_json(f"{service.root_url}/api/settings/dod-defaults")
+    finally:
+        service.shutdown()
+
+    assert response == {"items": ["Tests pass", "Docs updated"]}
+
+
+def test_browser_dod_defaults_update_endpoint_writes_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/settings/dod-defaults",
+            {"items": [" Tests pass ", "", "Docs updated"]},
+        )
+    finally:
+        service.shutdown()
+
+    assert response == {"status": 200, "body": {"items": ["Tests pass", "Docs updated"]}}
+    assert lock_operations == [(repo, "browser_dod_defaults_update")]
+    assert get_definition_of_done_defaults(discover_project(Path.cwd(), explicit_cwd=repo)) == [
+        "Tests pass",
+        "Docs updated",
+    ]
+
+
+def test_browser_dod_defaults_update_rejects_invalid_payload_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    replace_definition_of_done_defaults(project, ["Tests pass"])
+    before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/settings/dod-defaults", {"items": "Tests pass"})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
+
+
+def test_browser_dod_defaults_update_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    replace_definition_of_done_defaults(project, ["Tests pass"])
+    before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/dod-defaults",
+                {"items": ["Docs updated"]},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
+
+
 def test_browser_board_html_exposes_task_checklist_state_controls(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -555,6 +645,27 @@ def test_browser_board_html_exposes_task_checklist_state_controls(tmp_path):
     assert 'data-checklist-section="definitionOfDone"' in html
     assert "submitTaskChecklistState" in html
     assert "/checklist" in html
+
+
+def test_browser_board_html_exposes_dod_defaults_settings_dialog(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="dod-defaults-open"' in html
+    assert 'id="dod-defaults-dialog"' in html
+    assert 'id="dod-defaults-form"' in html
+    assert 'name="items"' in html
+    assert "openDodDefaultsSettings" in html
+    assert "submitDodDefaultsSettings" in html
+    assert "/api/settings/dod-defaults" in html
 
 
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
