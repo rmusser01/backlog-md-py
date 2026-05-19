@@ -189,6 +189,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "read-only browser task detail endpoint and dialog",
         ),
         _implemented(
+            "browser:markdown-detail-rendering",
+            "browser-implemented",
+            "web TaskDetailsModal",
+            "safe browser Markdown rendering for task detail description, implementation notes, and final summary",
+        ),
+        _implemented(
             "browser:task-create-form",
             "browser-implemented",
             "web task create form",

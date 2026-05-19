@@ -190,6 +190,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:markdown-detail-rendering"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:task-create-form"
     command: ["backlog", "browser"]
     agent_critical: false
