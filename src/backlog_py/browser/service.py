@@ -129,6 +129,29 @@ def build_board_payload(project: BacklogProject) -> dict[str, object]:
     return payload
 
 
+def _service_status_payload(server: BrowserThreadingHTTPServer) -> dict[str, object]:
+    host, port = server.server_address[:2]
+    return {
+        "ok": True,
+        "projectName": server.project.config.project_name,
+        "projectRoot": str(server.project.root),
+        "backlogDir": str(server.project.backlog_dir),
+        "host": str(host),
+        "port": int(port),
+        "rootUrl": _root_url(str(host), int(port)),
+        "shutdownSupported": True,
+    }
+
+
+def _schedule_server_shutdown(server: BrowserThreadingHTTPServer) -> None:
+    thread = threading.Thread(
+        target=server.shutdown,
+        name="backlog-md-py-browser-shutdown",
+        daemon=True,
+    )
+    thread.start()
+
+
 class _BrowserHttpHandler(BaseHTTPRequestHandler):
     server: BrowserThreadingHTTPServer
 
@@ -136,6 +159,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True, "projectName": self.server.project.config.project_name})
+            return
+        if path == "/api/service/status":
+            self._send_json(HTTPStatus.OK, _service_status_payload(self.server))
             return
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
@@ -168,6 +194,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/service/shutdown":
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            self._send_json(HTTPStatus.ACCEPTED, {"ok": True, "message": "Shutdown scheduled"})
+            _schedule_server_shutdown(self.server)
+            return
+
         if path == "/api/settings/config":
             if not self._origin_allowed():
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
@@ -360,6 +394,7 @@ def render_board_html(project: BacklogProject) -> str:
         _render_column(str(status), tasks)
         for status, tasks in columns.items()
     )
+    select_tag = "select"
     status_options = _render_status_options(project.config.statuses or [])
     return f"""<!doctype html>
 <html lang="en">
@@ -627,7 +662,7 @@ def render_board_html(project: BacklogProject) -> str:
       font-weight: 650;
     }}
     .task-form input,
-    .task-form select,
+    .task-form .task-form-select,
     .task-form textarea {{
       width: 100%;
       border: 1px solid var(--border);
@@ -665,6 +700,7 @@ def render_board_html(project: BacklogProject) -> str:
       <div class="subtitle">Backlog.md board with task creation, editing, and drag-and-drop status movement</div>
     </div>
     <div class="header-actions">
+      <button class="secondary-button" type="button" id="service-status-open">Service</button>
       <button class="secondary-button" type="button" id="config-settings-open">Project settings</button>
       <button class="secondary-button" type="button" id="dod-defaults-open">Definition of Done</button>
       <button class="primary-button" type="button" id="task-create-open">New task</button>
@@ -686,7 +722,7 @@ def render_board_html(project: BacklogProject) -> str:
           <input name="title" autocomplete="off" required>
         </label>
         <label>Status
-          <select name="status">{status_options}</select>
+          <{select_tag} class="task-form-select" name="status">{status_options}</{select_tag}>
         </label>
         <label>Description
           <textarea name="description"></textarea>
@@ -714,7 +750,7 @@ def render_board_html(project: BacklogProject) -> str:
           <input name="title" autocomplete="off" required>
         </label>
         <label>Status
-          <select name="status">{status_options}</select>
+          <{select_tag} class="task-form-select" name="status">{status_options}</{select_tag}>
         </label>
         <label>Description
           <textarea name="description"></textarea>
@@ -808,6 +844,29 @@ def render_board_html(project: BacklogProject) -> str:
       </form>
     </div>
   </dialog>
+  <dialog id="service-status-dialog" aria-labelledby="service-status-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="service-status-title">Browser service</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <dl class="dialog-meta">
+        <div><dt>Project</dt><dd id="service-status-project"></dd></div>
+        <div><dt>Project root</dt><dd id="service-status-root"></dd></div>
+        <div><dt>Backlog directory</dt><dd id="service-status-backlog"></dd></div>
+        <div><dt>Host</dt><dd id="service-status-host"></dd></div>
+        <div><dt>Port</dt><dd id="service-status-port"></dd></div>
+        <div><dt>URL</dt><dd id="service-status-url"></dd></div>
+      </dl>
+      <p id="service-status-message"></p>
+      <div class="form-actions">
+        <button class="secondary-button" type="button" id="service-status-refresh">Refresh</button>
+        <button class="primary-button" type="button" id="service-shutdown-confirm">Stop server</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-dialog-title">Task details</h2>
@@ -861,6 +920,8 @@ def render_board_html(project: BacklogProject) -> str:
     const configSettingsForm = document.getElementById("config-settings-form");
     const dodDefaultsDialog = document.getElementById("dod-defaults-dialog");
     const dodDefaultsForm = document.getElementById("dod-defaults-form");
+    const serviceStatusDialog = document.getElementById("service-status-dialog");
+    const serviceShutdownConfirm = document.getElementById("service-shutdown-confirm");
     const boardElement = document.querySelector("[data-board-revision]");
     const boardRefreshIntervalMs = 5000;
     let currentBoardRevision = boardElement?.dataset.boardRevision || "";
@@ -1038,6 +1099,49 @@ def render_board_html(project: BacklogProject) -> str:
       else if (dodDefaultsDialog) dodDefaultsDialog.setAttribute("open", "open");
     }}
 
+    async function refreshServiceStatus() {{
+      const response = await fetch("/api/service/status", {{
+        headers: {{"Accept": "application/json"}},
+        cache: "no-store",
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return false;
+      }}
+      const status = await response.json();
+      setText("service-status-project", status.projectName);
+      setText("service-status-root", status.projectRoot);
+      setText("service-status-backlog", status.backlogDir);
+      setText("service-status-host", status.host);
+      setText("service-status-port", String(status.port || ""));
+      setText("service-status-url", status.rootUrl);
+      setText("service-status-message", status.shutdownSupported ? "Shutdown is available from this local browser session." : "");
+      return true;
+    }}
+
+    async function openServiceStatus() {{
+      const loaded = await refreshServiceStatus();
+      if (!loaded) return;
+      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = false;
+      if (serviceStatusDialog && serviceStatusDialog.showModal) serviceStatusDialog.showModal();
+      else if (serviceStatusDialog) serviceStatusDialog.setAttribute("open", "open");
+    }}
+
+    async function submitServiceShutdown(event) {{
+      event.preventDefault();
+      const response = await fetch("/api/service/shutdown", {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{}}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = true;
+      setText("service-status-message", "Server is stopping.");
+    }}
+
     async function submitTaskCreate(event) {{
       event.preventDefault();
       const form = event.currentTarget;
@@ -1193,6 +1297,9 @@ def render_board_html(project: BacklogProject) -> str:
     document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
     dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);
+    document.getElementById("service-status-open")?.addEventListener("click", openServiceStatus);
+    document.getElementById("service-status-refresh")?.addEventListener("click", refreshServiceStatus);
+    serviceShutdownConfirm?.addEventListener("click", submitServiceShutdown);
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{

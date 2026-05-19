@@ -183,6 +183,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog browser --port <port> --no-open and browser service lifecycle",
         ),
         _implemented(
+            "browser:service-lifecycle",
+            "browser-implemented",
+            "web service mode",
+            "browser service status endpoint and guarded local shutdown dialog",
+        ),
+        _implemented(
             "browser:task-detail-view",
             "browser-implemented",
             "web TaskDetailsModal",

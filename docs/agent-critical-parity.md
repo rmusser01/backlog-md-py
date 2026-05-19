@@ -85,6 +85,7 @@ do not block the first local-file agent cutover candidate.
 | cli:task-plain-detail | implemented | task and draft plain detail output with file path, status, dates, and checklist sections | cli:task-plain-detail |
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
+| browser:service-lifecycle | implemented | browser service status endpoint and guarded local shutdown dialog | browser:service-lifecycle |
 | browser:task-detail-view | implemented | read-only browser task detail endpoint and dialog | browser:task-detail-view |
 | browser:markdown-detail-rendering | implemented | safe browser Markdown rendering for task detail description, implementation notes, and final summary | browser:markdown-detail-rendering |
 | browser:task-create-form | implemented | basic browser task create endpoint and form | browser:task-create-form |

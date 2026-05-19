@@ -90,13 +90,16 @@ larger task commands:
 - Browser board live-refresh polling through a deterministic `/api/board`
   revision, allowing open pages to detect external CLI, MCP, or browser-tab
   task changes and reload when no dialog is open.
+- Browser service status and guarded local shutdown controls through
+  `/api/service/status`, `/api/service/shutdown`, and an in-page Service
+  dialog.
 
 ## Remaining Full-Parity Work
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | responsive Kanban polish, rich Markdown editing, executable mermaid rendering, git/shell settings, richer live-update transports | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, and polling-based live refresh are implemented; richer browser editing and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
-| Browser service | advanced service logging and shutdown behavior | Custom port, no-open, foreground lifecycle, health, board JSON with deterministic revisions, task create/edit/archive/checklist/detail JSON, static board snapshot, and polling refresh are implemented |
+| Browser UI | responsive Kanban polish, rich Markdown editing, executable mermaid rendering, git/shell settings, richer live-update transports | Basic board service, drag-and-drop status movement, basic task creation/editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, polling-based live refresh, and service status/shutdown dialog controls are implemented; richer browser editing and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
+| Browser service | advanced service logging and shutdown behavior | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, board JSON with deterministic revisions, task create/edit/archive/checklist/detail JSON, static board snapshot, and polling refresh are implemented; richer request logging remains deferred |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 
