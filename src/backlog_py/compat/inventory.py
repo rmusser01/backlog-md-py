@@ -285,6 +285,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser board revision Server-Sent Events with polling fallback",
         ),
         _implemented(
+            "browser:service-transport-shutdown",
+            "browser-implemented",
+            "web service mode",
+            "browser SSE shutdown event and client transport teardown policy",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",
