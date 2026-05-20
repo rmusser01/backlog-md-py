@@ -741,6 +741,21 @@ def render_board_html(project: BacklogProject) -> str:
       flex-wrap: wrap;
       justify-content: flex-end;
     }}
+    @media (max-width: 720px) {{
+      header {{ flex-direction: column; align-items: stretch; padding: 16px; }}
+      h1 {{ font-size: 20px; }}
+      .subtitle {{ font-size: 13px; }}
+      .header-actions {{ width: 100%; justify-content: stretch; }}
+      .header-actions button {{ flex: 1 1 180px; }}
+      .board {{ grid-template-columns: 1fr; padding: 14px; gap: 14px; }}
+      .task-actions {{ justify-content: stretch; }}
+      .task-actions button {{ flex: 1 1 120px; }}
+      dialog {{ max-height: calc(100dvh - 24px); overflow: auto; }}
+      .dialog-header {{ gap: 10px; padding: 14px; }}
+      .dialog-body {{ padding: 14px; }}
+      .form-actions {{ flex-direction: column-reverse; }}
+      .form-actions button {{ width: 100%; }}
+    }}
   </style>
 </head>
 <body>

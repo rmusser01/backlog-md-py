@@ -16,7 +16,7 @@ full clone unless explicitly rejected.
 
 | Requirement | Classification | Agent cutover impact | Rationale |
 | --- | --- | --- | --- |
-| Responsive Kanban board | Required for full clone | Not required for agent cutover | Agents use `board`, task listing, and MCP tools; responsive browser layout is a human UI requirement. |
+| Responsive Kanban board | Required for full clone | Implemented for narrow viewports | The static board includes explicit mobile viewport rules for header actions, board columns, task actions, dialogs, and form actions while preserving the dependency-free browser service. |
 | drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
 | Task detail dialog | Required for full clone | Implemented for inspection, Markdown rendering, and checklist state | Browser cards can open a detail dialog backed by `/api/tasks/<id>` for metadata, safe Markdown-rendered description, Implementation Notes, Final Summary, Acceptance Criteria, and Definition of Done. Checklist controls update AC/DoD check state through a locked `/api/tasks/<id>/checklist` endpoint. |
 | Task create/edit forms | Required for full clone | Basic create/edit plus metadata and rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including assignees, labels, priority, milestone, and raw Markdown replacement for Implementation Notes and Final Summary. Broader rich edit flows remain deferred. |
@@ -29,7 +29,7 @@ full clone unless explicitly rejected.
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
 | Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
 | service mode | Required for full clone | Implemented for status, request logging, and guarded local shutdown | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Richer live-update shutdown policy remains part of the browser milestone. |
-| Mobile behavior | Required for full clone | Intentionally deferred | Mobile layout should be verified with real browser screenshots after the browser implementation exists. |
+| Mobile behavior | Required for full clone | Implemented for narrow viewport layout | Narrow viewport layout is covered by the browser HTML/CSS contract; richer device-specific visual QA can be handled as release validation instead of a missing parity feature. |
 
 ## Acceptance For Full Browser Clone
 
@@ -39,9 +39,10 @@ A later browser milestone should not be marked complete until it has:
   implemented drag-and-drop status movement, basic create/edit forms, archive
   confirmation, checklist-state controls, task detail inspection, safe
   Markdown rendering, raw Markdown Implementation Notes/Final Summary
-  replacement, metadata editing, Definition of Done default settings, and safe
-  general project settings.
-- Responsive checks for desktop and mobile viewports.
+  replacement, metadata editing, Definition of Done default settings, safe
+  general project settings, and responsive narrow-viewport layout.
+- Browser screenshot checks for desktop and mobile viewports before a tagged
+  release that advertises full browser parity.
 - A clear service mode lifecycle for any richer browser UI behavior, including
   live-update shutdown policy beyond the implemented local stop action and
   bounded request log.

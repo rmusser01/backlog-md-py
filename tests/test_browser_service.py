@@ -232,6 +232,28 @@ def test_browser_board_html_exposes_live_refresh_polling_contract(tmp_path):
     assert "/api/board" in html
 
 
+def test_browser_board_html_exposes_responsive_layout_contract(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
+    assert "@media (max-width: 720px)" in html
+    assert "header { flex-direction: column;" in html
+    assert ".header-actions { width: 100%;" in html
+    assert ".header-actions button { flex: 1 1 180px;" in html
+    assert ".board { grid-template-columns: 1fr;" in html
+    assert "dialog { max-height: calc(100dvh - 24px);" in html
+    assert ".form-actions { flex-direction: column-reverse;" in html
+
+
 def test_browser_board_html_exposes_service_lifecycle_controls(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)

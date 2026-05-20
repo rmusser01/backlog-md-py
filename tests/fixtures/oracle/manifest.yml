@@ -182,6 +182,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:responsive-layout"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:custom-port-service"
     command: ["backlog", "browser", "--port", "8080", "--no-open"]
     agent_critical: false
