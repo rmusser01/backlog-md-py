@@ -177,6 +177,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog browser",
         ),
         _implemented(
+            "browser:responsive-layout",
+            "browser-implemented",
+            "web board layout",
+            "responsive browser board layout for narrow viewports",
+        ),
+        _implemented(
             "browser:custom-port-service",
             "browser-implemented",
             "CLI-INSTRUCTIONS.md",

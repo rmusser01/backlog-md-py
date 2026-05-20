@@ -84,6 +84,7 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-overview | implemented | backlog overview interactive project statistics dashboard | cli:interactive-overview |
 | cli:task-plain-detail | implemented | task and draft plain detail output with file path, status, dates, and checklist sections | cli:task-plain-detail |
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
+| browser:responsive-layout | implemented | responsive browser board layout for narrow viewports | browser:responsive-layout |
 | browser:custom-port-service | implemented | backlog browser --port <port> --no-open and browser service lifecycle | browser:custom-port-service |
 | browser:service-lifecycle | implemented | browser service status endpoint and guarded local shutdown dialog | browser:service-lifecycle |
 | browser:service-request-log | implemented | bounded browser service request log endpoint and Service dialog list | browser:service-request-log |

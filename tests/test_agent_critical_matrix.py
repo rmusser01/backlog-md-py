@@ -233,6 +233,16 @@ def test_agent_critical_inventory_tracks_browser_service_surface():
     assert item.expected == "backlog browser --port <port> --no-open and browser service lifecycle"
 
 
+def test_agent_critical_inventory_tracks_browser_responsive_layout_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:responsive-layout"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "responsive browser board layout for narrow viewports"
+
+
 def test_agent_critical_inventory_tracks_browser_lifecycle_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
