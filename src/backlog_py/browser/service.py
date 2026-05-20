@@ -25,6 +25,7 @@ from backlog_py.storage.config import (
 )
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+_BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
         "autoOpenBrowser",
@@ -205,6 +206,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/service/requests":
             self._send_json(HTTPStatus.OK, _service_requests_payload(self.server))
+            return
+        if path == "/api/board/events":
+            self._send_board_revision_event(build_board_payload(self.server.project))
             return
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
@@ -416,6 +420,25 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def _send_html(self, status: HTTPStatus, html: str) -> None:
         self._send_text(status, html, content_type="text/html; charset=utf-8")
+
+    def _send_board_revision_event(self, payload: Mapping[str, object]) -> None:
+        event = _board_revision_sse_event(str(payload.get("revision", "")))
+        data = event.encode("utf-8")
+        content_type = "text/event-stream; charset=utf-8"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        _record_service_request(
+            self.server,
+            method=self.command,
+            raw_path=self.path,
+            status=HTTPStatus.OK,
+            content_type=content_type,
+        )
 
     def _send_text(self, status: HTTPStatus, text: str, *, content_type: str) -> None:
         data = text.encode("utf-8")
@@ -1013,6 +1036,8 @@ def render_board_html(project: BacklogProject) -> str:
     const boardRefreshIntervalMs = 5000;
     let currentBoardRevision = boardElement?.dataset.boardRevision || "";
     let boardRefreshInFlight = false;
+    let boardRefreshTimer = null;
+    let boardRevisionEvents = null;
 
     function setText(id, value) {{
       const element = document.getElementById(id);
@@ -1028,6 +1053,12 @@ def render_board_html(project: BacklogProject) -> str:
       return Boolean(document.querySelector("dialog[open]"));
     }}
 
+    function handleBoardRevision(nextRevision) {{
+      if (nextRevision && nextRevision !== currentBoardRevision && !hasOpenDialog()) {{
+        window.location.reload();
+      }}
+    }}
+
     async function pollBoardRevision() {{
       if (!currentBoardRevision || boardRefreshInFlight) return;
       boardRefreshInFlight = true;
@@ -1041,14 +1072,36 @@ def render_board_html(project: BacklogProject) -> str:
           return;
         }}
         const payload = await response.json();
-        if (payload.revision && payload.revision !== currentBoardRevision && !hasOpenDialog()) {{
-          window.location.reload();
-        }}
+        handleBoardRevision(payload.revision);
       }} catch (error) {{
         console.error(error);
       }} finally {{
         boardRefreshInFlight = false;
       }}
+    }}
+
+    function startBoardRevisionPolling() {{
+      if (boardRefreshTimer) return;
+      boardRefreshTimer = window.setInterval(pollBoardRevision, boardRefreshIntervalMs);
+    }}
+
+    function connectBoardRevisionEvents() {{
+      if (!("EventSource" in window)) return false;
+      boardRevisionEvents = new EventSource("/api/board/events");
+      boardRevisionEvents.addEventListener("revision", (event) => {{
+        try {{
+          const payload = JSON.parse(event.data || "{{}}");
+          handleBoardRevision(payload.revision);
+        }} catch (error) {{
+          console.error(error);
+        }}
+      }});
+      boardRevisionEvents.onerror = () => {{
+        if (boardRevisionEvents?.readyState === EventSource.CLOSED) {{
+          startBoardRevisionPolling();
+        }}
+      }};
+      return true;
     }}
 
     function renderChecklist(id, items, section) {{
@@ -1491,7 +1544,7 @@ def render_board_html(project: BacklogProject) -> str:
         window.location.reload();
       }});
     }});
-    window.setInterval(pollBoardRevision, boardRefreshIntervalMs);
+    if (!connectBoardRevisionEvents()) startBoardRevisionPolling();
     document.addEventListener("visibilitychange", () => {{
       if (!document.hidden) pollBoardRevision();
     }});
@@ -1535,6 +1588,11 @@ def _render_task(raw_task: object) -> str:
 def _board_revision(payload: Mapping[str, object]) -> str:
     revision_source = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(revision_source.encode("utf-8")).hexdigest()
+
+
+def _board_revision_sse_event(revision: str) -> str:
+    payload = json.dumps({"revision": revision}, sort_keys=True)
+    return f"retry: {_BOARD_REVISION_RETRY_MS}\nevent: revision\ndata: {payload}\n\n"
 
 
 def _render_status_options(statuses: list[str]) -> str:

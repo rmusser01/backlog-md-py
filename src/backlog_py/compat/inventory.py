@@ -267,6 +267,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser board revision polling detects external task changes",
         ),
         _implemented(
+            "browser:sse-live-refresh",
+            "browser-implemented",
+            "web live updates",
+            "browser board revision Server-Sent Events with polling fallback",
+        ),
+        _implemented(
             "cli:interactive-board",
             "interactive-implemented",
             "CLI-INSTRUCTIONS.md",

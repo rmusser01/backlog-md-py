@@ -213,7 +213,37 @@ def test_browser_board_endpoint_does_not_refresh_remote_refs_during_polling(tmp_
     assert remote_refreshes == []
 
 
-def test_browser_board_html_exposes_live_refresh_polling_contract(tmp_path):
+def test_browser_board_sse_endpoint_returns_revision_event_without_remote_refresh(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    remote_refreshes = []
+
+    from backlog_py.core import repository as repository_module
+    from backlog_py.browser.service import start_browser_service
+
+    monkeypatch.setattr(
+        repository_module,
+        "maybe_fetch_remote_refs",
+        lambda project: remote_refreshes.append(project.root),
+    )
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        board = _get_json(f"{service.root_url}/api/board")
+        response = _get_response_text(f"{service.root_url}/api/board/events")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["contentType"] == "text/event-stream; charset=utf-8"
+    assert "retry: 5000\n" in response["body"]
+    assert "event: revision\n" in response["body"]
+    data_line = next(line for line in response["body"].splitlines() if line.startswith("data: "))
+    assert json.loads(data_line.removeprefix("data: ")) == {"revision": board["revision"]}
+    assert remote_refreshes == []
+
+
+def test_browser_board_html_exposes_live_refresh_sse_contract(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
@@ -226,10 +256,16 @@ def test_browser_board_html_exposes_live_refresh_polling_contract(tmp_path):
         service.shutdown()
 
     assert 'data-board-revision="' in html
+    assert "connectBoardRevisionEvents" in html
+    assert 'new EventSource("/api/board/events")' in html
+    assert "handleBoardRevision" in html
+    assert "startBoardRevisionPolling" in html
     assert "pollBoardRevision" in html
     assert "hasOpenDialog" in html
     assert "setInterval" in html
+    assert '!("EventSource" in window)' in html
     assert "/api/board" in html
+    assert "/api/board/events" in html
 
 
 def test_browser_board_html_exposes_responsive_layout_contract(tmp_path):
@@ -1524,6 +1560,15 @@ def _get_json(url: str) -> object:
 def _get_text(url: str) -> str:
     with urllib.request.urlopen(url, timeout=2) as response:
         return response.read().decode("utf-8")
+
+
+def _get_response_text(url: str) -> dict[str, object]:
+    with urllib.request.urlopen(url, timeout=2) as response:
+        return {
+            "status": response.status,
+            "contentType": response.headers.get("Content-Type"),
+            "body": response.read().decode("utf-8"),
+        }
 
 
 def _post_json(url: str, payload: object, *, origin: str | None = None) -> object:
