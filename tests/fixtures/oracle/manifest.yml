@@ -198,6 +198,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:service-shutdown-state"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:task-detail-view"
     command: ["backlog", "browser"]
     agent_critical: false

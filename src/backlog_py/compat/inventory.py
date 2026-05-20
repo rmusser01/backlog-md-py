@@ -201,6 +201,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "bounded browser service request log endpoint and Service dialog list",
         ),
         _implemented(
+            "browser:service-shutdown-state",
+            "browser-implemented",
+            "web service mode",
+            "browser service shutdown state and idempotent stop scheduling",
+        ),
+        _implemented(
             "browser:task-detail-view",
             "browser-implemented",
             "web TaskDetailsModal",
