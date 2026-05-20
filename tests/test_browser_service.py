@@ -152,6 +152,36 @@ def test_browser_service_shutdown_endpoint_is_idempotent_while_shutdown_is_pendi
     assert scheduled == [service.server]
 
 
+def test_browser_board_sse_endpoint_reports_pending_shutdown(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    scheduled = []
+
+    from backlog_py.browser import service as browser_service
+
+    def fake_schedule(server):
+        scheduled.append(server)
+
+    monkeypatch.setattr(browser_service, "_schedule_server_shutdown", fake_schedule)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _post_json_response(f"{service.root_url}api/service/shutdown", {})
+        response = _get_response_text(f"{service.root_url}/api/board/events")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["contentType"] == "text/event-stream; charset=utf-8"
+    assert "retry: 5000\n" in response["body"]
+    assert "event: shutdown\n" in response["body"]
+    data_line = next(line for line in response["body"].splitlines() if line.startswith("data: "))
+    payload = json.loads(data_line.removeprefix("data: "))
+    assert payload["shutdownInProgress"] is True
+    assert payload["shutdownRequestedAt"].endswith("Z")
+    assert scheduled == [service.server]
+
+
 def test_browser_service_request_log_endpoint_records_recent_requests_without_query_strings(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -314,6 +344,24 @@ def test_browser_board_html_exposes_live_refresh_sse_contract(tmp_path):
     assert '!("EventSource" in window)' in html
     assert "/api/board" in html
     assert "/api/board/events" in html
+
+
+def test_browser_board_html_exposes_sse_shutdown_client_contract(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'addEventListener("shutdown"' in html
+    assert "closeBoardRevisionEvents" in html
+    assert "stopBoardRevisionPolling" in html
+    assert "Server shutdown was requested" in html
 
 
 def test_browser_board_html_exposes_responsive_layout_contract(tmp_path):

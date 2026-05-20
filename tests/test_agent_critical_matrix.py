@@ -383,6 +383,16 @@ def test_agent_critical_inventory_tracks_browser_sse_live_refresh_surface():
     assert item.expected == "browser board revision Server-Sent Events with polling fallback"
 
 
+def test_agent_critical_inventory_tracks_browser_service_transport_shutdown_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:service-transport-shutdown"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser SSE shutdown event and client transport teardown policy"
+
+
 def test_agent_critical_inventory_tracks_init_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

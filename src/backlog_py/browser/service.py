@@ -234,7 +234,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, _service_requests_payload(self.server))
             return
         if path == "/api/board/events":
-            self._send_board_revision_event(build_board_payload(self.server.project))
+            self._send_board_event()
             return
         if path == "/api/board":
             self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
@@ -455,8 +455,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
     def _send_html(self, status: HTTPStatus, html: str) -> None:
         self._send_text(status, html, content_type="text/html; charset=utf-8")
 
-    def _send_board_revision_event(self, payload: Mapping[str, object]) -> None:
-        event = _board_revision_sse_event(str(payload.get("revision", "")))
+    def _send_board_event(self) -> None:
+        shutdown_state = _shutdown_state_payload(self.server)
+        if shutdown_state["shutdownInProgress"]:
+            event = _board_shutdown_sse_event(shutdown_state)
+        else:
+            payload = build_board_payload(self.server.project)
+            event = _board_revision_sse_event(str(payload.get("revision", "")))
         data = event.encode("utf-8")
         content_type = "text/event-stream; charset=utf-8"
         self.send_response(HTTPStatus.OK)
@@ -1154,6 +1159,26 @@ def render_board_html(project: BacklogProject) -> str:
       boardRefreshTimer = window.setInterval(pollBoardRevision, boardRefreshIntervalMs);
     }}
 
+    function stopBoardRevisionPolling() {{
+      if (!boardRefreshTimer) return;
+      window.clearInterval(boardRefreshTimer);
+      boardRefreshTimer = null;
+    }}
+
+    function closeBoardRevisionEvents() {{
+      if (!boardRevisionEvents) return;
+      boardRevisionEvents.close();
+      boardRevisionEvents = null;
+    }}
+
+    function handleServiceShutdownEvent(payload) {{
+      stopBoardRevisionPolling();
+      closeBoardRevisionEvents();
+      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = true;
+      const requestedAt = payload?.shutdownRequestedAt ? ` at ${{payload.shutdownRequestedAt}}` : "";
+      setText("service-status-message", `Server shutdown was requested${{requestedAt}}.`);
+    }}
+
     function connectBoardRevisionEvents() {{
       if (!("EventSource" in window)) return false;
       boardRevisionEvents = new EventSource("/api/board/events");
@@ -1161,6 +1186,14 @@ def render_board_html(project: BacklogProject) -> str:
         try {{
           const payload = JSON.parse(event.data || "{{}}");
           handleBoardRevision(payload.revision);
+        }} catch (error) {{
+          console.error(error);
+        }}
+      }});
+      boardRevisionEvents.addEventListener("shutdown", (event) => {{
+        try {{
+          const payload = JSON.parse(event.data || "{{}}");
+          handleServiceShutdownEvent(payload);
         }} catch (error) {{
           console.error(error);
         }}
@@ -1755,6 +1788,11 @@ def _board_revision(payload: Mapping[str, object]) -> str:
 def _board_revision_sse_event(revision: str) -> str:
     payload = json.dumps({"revision": revision}, sort_keys=True)
     return f"retry: {_BOARD_REVISION_RETRY_MS}\nevent: revision\ndata: {payload}\n\n"
+
+
+def _board_shutdown_sse_event(shutdown_state: Mapping[str, object]) -> str:
+    payload = json.dumps(shutdown_state, sort_keys=True)
+    return f"retry: {_BOARD_REVISION_RETRY_MS}\nevent: shutdown\ndata: {payload}\n\n"
 
 
 def _render_status_options(statuses: list[str]) -> str:

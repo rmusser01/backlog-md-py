@@ -23,12 +23,12 @@ full clone unless explicitly rejected.
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
 | General project settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, `zeroPaddedIds`, and `statuses` through a locked settings endpoint. Shell-hook and git automation settings remain outside the browser surface. |
-| Real-time updates | Required for full clone | Implemented with SSE and polling fallback | The browser page subscribes to `/api/board/events` for deterministic board revision events and reloads when external CLI, MCP, or browser-tab edits change task state. Browsers without `EventSource` keep using conservative `/api/board` polling. |
+| Real-time updates | Required for full clone | Implemented with SSE, shutdown events, and polling fallback | The browser page subscribes to `/api/board/events` for deterministic board revision events and reloads when external CLI, MCP, or browser-tab edits change task state. Browsers without `EventSource` keep using conservative `/api/board` polling. When service shutdown starts, the same SSE endpoint emits a shutdown event so the client closes the EventSource and stops revision polling. |
 | Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
 | Rich Markdown editing | Required for full clone | Safe rendering, Markdown toolbar, and owned-section replacement implemented | Task detail Markdown is rendered through a dependency-free safe HTML renderer, and the browser edit form can replace raw Markdown Implementation Notes and Final Summary sections through the existing parser-preserving writer. Description, Implementation Notes, and Final Summary textareas expose local Markdown formatting controls for common inline, list, heading, and link syntax. Full WYSIWYG editing remains deferred. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
 | Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
-| service mode | Required for full clone | Implemented for status, request logging, and guarded local shutdown state | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Shutdown requests are idempotent and surface pending shutdown state in the Service dialog. Future persistent transports still need an explicit shutdown policy. |
+| service mode | Required for full clone | Implemented for status, request logging, guarded local shutdown state, and SSE shutdown policy | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Shutdown requests are idempotent, surface pending shutdown state in the Service dialog, and notify the SSE board transport so the browser stops reconnecting or polling. |
 | Mobile behavior | Required for full clone | Implemented for narrow viewport layout | Narrow viewport layout is covered by the browser HTML/CSS contract; richer device-specific visual QA can be handled as release validation instead of a missing parity feature. |
 
 ## Acceptance For Full Browser Clone
@@ -44,13 +44,13 @@ A later browser milestone should not be marked complete until it has:
   general project settings, and responsive narrow-viewport layout.
 - Browser screenshot checks for desktop and mobile viewports before a tagged
   release that advertises full browser parity.
-- A clear service mode lifecycle for any future persistent transport beyond
-  the implemented short-lived SSE revision events, local stop action, shutdown
-  state, and bounded request log.
+- A clear service mode lifecycle for any future non-SSE persistent transport
+  beyond the implemented SSE revision/shutdown events, local stop action,
+  shutdown state, and bounded request log.
 - Round-trip tests proving rich Markdown editing does not damage frontmatter,
   owned sections, unknown body text, mermaid blocks, or checklist markers.
-- Documentation for any future move beyond the implemented short-lived
-  SSE/polling/reload contract, such as WebSockets.
+- Documentation for any future move beyond the implemented
+  SSE/polling/reload/shutdown contract, such as WebSockets.
 
 ## Rejected For Agent Cutover
 

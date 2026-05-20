@@ -39,6 +39,8 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["browser:markdown-edit-toolbar"].status == "implemented"
     assert by_name["browser:sse-live-refresh"].classification == "browser-implemented"
     assert by_name["browser:sse-live-refresh"].status == "implemented"
+    assert by_name["browser:service-transport-shutdown"].classification == "browser-implemented"
+    assert by_name["browser:service-transport-shutdown"].status == "implemented"
     assert by_name["cli:interactive-board"].classification == "interactive-implemented"
     assert by_name["cli:interactive-board"].status == "implemented"
     assert by_name["cli:interactive-overview"].classification == "interactive-implemented"
