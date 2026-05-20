@@ -82,6 +82,7 @@ do not block the first local-file agent cutover candidate.
 | cli:interactive-search-filters | implemented | interactive search filters and live filtering | cli:interactive-search-filters |
 | cli:interactive-board | implemented | backlog board interactive controls | cli:interactive-board |
 | cli:interactive-overview | implemented | backlog overview interactive project statistics dashboard | cli:interactive-overview |
+| cli:interactive-date-display | implemented | interactive task detail respects dateFormat and includeDatetimeInDates | cli:interactive-date-display |
 | cli:task-plain-detail | implemented | task and draft plain detail output with file path, status, dates, and checklist sections | cli:task-plain-detail |
 | browser:kanban-drag-drop | implemented | backlog browser | browser:kanban-drag-drop |
 | browser:responsive-layout | implemented | responsive browser board layout for narrow viewports | browser:responsive-layout |

@@ -43,6 +43,8 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["cli:interactive-task-view-editor"].status == "implemented"
     assert by_name["cli:interactive-search-filters"].classification == "interactive-implemented"
     assert by_name["cli:interactive-search-filters"].status == "implemented"
+    assert by_name["cli:interactive-date-display"].classification == "interactive-implemented"
+    assert by_name["cli:interactive-date-display"].status == "implemented"
     assert by_name["cli:rich-colored-output"].classification == "terminal-implemented"
     assert by_name["cli:task-plain-detail"].classification == "cli-implemented"
     assert by_name["cli:task-plain-detail"].status == "implemented"

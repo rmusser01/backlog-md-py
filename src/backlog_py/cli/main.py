@@ -5,6 +5,7 @@ import os
 import shlex
 import subprocess  # nosec B404
 from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, TypeVar
 
@@ -1555,6 +1556,7 @@ def _format_interactive_task_detail(project: BacklogProject, task_record: TaskRe
         f"Title: {task_record.title}",
         f"Status: {task_record.status}",
         f"File: {path_display}",
+        *_interactive_task_date_metadata(project, task_record),
         "",
         "Description:",
         description,
@@ -1562,6 +1564,62 @@ def _format_interactive_task_detail(project: BacklogProject, task_record: TaskRe
         "Actions: [E]dit in editor  [Q]uit",
     ]
     return "\n".join(lines).rstrip()
+
+
+def _interactive_task_date_metadata(project: BacklogProject, task_record: TaskRecord) -> list[str]:
+    metadata: list[str] = []
+    for key, label in (("created_date", "Created"), ("updated_date", "Updated")):
+        value = task_record.parsed.frontmatter.get(key)
+        if value is not None and value != "":
+            metadata.append(f"{label}: {_format_configured_date(value, project=project)}")
+    return metadata
+
+
+def _format_configured_date(value: object, *, project: BacklogProject) -> str:
+    parsed = _parse_frontmatter_date(value)
+    if parsed is None:
+        return str(value)
+    date_text = _format_date_tokens(parsed, project.config.date_format)
+    if project.config.include_datetime_in_dates and _frontmatter_value_includes_time(value):
+        return f"{date_text} {parsed.strftime('%H:%M')}"
+    return date_text
+
+
+def _parse_frontmatter_date(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _format_date_tokens(value: datetime, date_format: str) -> str:
+    template = (date_format or "yyyy-mm-dd").strip().casefold()
+    if not template:
+        template = "yyyy-mm-dd"
+    for token, replacement in (
+        ("yyyy", f"{value.year:04d}"),
+        ("yy", f"{value.year % 100:02d}"),
+        ("mm", f"{value.month:02d}"),
+        ("dd", f"{value.day:02d}"),
+    ):
+        template = template.replace(token, replacement)
+    return template
+
+
+def _frontmatter_value_includes_time(value: object) -> bool:
+    if isinstance(value, datetime):
+        return True
+    if isinstance(value, date):
+        return False
+    text = str(value)
+    return ":" in text or "T" in text
 
 
 def _edit_task_in_configured_editor(ctx: click.Context, task_record: TaskRecord) -> None:

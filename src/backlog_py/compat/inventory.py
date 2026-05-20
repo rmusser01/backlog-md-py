@@ -315,6 +315,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "backlog config interactive advanced wizard",
         ),
         _implemented(
+            "cli:interactive-date-display",
+            "interactive-implemented",
+            "ADVANCED-CONFIG.md",
+            "interactive task detail respects dateFormat and includeDatetimeInDates",
+        ),
+        _implemented(
             "cli:task-plain-detail",
             "cli-implemented",
             "CLI-INSTRUCTIONS.md",
