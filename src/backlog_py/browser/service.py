@@ -745,10 +745,10 @@ def render_board_html(project: BacklogProject) -> str:
       header {{ flex-direction: column; align-items: stretch; padding: 16px; }}
       h1 {{ font-size: 20px; }}
       .subtitle {{ font-size: 13px; }}
-      .header-actions {{ width: 100%; justify-content: stretch; }}
+      .header-actions {{ width: 100%; justify-content: flex-start; }}
       .header-actions button {{ flex: 1 1 180px; }}
       .board {{ grid-template-columns: 1fr; padding: 14px; gap: 14px; }}
-      .task-actions {{ justify-content: stretch; }}
+      .task-actions {{ justify-content: flex-start; }}
       .task-actions button {{ flex: 1 1 120px; }}
       dialog {{ max-height: calc(100dvh - 24px); overflow: auto; }}
       .dialog-header {{ gap: 10px; padding: 14px; }}

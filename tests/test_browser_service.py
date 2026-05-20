@@ -247,9 +247,10 @@ def test_browser_board_html_exposes_responsive_layout_contract(tmp_path):
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "@media (max-width: 720px)" in html
     assert "header { flex-direction: column;" in html
-    assert ".header-actions { width: 100%;" in html
+    assert ".header-actions { width: 100%; justify-content: flex-start;" in html
     assert ".header-actions button { flex: 1 1 180px;" in html
     assert ".board { grid-template-columns: 1fr;" in html
+    assert ".task-actions { justify-content: flex-start;" in html
     assert "dialog { max-height: calc(100dvh - 24px);" in html
     assert ".form-actions { flex-direction: column-reverse;" in html
 
