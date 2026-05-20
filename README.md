@@ -145,7 +145,8 @@ tracked separately from the first agent cutover candidate:
   editing and mobile behavior. The custom-port browser service with responsive
   board layout, drag/drop status movement, basic task creation/editing, task
   archive confirmation, and read-only task detail dialog with checklist state
-  controls are implemented, but rich browser editing remains deferred.
+  controls are implemented. The browser also includes a basic Markdown toolbar
+  for raw textareas, while full WYSIWYG editing remains deferred.
 - `docs/interactive-deferrals.md` records the implemented task detail/editor,
   search filter, board, and overview flows, remaining CLI/TUI deferrals, hook
   bypass, fetch-only remote operations, and the opt-in auto-commit runtime policy.

@@ -219,6 +219,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser edit form updates Implementation Notes and Final Summary Markdown sections",
         ),
         _implemented(
+            "browser:markdown-edit-toolbar",
+            "browser-implemented",
+            "web task edit form",
+            "browser Markdown edit toolbar for raw Markdown textareas",
+        ),
+        _implemented(
             "browser:metadata-editing",
             "browser-implemented",
             "web task edit form",

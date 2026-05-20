@@ -857,6 +857,30 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert "/api/tasks/" in html
 
 
+def test_browser_board_html_exposes_markdown_edit_toolbar(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert html.count('data-markdown-toolbar="true"') >= 4
+    assert html.count('data-markdown-input="true"') >= 4
+    assert 'data-markdown-field="description"' in html
+    assert 'data-markdown-field="implementationNotes"' in html
+    assert 'data-markdown-field="finalSummary"' in html
+    for command in ("bold", "italic", "code", "bullet", "numbered", "heading", "link"):
+        assert f'data-markdown-command="{command}"' in html
+    assert "function applyMarkdownFormat(textarea, command)" in html
+    assert "document.querySelectorAll(\"[data-markdown-command]\")" in html
+    assert "textarea.setSelectionRange" in html
+
+
 def test_browser_task_archive_endpoint_archives_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)

@@ -89,6 +89,8 @@ larger task commands:
 - Browser edit form replacement for raw Markdown Implementation Notes and
   Final Summary sections, backed by the project write lock and existing safe
   detail rendering.
+- Browser Markdown formatting toolbar for raw Markdown description,
+  Implementation Notes, and Final Summary textareas.
 - Browser task archiving through a confirmation dialog and locked loopback
   service endpoint.
 - Browser task detail checklist controls for Acceptance Criteria and Definition
@@ -113,7 +115,7 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | richer Markdown editing, executable mermaid rendering, git/shell settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; richer browser editing beyond textarea-backed owned sections and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
+| Browser UI | full WYSIWYG Markdown editing, executable mermaid rendering, git/shell settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
 | Browser service | advanced service shutdown behavior | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, bounded request logging, board JSON with deterministic revisions, short-lived SSE revision events with polling fallback, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; future persistent transports need explicit shutdown policy |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 

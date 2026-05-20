@@ -92,6 +92,7 @@ do not block the first local-file agent cutover candidate.
 | browser:task-detail-view | implemented | read-only browser task detail endpoint and dialog | browser:task-detail-view |
 | browser:markdown-detail-rendering | implemented | safe browser Markdown rendering for task detail description, implementation notes, and final summary | browser:markdown-detail-rendering |
 | browser:rich-section-editing | implemented | browser edit form updates Implementation Notes and Final Summary Markdown sections | browser:rich-section-editing |
+| browser:markdown-edit-toolbar | implemented | browser Markdown edit toolbar for raw Markdown textareas | browser:markdown-edit-toolbar |
 | browser:metadata-editing | implemented | browser edit form updates assignees, labels, priority, and milestone | browser:metadata-editing |
 | browser:task-create-form | implemented | basic browser task create endpoint and form | browser:task-create-form |
 | browser:task-edit-form | implemented | basic browser task edit endpoint and form | browser:task-edit-form |

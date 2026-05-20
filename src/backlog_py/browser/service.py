@@ -467,6 +467,7 @@ def render_board_html(project: BacklogProject) -> str:
         _render_column(str(status), tasks)
         for status, tasks in columns.items()
     )
+    markdown_toolbar = _render_markdown_toolbar()
     select_tag = "select"
     status_options = _render_status_options(project.config.statuses or [])
     return f"""<!doctype html>
@@ -729,7 +730,8 @@ def render_board_html(project: BacklogProject) -> str:
       display: grid;
       gap: 12px;
     }}
-    .task-form label {{
+    .task-form label,
+    .task-form-field {{
       display: grid;
       gap: 4px;
       font-weight: 650;
@@ -748,6 +750,31 @@ def render_board_html(project: BacklogProject) -> str:
     .task-form textarea {{
       min-height: 88px;
       resize: vertical;
+    }}
+    .markdown-toolbar {{
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 2px;
+    }}
+    .markdown-toolbar button {{
+      min-width: 30px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.2;
+      padding: 4px 7px;
+      cursor: pointer;
+    }}
+    .markdown-toolbar button:hover,
+    .markdown-toolbar button:focus-visible {{
+      border-color: var(--accent);
+      color: var(--accent);
+      outline: none;
     }}
     .task-form input[type="checkbox"] {{
       width: auto;
@@ -824,9 +851,11 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Labels
           <textarea name="labels"></textarea>
         </label>
-        <label>Description
-          <textarea name="description"></textarea>
-        </label>
+        <div class="task-form-field">
+          <label for="task-create-description">Description</label>
+          {markdown_toolbar}
+          <textarea id="task-create-description" name="description" data-markdown-input="true" data-markdown-field="description"></textarea>
+        </div>
         <label>Acceptance Criteria
           <textarea name="acceptanceCriteria"></textarea>
         </label>
@@ -852,18 +881,24 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Status
           <{select_tag} class="task-form-select" name="status">{status_options}</{select_tag}>
         </label>
-        <label>Description
-          <textarea name="description"></textarea>
-        </label>
+        <div class="task-form-field">
+          <label for="task-edit-description">Description</label>
+          {markdown_toolbar}
+          <textarea id="task-edit-description" name="description" data-markdown-input="true" data-markdown-field="description"></textarea>
+        </div>
         <label>Acceptance Criteria
           <textarea name="acceptanceCriteria"></textarea>
         </label>
-        <label>Implementation Notes
-          <textarea name="implementationNotes"></textarea>
-        </label>
-        <label>Final Summary
-          <textarea name="finalSummary"></textarea>
-        </label>
+        <div class="task-form-field">
+          <label for="task-edit-implementation-notes">Implementation Notes</label>
+          {markdown_toolbar}
+          <textarea id="task-edit-implementation-notes" name="implementationNotes" data-markdown-input="true" data-markdown-field="implementationNotes"></textarea>
+        </div>
+        <div class="task-form-field">
+          <label for="task-edit-final-summary">Final Summary</label>
+          {markdown_toolbar}
+          <textarea id="task-edit-final-summary" name="finalSummary" data-markdown-input="true" data-markdown-field="finalSummary"></textarea>
+        </div>
         <div class="form-actions">
           <button class="secondary-button" type="button" id="task-edit-cancel">Cancel</button>
           <button class="primary-button" type="submit">Save</button>
@@ -1140,6 +1175,73 @@ def render_board_html(project: BacklogProject) -> str:
 
     function metadataList(value) {{
       return String(value || "").split(/[\\n,]/).map((item) => item.trim()).filter(Boolean);
+    }}
+
+    function selectedRange(textarea) {{
+      const valueLength = textarea.value.length;
+      const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : valueLength;
+      const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : start;
+      return {{start, end}};
+    }}
+
+    function replaceMarkdownSelection(textarea, start, end, replacement, selectStart, selectEnd) {{
+      const value = textarea.value || "";
+      textarea.value = value.slice(0, start) + replacement + value.slice(end);
+      textarea.focus();
+      textarea.setSelectionRange(selectStart, selectEnd);
+      textarea.dispatchEvent(new Event("input", {{bubbles: true}}));
+    }}
+
+    function applyMarkdownLineFormat(textarea, range, command) {{
+      const value = textarea.value || "";
+      const lineStart = range.start === 0 ? 0 : value.lastIndexOf("\\n", range.start - 1) + 1;
+      const nextLineBreak = value.indexOf("\\n", range.end);
+      const lineEnd = nextLineBreak === -1 ? value.length : nextLineBreak;
+      const segment = value.slice(lineStart, lineEnd);
+      const placeholder = command === "heading" ? "Heading" : "List item";
+      const lines = (segment || placeholder).split("\\n");
+      const replacement = lines.map((line, index) => {{
+        if (command === "heading") return line.startsWith("#") ? line : `## ${{line}}`;
+        if (command === "numbered") return `${{index + 1}}. ${{line}}`;
+        return `- ${{line}}`;
+      }}).join("\\n");
+      replaceMarkdownSelection(textarea, lineStart, lineEnd, replacement, lineStart, lineStart + replacement.length);
+    }}
+
+    function applyMarkdownFormat(textarea, command) {{
+      if (!textarea || !command) return;
+      const range = selectedRange(textarea);
+      const value = textarea.value || "";
+      const selected = value.slice(range.start, range.end);
+      const inlineFormats = {{
+        bold: {{prefix: "**", suffix: "**", placeholder: "bold text"}},
+        italic: {{prefix: "*", suffix: "*", placeholder: "italic text"}},
+        code: {{prefix: "`", suffix: "`", placeholder: "code"}},
+      }};
+      if (inlineFormats[command]) {{
+        const format = inlineFormats[command];
+        const content = selected || format.placeholder;
+        const replacement = `${{format.prefix}}${{content}}${{format.suffix}}`;
+        const innerStart = range.start + format.prefix.length;
+        replaceMarkdownSelection(textarea, range.start, range.end, replacement, innerStart, innerStart + content.length);
+        return;
+      }}
+      if (command === "link") {{
+        const content = selected || "link text";
+        const replacement = `[${{content}}](url)`;
+        const innerStart = range.start + 1;
+        replaceMarkdownSelection(textarea, range.start, range.end, replacement, innerStart, innerStart + content.length);
+        return;
+      }}
+      if (command === "bullet" || command === "numbered" || command === "heading") {{
+        applyMarkdownLineFormat(textarea, range, command);
+      }}
+    }}
+
+    function toolbarTextarea(button) {{
+      const toolbar = button.closest("[data-markdown-toolbar]");
+      const container = toolbar ? toolbar.parentElement : null;
+      return container ? container.querySelector("[data-markdown-input]") : null;
     }}
 
     async function openTaskDetails(taskId) {{
@@ -1494,6 +1596,11 @@ def render_board_html(project: BacklogProject) -> str:
     document.getElementById("service-status-open")?.addEventListener("click", openServiceStatus);
     document.getElementById("service-status-refresh")?.addEventListener("click", refreshServicePanel);
     serviceShutdownConfirm?.addEventListener("click", submitServiceShutdown);
+    document.querySelectorAll("[data-markdown-command]").forEach((button) => {{
+      button.addEventListener("click", () => {{
+        applyMarkdownFormat(toolbarTextarea(button), button.dataset.markdownCommand);
+      }});
+    }});
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{
@@ -1552,6 +1659,21 @@ def render_board_html(project: BacklogProject) -> str:
 </body>
 </html>
 """
+
+
+def _render_markdown_toolbar() -> str:
+    return (
+        '<span class="markdown-toolbar" data-markdown-toolbar="true" role="toolbar" '
+        'aria-label="Markdown formatting">'
+        '<button type="button" data-markdown-command="bold" aria-label="Bold"><strong>B</strong></button>'
+        '<button type="button" data-markdown-command="italic" aria-label="Italic"><em>I</em></button>'
+        '<button type="button" data-markdown-command="code" aria-label="Inline code">`</button>'
+        '<button type="button" data-markdown-command="bullet" aria-label="Bullet list">-</button>'
+        '<button type="button" data-markdown-command="numbered" aria-label="Numbered list">1.</button>'
+        '<button type="button" data-markdown-command="heading" aria-label="Heading">H</button>'
+        '<button type="button" data-markdown-command="link" aria-label="Link">Link</button>'
+        "</span>"
+    )
 
 
 def _render_column(status: str, raw_tasks: object) -> str:
