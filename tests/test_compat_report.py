@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 94,
+        "implemented": 95,
         "deferred": 1,
-        "total": 95,
+        "total": 96,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 20,
+        "implemented": 21,
         "deferred": 0,
-        "total": 20,
+        "total": 21,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -88,6 +88,10 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:checklist-state-controls"]["status"] == "implemented"
     assert items_by_name["browser:dod-defaults-settings"]["status"] == "implemented"
     assert items_by_name["browser:general-settings"]["status"] == "implemented"
+    assert items_by_name["browser:safe-git-settings"]["status"] == "implemented"
+    assert items_by_name["browser:safe-git-settings"]["expected"] == (
+        "browser safe git automation settings dialog and endpoint"
+    )
     assert items_by_name["browser:live-refresh-polling"]["status"] == "implemented"
     assert items_by_name["browser:sse-live-refresh"]["status"] == "implemented"
     assert items_by_name["browser:sse-live-refresh"]["expected"] == (

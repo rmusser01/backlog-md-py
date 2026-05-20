@@ -98,8 +98,12 @@ larger task commands:
 - Browser Definition of Done defaults settings dialog and loopback endpoint,
   backed by the project write lock and safe config writer.
 - Browser general project settings dialog and loopback endpoint for safe
-  non-shell, non-git config values, backed by the project write lock and safe
-  config writer.
+  non-shell config values, backed by the project write lock and safe config
+  writer.
+- Browser safe git automation settings dialog and loopback endpoint for
+  `remoteOperations`, `checkActiveBranches`, `activeBranchDays`, and
+  `autoCommit`; browser writes still reject `onStatusChange` and
+  `bypassGitHooks`.
 - Browser board live-refresh polling through a deterministic `/api/board`
   revision, allowing open pages to detect external CLI, MCP, or browser-tab
   task changes and reload when no dialog is open.
@@ -120,7 +124,7 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | full WYSIWYG Markdown editing, executable mermaid rendering, git/shell settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
+| Browser UI | full WYSIWYG Markdown editing, executable mermaid rendering, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing and executable Mermaid rendering remain deferred, and shell-hook execution plus hook-bypass settings stay CLI-only or explicitly deferred |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 

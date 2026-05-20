@@ -1294,6 +1294,10 @@ def test_browser_config_settings_endpoint_returns_safe_values(tmp_path):
     set_config_value(project, "defaultAssignee", "codex")
     set_config_value(project, "defaultPort", "6543")
     set_config_value(project, "autoOpenBrowser", "false")
+    set_config_value(project, "autoCommit", "true")
+    set_config_value(project, "remoteOperations", "true")
+    set_config_value(project, "checkActiveBranches", "true")
+    set_config_value(project, "activeBranchDays", "14")
 
     from backlog_py.browser.service import start_browser_service
 
@@ -1305,13 +1309,17 @@ def test_browser_config_settings_endpoint_returns_safe_values(tmp_path):
 
     assert response == {
         "settings": {
+            "activeBranchDays": 14,
+            "autoCommit": True,
             "autoOpenBrowser": False,
+            "checkActiveBranches": True,
             "dateFormat": "yyyy-mm-dd",
             "defaultAssignee": "codex",
             "defaultPort": 6543,
             "defaultStatus": "To Do",
             "includeDatetimeInDates": True,
             "projectName": "basic-fixture",
+            "remoteOperations": True,
             "statuses": ["To Do", "In Progress", "Done"],
             "zeroPaddedIds": None,
         }
@@ -1347,6 +1355,10 @@ def test_browser_config_settings_update_endpoint_writes_safe_values_under_projec
                     "defaultPort": 6543,
                     "autoOpenBrowser": False,
                     "zeroPaddedIds": 4,
+                    "autoCommit": True,
+                    "remoteOperations": True,
+                    "checkActiveBranches": True,
+                    "activeBranchDays": 14,
                     "statuses": ["Ready", "In Progress", "Done"],
                 }
             },
@@ -1358,9 +1370,17 @@ def test_browser_config_settings_update_endpoint_writes_safe_values_under_projec
     assert response["status"] == 200
     assert response["body"]["settings"]["projectName"] == "Browser project"
     assert response["body"]["settings"]["defaultPort"] == 6543
+    assert response["body"]["settings"]["autoCommit"] is True
+    assert response["body"]["settings"]["remoteOperations"] is True
+    assert response["body"]["settings"]["checkActiveBranches"] is True
+    assert response["body"]["settings"]["activeBranchDays"] == 14
     assert response["body"]["settings"]["statuses"] == ["Ready", "In Progress", "Done"]
     assert updated["settings"]["includeDatetimeInDates"] is False
     assert updated["settings"]["zeroPaddedIds"] == 4
+    assert updated["settings"]["autoCommit"] is True
+    assert updated["settings"]["remoteOperations"] is True
+    assert updated["settings"]["checkActiveBranches"] is True
+    assert updated["settings"]["activeBranchDays"] == 14
     assert lock_operations == [(repo, "browser_config_settings_update")]
 
 
@@ -1385,7 +1405,16 @@ def test_browser_config_settings_update_refreshes_server_project(tmp_path):
     assert '<option value="Ready">Ready</option>' in html
 
 
-def test_browser_config_settings_update_rejects_invalid_payload_without_mutation(tmp_path):
+@pytest.mark.parametrize(
+    ("unsafe_key", "unsafe_value"),
+    [
+        ("onStatusChange", "echo unsafe"),
+        ("bypassGitHooks", True),
+    ],
+)
+def test_browser_config_settings_update_rejects_unsafe_git_and_shell_settings_without_mutation(
+    tmp_path, unsafe_key, unsafe_value
+):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
     before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
@@ -1397,7 +1426,7 @@ def test_browser_config_settings_update_rejects_invalid_payload_without_mutation
         with pytest.raises(urllib.error.HTTPError) as exc:
             _post_json(
                 f"{service.root_url}/api/settings/config",
-                {"settings": {"onStatusChange": "echo unsafe", "projectName": "Mutated"}},
+                {"settings": {unsafe_key: unsafe_value, "projectName": "Mutated"}},
             )
     finally:
         service.shutdown()
@@ -1485,6 +1514,12 @@ def test_browser_board_html_exposes_general_settings_dialog(tmp_path):
     assert 'name="projectName"' in html
     assert 'name="defaultPort"' in html
     assert 'name="statuses"' in html
+    assert 'name="autoCommit"' in html
+    assert 'name="remoteOperations"' in html
+    assert 'name="checkActiveBranches"' in html
+    assert 'name="activeBranchDays"' in html
+    assert "configSettingsForm.elements.autoCommit.checked" in html
+    assert "activeBranchDays: Number(data.get(\"activeBranchDays\") || 0)" in html
     assert "openConfigSettings" in html
     assert "submitConfigSettings" in html
     assert "/api/settings/config" in html
