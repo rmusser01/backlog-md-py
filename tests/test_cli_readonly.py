@@ -149,8 +149,34 @@ def test_task_view_default_renders_interactive_task_detail():
     assert "Task TASK-1" in result.output
     assert "Status: In Progress" in result.output
     assert "File: backlog/tasks/task-1 - Example-task.md" in result.output
+    assert "Created: 2026-05-10 10:00" in result.output
     assert "Actions: [E]dit in editor  [Q]uit" in result.output
     assert "---" not in result.output
+
+
+def test_task_view_default_honors_date_display_config(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    task_path = _task_file(repo)
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            "created_date: '2026-05-10 10:00'\n",
+            "created_date: '2026-05-10 10:00'\nupdated_date: '2026-05-11 12:34'\n",
+        ),
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    set_config_value(project, "dateFormat", "dd/mm/yyyy")
+    set_config_value(project, "includeDatetimeInDates", "false")
+
+    result = _invoke_repo(repo, "task", "TASK-1")
+
+    assert result.exit_code == 0
+    assert "Created: 10/05/2026" in result.output
+    assert "Updated: 11/05/2026" in result.output
+    assert "2026-05-10 10:00" not in result.output
+    assert "2026-05-11 12:34" not in result.output
+    assert "12:34" not in result.output
 
 
 def test_task_view_editor_key_launches_default_editor_under_project_lock(tmp_path, monkeypatch):
@@ -605,10 +631,10 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 90" in result.output
+    assert "implemented: 91" in result.output
     assert "deferred: 1" in result.output
-    assert "total: 91" in result.output
-    assert "cli: 44 implemented, 0 deferred, 44 total" in result.output
+    assert "total: 92" in result.output
+    assert "cli: 45 implemented, 0 deferred, 45 total" in result.output
     assert "browser: 17 implemented, 0 deferred, 17 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 3 implemented, 0 deferred, 3 total" in result.output
@@ -623,6 +649,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"cli:interactive-task-view-editor"' in result.output
     assert '"cli:interactive-overview"' in result.output
     assert '"cli:task-plain-detail"' in result.output
+    assert '"cli:interactive-date-display"' in result.output
     assert '"browser:responsive-layout"' in result.output
     assert '"browser:service-lifecycle"' in result.output
     assert '"browser:service-request-log"' in result.output

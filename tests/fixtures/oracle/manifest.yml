@@ -298,6 +298,10 @@ fixtures:
     command: ["backlog", "config", "set", "includeDatetimeInDates", "false"]
     agent_critical: false
     classification: "core-implemented"
+  - name: "cli:interactive-date-display"
+    command: ["backlog", "task", "TASK-1"]
+    agent_critical: false
+    classification: "interactive-implemented"
   - name: "git:remote-operations"
     command: ["backlog", "task", "create", "Remote operation example"]
     agent_critical: false

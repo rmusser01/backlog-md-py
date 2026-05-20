@@ -14,7 +14,7 @@ reviewable file operations are the first compatibility target.
 | Interactive task view/editor | Interactive TUI | Implemented | Non-plain `task <id>` renders a human task detail view and interactive terminals can press `E` to launch the configured editor under the project write lock. |
 | Interactive search filters | Interactive TUI | Implemented | Non-plain `search` renders a human filter panel; interactive terminals can refine by status, priority, result type, or modified file while preserving `--plain`. |
 | Editor launch | Interactive TUI | Implemented for task view and board | `defaultEditor`, `VISUAL`, or `EDITOR` is split into argv without a shell and receives the task file path. |
-| Extended display/TUI config effects | Human-facing config | Partially deferred | Config read/write is supported and browser `defaultPort`/`autoOpenBrowser` behavior is implemented; task view consumes `defaultEditor`; date display preferences follow the remaining TUI milestone. |
+| Extended display/TUI config effects | Human-facing config | Implemented | Config read/write is supported, browser `defaultPort`/`autoOpenBrowser` behavior is implemented, task view consumes `defaultEditor`, and non-plain task detail respects `dateFormat` plus `includeDatetimeInDates` for Created/Updated display. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
 | Remote operations | Git/network behavior | Implemented as fetch-only | When `remoteOperations` and `checkActiveBranches` are enabled, repository reads run a best-effort `git fetch --all --prune` to refresh remote-tracking refs without pulling, merging, pushing, or changing the working tree. |
 
@@ -46,11 +46,13 @@ The Python clone keeps these features out of the first cutover path:
 - Interactive overview dashboard output is implemented for human operators
   without changing non-interactive `overview` output.
 - `backlog config` now provides the guided config wizard for human operators.
+- Non-plain task detail now displays Created/Updated dates using the configured
+  `dateFormat` and `includeDatetimeInDates` preferences while preserving raw
+  `task <id> --plain` output.
 - Browser `defaultPort` and `autoOpenBrowser` effects are implemented for the
   loopback browser service; the browser also exposes basic task creation,
   basic task editing, task archive confirmation, task detail inspection, and
-  AC/DoD checklist state controls; remaining TUI effects of extended config
-  keys stay deferred.
+  AC/DoD checklist state controls.
 - `onStatusChange` is supported only when explicitly configured; task-level
   hooks override the project hook, and hook failures do not block status writes.
 - `autoCommit` is opt-in and local-only. It runs after project write mutations

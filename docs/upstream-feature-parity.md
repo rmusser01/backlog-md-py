@@ -51,6 +51,9 @@ larger task commands:
   Definition-of-Done defaults.
 - Non-plain `backlog task <id>` task detail view with `defaultEditor`/`VISUAL`/
   `EDITOR` launch from interactive terminals under the project write lock.
+- Non-plain `backlog task <id>` task detail Created/Updated display that
+  respects `dateFormat` and `includeDatetimeInDates`, while preserving raw
+  `--plain` detail output.
 - Non-plain `backlog search` interactive filter panel with status, priority,
   result-type, and modified-file refinement while preserving `--plain`.
 - Interactive `backlog board` view/edit/move controls while preserving
@@ -112,7 +115,6 @@ larger task commands:
 | --- | --- | --- |
 | Browser UI | richer Markdown editing, executable mermaid rendering, git/shell settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; richer browser editing beyond textarea-backed owned sections and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
 | Browser service | advanced service shutdown behavior | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, bounded request logging, board JSON with deterministic revisions, short-lived SSE revision events with polling fallback, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; future persistent transports need explicit shutdown policy |
-| Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 
 ## Recommended Work Order
