@@ -28,7 +28,7 @@ full clone unless explicitly rejected.
 | Rich Markdown editing | Required for full clone | Safe rendering, Markdown toolbar, and owned-section replacement implemented | Task detail Markdown is rendered through a dependency-free safe HTML renderer, and the browser edit form can replace raw Markdown Implementation Notes and Final Summary sections through the existing parser-preserving writer. Description, Implementation Notes, and Final Summary textareas expose local Markdown formatting controls for common inline, list, heading, and link syntax. Full WYSIWYG editing remains deferred. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
 | Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
-| service mode | Required for full clone | Implemented for status, request logging, and guarded local shutdown | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Richer live-update shutdown policy remains part of the browser milestone. |
+| service mode | Required for full clone | Implemented for status, request logging, and guarded local shutdown state | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Shutdown requests are idempotent and surface pending shutdown state in the Service dialog. Future persistent transports still need an explicit shutdown policy. |
 | Mobile behavior | Required for full clone | Implemented for narrow viewport layout | Narrow viewport layout is covered by the browser HTML/CSS contract; richer device-specific visual QA can be handled as release validation instead of a missing parity feature. |
 
 ## Acceptance For Full Browser Clone
@@ -45,8 +45,8 @@ A later browser milestone should not be marked complete until it has:
 - Browser screenshot checks for desktop and mobile viewports before a tagged
   release that advertises full browser parity.
 - A clear service mode lifecycle for any future persistent transport beyond
-  the implemented short-lived SSE revision events, local stop action, and
-  bounded request log.
+  the implemented short-lived SSE revision events, local stop action, shutdown
+  state, and bounded request log.
 - Round-trip tests proving rich Markdown editing does not damage frontmatter,
   owned sections, unknown body text, mermaid blocks, or checklist markers.
 - Documentation for any future move beyond the implemented short-lived

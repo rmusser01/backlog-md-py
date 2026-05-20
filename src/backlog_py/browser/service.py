@@ -65,6 +65,9 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
     request_log: deque[dict[str, object]]
     request_log_limit: int
     request_log_lock: threading.Lock
+    shutdown_in_progress: bool
+    shutdown_lock: threading.Lock
+    shutdown_requested_at: str | None
 
 
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
@@ -76,6 +79,9 @@ def create_browser_server(*, project: BacklogProject, host: str, port: int) -> B
     server.request_log_limit = 50
     server.request_log = deque(maxlen=server.request_log_limit)
     server.request_log_lock = threading.Lock()
+    server.shutdown_in_progress = False
+    server.shutdown_requested_at = None
+    server.shutdown_lock = threading.Lock()
     return server
 
 
@@ -149,6 +155,7 @@ def _service_status_payload(server: BrowserThreadingHTTPServer) -> dict[str, obj
         "port": int(port),
         "rootUrl": _root_url(str(host), int(port)),
         "shutdownSupported": True,
+        **_shutdown_state_payload(server),
     }
 
 
@@ -191,6 +198,25 @@ def _schedule_server_shutdown(server: BrowserThreadingHTTPServer) -> None:
         daemon=True,
     )
     thread.start()
+
+
+def _shutdown_state_payload(server: BrowserThreadingHTTPServer) -> dict[str, object]:
+    with server.shutdown_lock:
+        return {
+            "shutdownInProgress": server.shutdown_in_progress,
+            "shutdownRequestedAt": server.shutdown_requested_at,
+        }
+
+
+def _request_server_shutdown(server: BrowserThreadingHTTPServer) -> bool:
+    with server.shutdown_lock:
+        already_scheduled = server.shutdown_in_progress
+        if server.shutdown_requested_at is None:
+            server.shutdown_requested_at = _utc_timestamp()
+        server.shutdown_in_progress = True
+    if not already_scheduled:
+        _schedule_server_shutdown(server)
+    return already_scheduled
 
 
 class _BrowserHttpHandler(BaseHTTPRequestHandler):
@@ -245,8 +271,16 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             if not self._origin_allowed():
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
                 return
-            self._send_json(HTTPStatus.ACCEPTED, {"ok": True, "message": "Shutdown scheduled"})
-            _schedule_server_shutdown(self.server)
+            already_scheduled = _request_server_shutdown(self.server)
+            self._send_json(
+                HTTPStatus.ACCEPTED,
+                {
+                    "ok": True,
+                    "message": "Shutdown already scheduled" if already_scheduled else "Shutdown scheduled",
+                    "shutdownInProgress": True,
+                    "alreadyScheduled": already_scheduled,
+                },
+            )
             return
 
         if path == "/api/settings/config":
@@ -1367,7 +1401,13 @@ def render_board_html(project: BacklogProject) -> str:
       setText("service-status-host", status.host);
       setText("service-status-port", String(status.port || ""));
       setText("service-status-url", status.rootUrl);
-      setText("service-status-message", status.shutdownSupported ? "Shutdown is available from this local browser session." : "");
+      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = Boolean(status.shutdownInProgress);
+      if (status.shutdownInProgress) {{
+        const requestedAt = status.shutdownRequestedAt ? ` at ${{status.shutdownRequestedAt}}` : "";
+        setText("service-status-message", `Shutdown has been requested${{requestedAt}}.`);
+      }} else {{
+        setText("service-status-message", status.shutdownSupported ? "Shutdown is available from this local browser session." : "");
+      }}
       return true;
     }}
 
@@ -1412,7 +1452,6 @@ def render_board_html(project: BacklogProject) -> str:
     async function openServiceStatus() {{
       const loaded = await refreshServicePanel();
       if (!loaded) return;
-      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = false;
       if (serviceStatusDialog && serviceStatusDialog.showModal) serviceStatusDialog.showModal();
       else if (serviceStatusDialog) serviceStatusDialog.setAttribute("open", "open");
     }}
@@ -1428,8 +1467,9 @@ def render_board_html(project: BacklogProject) -> str:
         console.error(await response.text());
         return;
       }}
-      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = true;
-      setText("service-status-message", "Server is stopping.");
+      const payload = await response.json();
+      if (serviceShutdownConfirm) serviceShutdownConfirm.disabled = Boolean(payload.shutdownInProgress);
+      setText("service-status-message", payload.message || "Server is stopping.");
     }}
 
     async function submitTaskCreate(event) {{

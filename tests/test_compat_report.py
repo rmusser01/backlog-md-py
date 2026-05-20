@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 92,
+        "implemented": 93,
         "deferred": 1,
-        "total": 93,
+        "total": 94,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 18,
+        "implemented": 19,
         "deferred": 0,
-        "total": 18,
+        "total": 19,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -69,6 +69,10 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:responsive-layout"]["status"] == "implemented"
     assert items_by_name["browser:service-lifecycle"]["status"] == "implemented"
     assert items_by_name["browser:service-request-log"]["status"] == "implemented"
+    assert items_by_name["browser:service-shutdown-state"]["status"] == "implemented"
+    assert items_by_name["browser:service-shutdown-state"]["expected"] == (
+        "browser service shutdown state and idempotent stop scheduling"
+    )
     assert items_by_name["browser:kanban-drag-drop"]["status"] == "implemented"
     assert items_by_name["browser:task-detail-view"]["status"] == "implemented"
     assert items_by_name["browser:markdown-detail-rendering"]["status"] == "implemented"

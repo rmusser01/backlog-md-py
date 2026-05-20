@@ -61,6 +61,8 @@ def test_browser_service_status_endpoint_returns_runtime_metadata(tmp_path):
         "port": service.port,
         "rootUrl": service.root_url,
         "shutdownSupported": True,
+        "shutdownInProgress": False,
+        "shutdownRequestedAt": None,
     }
 
 
@@ -94,7 +96,12 @@ def test_browser_service_shutdown_endpoint_stops_service(tmp_path):
         service.thread.join(timeout=2)
         assert response == {
             "status": 202,
-            "body": {"ok": True, "message": "Shutdown scheduled"},
+            "body": {
+                "ok": True,
+                "message": "Shutdown scheduled",
+                "shutdownInProgress": True,
+                "alreadyScheduled": False,
+            },
         }
         assert not service.thread.is_alive()
     finally:
@@ -102,6 +109,47 @@ def test_browser_service_shutdown_endpoint_stops_service(tmp_path):
             service.shutdown()
         else:
             service.server.server_close()
+
+
+def test_browser_service_shutdown_endpoint_is_idempotent_while_shutdown_is_pending(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    scheduled = []
+
+    from backlog_py.browser import service as browser_service
+
+    def fake_schedule(server):
+        scheduled.append(server)
+
+    monkeypatch.setattr(browser_service, "_schedule_server_shutdown", fake_schedule)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before = _get_json(f"{service.root_url}api/service/status")
+        first = _post_json_response(f"{service.root_url}api/service/shutdown", {})
+        after = _get_json(f"{service.root_url}api/service/status")
+        second = _post_json_response(f"{service.root_url}api/service/shutdown", {})
+    finally:
+        service.shutdown()
+
+    assert before["shutdownInProgress"] is False
+    assert before["shutdownRequestedAt"] is None
+    assert first["body"] == {
+        "ok": True,
+        "message": "Shutdown scheduled",
+        "shutdownInProgress": True,
+        "alreadyScheduled": False,
+    }
+    assert after["shutdownInProgress"] is True
+    assert isinstance(after["shutdownRequestedAt"], str)
+    assert after["shutdownRequestedAt"].endswith("Z")
+    assert second["body"] == {
+        "ok": True,
+        "message": "Shutdown already scheduled",
+        "shutdownInProgress": True,
+        "alreadyScheduled": True,
+    }
+    assert scheduled == [service.server]
 
 
 def test_browser_service_request_log_endpoint_records_recent_requests_without_query_strings(tmp_path):
@@ -311,6 +359,8 @@ def test_browser_board_html_exposes_service_lifecycle_controls(tmp_path):
     assert "refreshServiceRequests" in html
     assert "renderServiceRequestLog" in html
     assert "submitServiceShutdown" in html
+    assert "shutdownInProgress" in html
+    assert "shutdownRequestedAt" in html
     assert "/api/service/status" in html
     assert "/api/service/requests" in html
     assert "/api/service/shutdown" in html
