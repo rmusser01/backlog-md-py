@@ -313,6 +313,16 @@ def test_agent_critical_inventory_tracks_browser_rich_section_editing_surface():
     assert item.expected == "browser edit form updates Implementation Notes and Final Summary Markdown sections"
 
 
+def test_agent_critical_inventory_tracks_browser_markdown_edit_toolbar_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:markdown-edit-toolbar"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser Markdown edit toolbar for raw Markdown textareas"
+
+
 def test_agent_critical_inventory_tracks_browser_metadata_editing_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

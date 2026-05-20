@@ -210,6 +210,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:markdown-edit-toolbar"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:metadata-editing"
     command: ["backlog", "browser"]
     agent_critical: false
