@@ -23,7 +23,7 @@ full clone unless explicitly rejected.
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
 | General project settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, `zeroPaddedIds`, and `statuses` through a locked settings endpoint. Shell-hook and git automation settings remain outside the browser surface. |
-| Real-time updates | Required for full clone | Implemented with conservative polling | The browser page polls `/api/board` for a deterministic board revision and reloads when external CLI, MCP, or browser-tab edits change task state. Richer SSE/WebSocket updates remain out of scope. |
+| Real-time updates | Required for full clone | Implemented with SSE and polling fallback | The browser page subscribes to `/api/board/events` for deterministic board revision events and reloads when external CLI, MCP, or browser-tab edits change task state. Browsers without `EventSource` keep using conservative `/api/board` polling. |
 | Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
 | Rich Markdown editing | Required for full clone | Safe rendering and owned-section replacement implemented | Task detail Markdown is rendered through a dependency-free safe HTML renderer, and the browser edit form can replace raw Markdown Implementation Notes and Final Summary sections through the existing parser-preserving writer. Broader rich editing and visual Markdown tools remain deferred. |
 | mermaid rendering | Required for full clone | Intentionally deferred | Mermaid rendering is browser-only presentation behavior and does not affect CLI/MCP file correctness. |
@@ -43,13 +43,13 @@ A later browser milestone should not be marked complete until it has:
   general project settings, and responsive narrow-viewport layout.
 - Browser screenshot checks for desktop and mobile viewports before a tagged
   release that advertises full browser parity.
-- A clear service mode lifecycle for any richer browser UI behavior, including
-  live-update shutdown policy beyond the implemented local stop action and
+- A clear service mode lifecycle for any future persistent transport beyond
+  the implemented short-lived SSE revision events, local stop action, and
   bounded request log.
 - Round-trip tests proving rich Markdown editing does not damage frontmatter,
   owned sections, unknown body text, mermaid blocks, or checklist markers.
-- Documentation for any future move beyond the implemented polling/reload
-  contract, such as server-sent events or WebSockets.
+- Documentation for any future move beyond the implemented short-lived
+  SSE/polling/reload contract, such as WebSockets.
 
 ## Rejected For Agent Cutover
 

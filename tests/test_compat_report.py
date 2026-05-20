@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 89,
+        "implemented": 90,
         "deferred": 1,
-        "total": 90,
+        "total": 91,
     }
     assert report["categories"]["cli"] == {
         "implemented": 44,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 16,
+        "implemented": 17,
         "deferred": 0,
-        "total": 16,
+        "total": 17,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -80,4 +80,8 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:dod-defaults-settings"]["status"] == "implemented"
     assert items_by_name["browser:general-settings"]["status"] == "implemented"
     assert items_by_name["browser:live-refresh-polling"]["status"] == "implemented"
+    assert items_by_name["browser:sse-live-refresh"]["status"] == "implemented"
+    assert items_by_name["browser:sse-live-refresh"]["expected"] == (
+        "browser board revision Server-Sent Events with polling fallback"
+    )
     assert deferred_by_name["git:hook-bypass"]["reason"] == "Hook bypass remains unsupported for safety."

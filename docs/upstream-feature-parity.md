@@ -98,6 +98,8 @@ larger task commands:
 - Browser board live-refresh polling through a deterministic `/api/board`
   revision, allowing open pages to detect external CLI, MCP, or browser-tab
   task changes and reload when no dialog is open.
+- Browser board live-refresh Server-Sent Events through `/api/board/events`,
+  with `EventSource` reconnect behavior and `/api/board` polling fallback.
 - Browser service status and guarded local shutdown controls through
   `/api/service/status`, `/api/service/shutdown`, and an in-page Service
   dialog.
@@ -108,8 +110,8 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | richer Markdown editing, executable mermaid rendering, git/shell settings, richer live-update transports | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, polling-based live refresh, and service status/shutdown/logging dialog controls are implemented; richer browser editing beyond textarea-backed owned sections and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
-| Browser service | advanced service shutdown behavior | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, bounded request logging, board JSON with deterministic revisions, task create/edit/archive/checklist/detail JSON, static board snapshot, and polling refresh are implemented; richer live-update shutdown behavior remains deferred |
+| Browser UI | richer Markdown editing, executable mermaid rendering, git/shell settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, archive confirmation, task detail dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; richer browser editing beyond textarea-backed owned sections and executable Mermaid rendering remain deferred, and git automation plus shell-hook settings stay CLI-only or explicitly deferred |
+| Browser service | advanced service shutdown behavior | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, bounded request logging, board JSON with deterministic revisions, short-lived SSE revision events with polling fallback, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; future persistent transports need explicit shutdown policy |
 | Extended config effects | TUI behavior driven by date display preferences | Browser `defaultPort` and `autoOpenBrowser` effects, task-view `defaultEditor`, and `includeDatetimeInDates` timestamp precision are implemented; remaining TUI display effects are deferred |
 | Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
 
