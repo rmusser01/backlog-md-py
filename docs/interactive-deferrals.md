@@ -15,12 +15,12 @@ reviewable file operations are the first compatibility target.
 | Interactive search filters | Interactive TUI | Implemented | Non-plain `search` renders a human filter panel; interactive terminals can refine by status, priority, result type, or modified file while preserving `--plain`. |
 | Editor launch | Interactive TUI | Implemented for task view and board | `defaultEditor`, `VISUAL`, or `EDITOR` is split into argv without a shell and receives the task file path. |
 | Extended display/TUI config effects | Human-facing config | Implemented | Config read/write is supported, browser `defaultPort`/`autoOpenBrowser` behavior is implemented, task view consumes `defaultEditor`, and non-plain task detail respects `dateFormat` plus `includeDatetimeInDates` for Created/Updated display. |
-| hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
+| hook bypass | Git safety bypass | Implemented for opt-in auto-commit | `bypassGitHooks` only adds `--no-verify` to the local `autoCommit` commit argv when explicitly enabled; hooks still run by default. |
 | Remote operations | Git/network behavior | Implemented as fetch-only plus read-only snapshots | When `remoteOperations` and `checkActiveBranches` are enabled, repository reads run a best-effort `git fetch --all --prune` to refresh remote-tracking refs, then load recent branch task snapshots without pulling, merging, pushing, checking out branches, or changing the working tree. |
 
 ## Required Before Enabling Deferred Behavior
 
-Any future implementation of these features must provide:
+Any future implementation of additional deferred features must provide:
 
 - A dedicated Backlog task and implementation plan.
 - Tests proving the feature is opt-in and does not run during normal CLI, MCP,
@@ -57,11 +57,12 @@ The Python clone keeps these features out of the first cutover path:
   hooks override the project hook, and hook failures do not block status writes.
 - `autoCommit` is opt-in and local-only. It runs after project write mutations
   when the project had no pre-existing git changes, uses fixed `git` argv
-  without a shell, does not push or pull remotes, and does not bypass hooks.
+  without a shell, and does not push or pull remotes. Git hooks run by default;
+  `bypassGitHooks: true` only adds `--no-verify` to this local auto-commit.
 - Remote operations are implemented as best-effort fetch-only remote-tracking
   ref refreshes plus read-only task snapshots from recent active branches;
   `remoteOperations: false` keeps repository reads offline and limited to local
   branch refs.
-- hook bypass is rejected for first cutover.
+- hook bypass is implemented only for explicit local auto-commit opt-in.
 - Remaining rich interactive UI behavior is later human-operator convenience,
   not an agent blocker.

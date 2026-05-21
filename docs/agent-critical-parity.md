@@ -113,12 +113,11 @@ do not block the first local-file agent cutover candidate.
 | git:remote-operations | implemented | remote git operations | git:remote-operations |
 | git:active-branch-accuracy | implemented | read-only active branch task snapshots | git:active-branch-accuracy |
 | git:auto-commit | implemented | autoCommit | git:auto-commit |
+| git:hook-bypass | implemented | bypassGitHooks | git:hook-bypass |
 
 ## Explicit Deferred Blockers
 
-| Inventory item | Status | Expected behavior | Deferred reason |
-| --- | --- | --- | --- |
-| git:hook-bypass | deferred | bypassGitHooks | Hook bypass remains unsupported for safety. |
+There are no explicit deferred compatibility blockers in the current inventory.
 
 ## Validation Commands
 

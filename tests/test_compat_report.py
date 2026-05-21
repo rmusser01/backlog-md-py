@@ -7,8 +7,8 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 98,
-        "deferred": 1,
+        "implemented": 99,
+        "deferred": 0,
         "total": 99,
     }
     assert report["categories"]["cli"] == {
@@ -37,8 +37,8 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 3,
     }
     assert report["categories"]["git"] == {
-        "implemented": 3,
-        "deferred": 1,
+        "implemented": 4,
+        "deferred": 0,
         "total": 4,
     }
 
@@ -69,6 +69,8 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
         "read-only active branch task snapshots"
     )
     assert items_by_name["git:auto-commit"]["status"] == "implemented"
+    assert items_by_name["git:hook-bypass"]["status"] == "implemented"
+    assert items_by_name["git:hook-bypass"]["expected"] == "bypassGitHooks"
     assert items_by_name["browser:custom-port-service"]["status"] == "implemented"
     assert items_by_name["browser:responsive-layout"]["status"] == "implemented"
     assert items_by_name["browser:service-lifecycle"]["status"] == "implemented"
@@ -113,4 +115,4 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:service-transport-shutdown"]["expected"] == (
         "browser SSE shutdown event and client transport teardown policy"
     )
-    assert deferred_by_name["git:hook-bypass"]["reason"] == "Hook bypass remains unsupported for safety."
+    assert "git:hook-bypass" not in deferred_by_name

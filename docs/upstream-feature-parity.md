@@ -61,7 +61,9 @@ larger task commands:
 - Interactive `backlog overview` project statistics dashboard while preserving
   deterministic non-interactive overview output.
 - Opt-in local `autoCommit` after project write mutations, with dirty-worktree
-  protection, no remote push/pull behavior, and no hook bypass.
+  protection, no remote push/pull behavior, hooks enabled by default, and
+  explicit `bypassGitHooks` support that only adds `--no-verify` to the local
+  auto-commit argv.
 - Fetch-only remote operations: when `remoteOperations` and
   `checkActiveBranches` are enabled, repository reads refresh remote-tracking
   refs with `git fetch --all --prune` without pulling, merging, or pushing.
@@ -133,9 +135,9 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing remains deferred, and shell-hook execution plus hook-bypass settings stay CLI-only or explicitly deferred |
+| Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing remains deferred, and shell-hook execution plus hook-bypass settings stay CLI-only |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
-| Git automation | hook bypass | Local auto-commit, fetch-only remote operations, and read-only active branch snapshots are implemented; hook bypass rejected for first cutover |
+| Git automation | none currently tracked | Local auto-commit, explicit auto-commit hook bypass, fetch-only remote operations, and read-only active branch snapshots are implemented |
 
 ## Recommended Work Order
 
@@ -145,5 +147,6 @@ larger task commands:
    should explicitly advertise a headless/agent-focused compatibility scope.
 3. If browser parity is in scope, implement it separately from MCP/CLI runtime
    work and require end-to-end browser tests before claiming support.
-4. Treat hook bypass as a separate security-sensitive milestone with explicit
-   opt-in behavior.
+4. Keep any future shell-hook or browser-exposed automation behind separate
+   security review; the CLI-only hook-bypass milestone is complete for
+   explicit local auto-commit opt-in.
