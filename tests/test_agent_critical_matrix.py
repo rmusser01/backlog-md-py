@@ -393,6 +393,16 @@ def test_agent_critical_inventory_tracks_browser_service_transport_shutdown_surf
     assert item.expected == "browser SSE shutdown event and client transport teardown policy"
 
 
+def test_agent_critical_inventory_tracks_browser_safe_git_settings_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:safe-git-settings"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser safe git automation settings dialog and endpoint"
+
+
 def test_agent_critical_inventory_tracks_init_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

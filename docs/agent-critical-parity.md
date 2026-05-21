@@ -101,6 +101,7 @@ do not block the first local-file agent cutover candidate.
 | browser:checklist-state-controls | implemented | browser checklist state endpoint and task detail controls | browser:checklist-state-controls |
 | browser:dod-defaults-settings | implemented | browser Definition of Done defaults settings dialog and endpoint | browser:dod-defaults-settings |
 | browser:general-settings | implemented | browser safe general project settings dialog and endpoint | browser:general-settings |
+| browser:safe-git-settings | implemented | browser safe git automation settings dialog and endpoint | browser:safe-git-settings |
 | browser:live-refresh-polling | implemented | browser board revision polling detects external task changes | browser:live-refresh-polling |
 | browser:sse-live-refresh | implemented | browser board revision Server-Sent Events with polling fallback | browser:sse-live-refresh |
 | browser:service-transport-shutdown | implemented | browser SSE shutdown event and client transport teardown policy | browser:service-transport-shutdown |

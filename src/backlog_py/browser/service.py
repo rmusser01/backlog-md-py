@@ -28,13 +28,17 @@ _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
+        "activeBranchDays",
+        "autoCommit",
         "autoOpenBrowser",
+        "checkActiveBranches",
         "dateFormat",
         "defaultAssignee",
         "defaultPort",
         "defaultStatus",
         "includeDatetimeInDates",
         "projectName",
+        "remoteOperations",
         "statuses",
         "zeroPaddedIds",
     )
@@ -984,6 +988,9 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Default browser port
           <input name="defaultPort" type="number" min="1" max="65535" step="1" required>
         </label>
+        <label>Active branch window days
+          <input name="activeBranchDays" type="number" min="1" step="1" required>
+        </label>
         <label>Zero-padded ID width
           <input name="zeroPaddedIds" type="number" min="0" step="1">
         </label>
@@ -997,6 +1004,18 @@ def render_board_html(project: BacklogProject) -> str:
         <label>
           <input name="autoOpenBrowser" type="checkbox">
           Open browser automatically
+        </label>
+        <label>
+          <input name="remoteOperations" type="checkbox">
+          Remote operations
+        </label>
+        <label>
+          <input name="checkActiveBranches" type="checkbox">
+          Check active branches
+        </label>
+        <label>
+          <input name="autoCommit" type="checkbox">
+          Auto commit changes
         </label>
         <div class="form-actions">
           <button class="secondary-button" type="button" id="config-settings-cancel">Cancel</button>
@@ -1395,10 +1414,14 @@ def render_board_html(project: BacklogProject) -> str:
         configSettingsForm.elements.defaultStatus.value = settings.defaultStatus || "";
         configSettingsForm.elements.dateFormat.value = settings.dateFormat || "";
         configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
+        configSettingsForm.elements.activeBranchDays.value = settings.activeBranchDays || "";
         configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
         configSettingsForm.elements.statuses.value = (settings.statuses || []).join("\\n");
         configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
         configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
+        configSettingsForm.elements.remoteOperations.checked = Boolean(settings.remoteOperations);
+        configSettingsForm.elements.checkActiveBranches.checked = Boolean(settings.checkActiveBranches);
+        configSettingsForm.elements.autoCommit.checked = Boolean(settings.autoCommit);
       }}
       if (configSettingsDialog && configSettingsDialog.showModal) configSettingsDialog.showModal();
       else if (configSettingsDialog) configSettingsDialog.setAttribute("open", "open");
@@ -1619,10 +1642,14 @@ def render_board_html(project: BacklogProject) -> str:
             defaultStatus: String(data.get("defaultStatus") || ""),
             dateFormat: String(data.get("dateFormat") || ""),
             defaultPort: Number(data.get("defaultPort") || 0),
+            activeBranchDays: Number(data.get("activeBranchDays") || 0),
             zeroPaddedIds: String(data.get("zeroPaddedIds") || ""),
             statuses,
             includeDatetimeInDates: Boolean(form.elements.includeDatetimeInDates?.checked),
             autoOpenBrowser: Boolean(form.elements.autoOpenBrowser?.checked),
+            remoteOperations: Boolean(form.elements.remoteOperations?.checked),
+            checkActiveBranches: Boolean(form.elements.checkActiveBranches?.checked),
+            autoCommit: Boolean(form.elements.autoCommit?.checked),
           }},
         }}),
       }});
@@ -2138,13 +2165,17 @@ def _dod_defaults_items_from_payload(payload: object) -> list[str]:
 
 def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:
     return {
+        "activeBranchDays": config.active_branch_days,
+        "autoCommit": config.auto_commit,
         "autoOpenBrowser": config.auto_open_browser,
+        "checkActiveBranches": config.check_active_branches,
         "dateFormat": config.date_format,
         "defaultAssignee": config.default_assignee,
         "defaultPort": config.default_port,
         "defaultStatus": config.default_status,
         "includeDatetimeInDates": config.include_datetime_in_dates,
         "projectName": config.project_name,
+        "remoteOperations": config.remote_operations,
         "statuses": list(config.statuses or []),
         "zeroPaddedIds": config.zero_padded_ids,
     }
@@ -2165,10 +2196,18 @@ def _config_settings_from_payload(payload: object) -> dict[str, str]:
             updates[raw_key] = _required_string_setting(raw_value, raw_key)
         elif raw_key == "defaultAssignee":
             updates[raw_key] = _optional_string_setting(raw_value, raw_key)
-        elif raw_key in {"autoOpenBrowser", "includeDatetimeInDates"}:
+        elif raw_key in {
+            "autoCommit",
+            "autoOpenBrowser",
+            "checkActiveBranches",
+            "includeDatetimeInDates",
+            "remoteOperations",
+        }:
             updates[raw_key] = _boolean_setting(raw_value, raw_key)
         elif raw_key == "defaultPort":
             updates[raw_key] = _port_setting(raw_value, raw_key)
+        elif raw_key == "activeBranchDays":
+            updates[raw_key] = _positive_integer_setting(raw_value, raw_key)
         elif raw_key == "zeroPaddedIds":
             updates[raw_key] = _zero_padded_ids_setting(raw_value, raw_key)
         elif raw_key == "statuses":
@@ -2202,6 +2241,13 @@ def _port_setting(value: object, field: str) -> str:
     parsed = _integer_setting(value, field)
     if parsed < 1 or parsed > 65535:
         raise ValueError(f"Request body setting {field} must be a valid port number (1-65535)")
+    return str(parsed)
+
+
+def _positive_integer_setting(value: object, field: str) -> str:
+    parsed = _integer_setting(value, field)
+    if parsed < 1:
+        raise ValueError(f"Request body setting {field} must be a positive integer")
     return str(parsed)
 
 
