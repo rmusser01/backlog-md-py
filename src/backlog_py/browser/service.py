@@ -14,6 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
 from urllib.parse import unquote, urlparse
 
+from backlog_py.core.decisions import DecisionRecord, DecisionService
+from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
 from backlog_py.runtime.locks import with_project_write_lock
@@ -254,6 +256,33 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"items": get_definition_of_done_defaults(self.server.project)},
             )
+            return
+        if path in {"/api/docs", "/api/docs/"}:
+            self._send_json(HTTPStatus.OK, _document_list_payload(self.server.project))
+            return
+        document_id = _document_endpoint_id(path)
+        if document_id is not None:
+            try:
+                document = DocumentService(self.server.project).view_document(document_id)
+            except DocumentMutationError:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid document path"})
+                return
+            except KeyError:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Document not found: {document_id}"})
+                return
+            self._send_json(HTTPStatus.OK, _document_detail_payload(document))
+            return
+        if path in {"/api/decisions", "/api/decisions/"}:
+            self._send_json(HTTPStatus.OK, _decision_list_payload(self.server.project))
+            return
+        decision_id = _decision_endpoint_id(path)
+        if decision_id is not None:
+            try:
+                decision = DecisionService(self.server.project).view_decision(decision_id)
+            except KeyError:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Decision not found: {decision_id}"})
+                return
+            self._send_json(HTTPStatus.OK, _decision_detail_payload(decision))
             return
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
@@ -720,6 +749,38 @@ def render_board_html(project: BacklogProject) -> str:
       margin: 0;
       white-space: pre-wrap;
     }}
+    .readonly-list {{
+      display: grid;
+      gap: 8px;
+      margin: 0 0 16px;
+      padding: 0;
+      list-style: none;
+    }}
+    .readonly-list button {{
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      padding: 8px 10px;
+      text-align: left;
+    }}
+    .readonly-list button:hover,
+    .readonly-list button:focus-visible {{
+      border-color: var(--accent);
+      outline: none;
+    }}
+    .readonly-list-title {{
+      display: block;
+      font-weight: 650;
+    }}
+    .readonly-list-meta {{
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }}
     .markdown-body > :first-child {{
       margin-top: 0;
     }}
@@ -876,6 +937,8 @@ def render_board_html(project: BacklogProject) -> str:
     </div>
     <div class="header-actions">
       <button class="secondary-button" type="button" id="service-status-open">Service</button>
+      <button class="secondary-button" type="button" id="documents-open">Documents</button>
+      <button class="secondary-button" type="button" id="decisions-open">Decisions</button>
       <button class="secondary-button" type="button" id="config-settings-open">Project settings</button>
       <button class="secondary-button" type="button" id="dod-defaults-open">Definition of Done</button>
       <button class="primary-button" type="button" id="task-create-open">New task</button>
@@ -1087,6 +1150,61 @@ def render_board_html(project: BacklogProject) -> str:
       </div>
     </div>
   </dialog>
+  <dialog id="documents-dialog" aria-labelledby="documents-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="documents-title">Documents</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <ul class="readonly-list" id="documents-list"></ul>
+      <section class="dialog-section">
+        <h3 id="document-detail-title">Document detail</h3>
+        <dl class="dialog-meta">
+          <div><dt>File</dt><dd id="document-detail-path"></dd></div>
+          <div><dt>Type</dt><dd id="document-detail-type"></dd></div>
+          <div><dt>Tags</dt><dd id="document-detail-tags"></dd></div>
+        </dl>
+        <div class="markdown-body" id="document-detail"></div>
+      </section>
+    </div>
+  </dialog>
+  <dialog id="decisions-dialog" aria-labelledby="decisions-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="decisions-title">Decisions</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <ul class="readonly-list" id="decisions-list"></ul>
+      <section class="dialog-section" id="decision-detail">
+        <h3 id="decision-detail-title">Decision detail</h3>
+        <dl class="dialog-meta">
+          <div><dt>Status</dt><dd id="decision-detail-status"></dd></div>
+          <div><dt>Date</dt><dd id="decision-detail-date"></dd></div>
+          <div><dt>File</dt><dd id="decision-detail-path"></dd></div>
+        </dl>
+        <section class="dialog-section">
+          <h3>Context</h3>
+          <div class="markdown-body" id="decision-detail-context"></div>
+        </section>
+        <section class="dialog-section">
+          <h3>Decision</h3>
+          <div class="markdown-body" id="decision-detail-decision"></div>
+        </section>
+        <section class="dialog-section">
+          <h3>Consequences</h3>
+          <div class="markdown-body" id="decision-detail-consequences"></div>
+        </section>
+        <section class="dialog-section">
+          <h3>Alternatives</h3>
+          <div class="markdown-body" id="decision-detail-alternatives"></div>
+        </section>
+      </section>
+    </div>
+  </dialog>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-dialog-title">Task details</h2>
@@ -1142,6 +1260,8 @@ def render_board_html(project: BacklogProject) -> str:
     const dodDefaultsForm = document.getElementById("dod-defaults-form");
     const serviceStatusDialog = document.getElementById("service-status-dialog");
     const serviceShutdownConfirm = document.getElementById("service-shutdown-confirm");
+    const documentsDialog = document.getElementById("documents-dialog");
+    const decisionsDialog = document.getElementById("decisions-dialog");
     const boardElement = document.querySelector("[data-board-revision]");
     const boardRefreshIntervalMs = 5000;
     let currentBoardRevision = boardElement?.dataset.boardRevision || "";
@@ -1157,6 +1277,30 @@ def render_board_html(project: BacklogProject) -> str:
     function setHtml(id, value) {{
       const element = document.getElementById(id);
       if (element) element.innerHTML = value || '<p class="markdown-empty">No content</p>';
+    }}
+
+    function readonlyListItem(title, meta, onClick) {{
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      const titleElement = document.createElement("span");
+      titleElement.className = "readonly-list-title";
+      titleElement.textContent = title || "Untitled";
+      const metaElement = document.createElement("span");
+      metaElement.className = "readonly-list-meta";
+      metaElement.textContent = meta || "";
+      button.append(titleElement, metaElement);
+      button.addEventListener("click", onClick);
+      item.appendChild(button);
+      return item;
+    }}
+
+    function renderEmptyReadonlyList(list, message) {{
+      list.replaceChildren();
+      const empty = document.createElement("li");
+      empty.className = "readonly-list-meta";
+      empty.textContent = message;
+      list.appendChild(empty);
     }}
 
     const mermaidModuleUrl = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
@@ -1299,6 +1443,104 @@ def render_board_html(project: BacklogProject) -> str:
 
     function metadataList(value) {{
       return String(value || "").split(/[\\n,]/).map((item) => item.trim()).filter(Boolean);
+    }}
+
+    async function openDocumentDetail(identifier) {{
+      const response = await fetch(`/api/docs/${{encodeURIComponent(identifier)}}`);
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const doc = await response.json();
+      setText("document-detail-title", doc.title);
+      setText("document-detail-path", doc.path);
+      setText("document-detail-type", doc.type);
+      setText("document-detail-tags", (doc.tags || []).join(", "));
+      setHtml("document-detail", doc.contentHtml);
+      renderMermaidDiagrams(documentsDialog || window.document);
+    }}
+
+    function renderDocumentsList(documents) {{
+      const list = document.getElementById("documents-list");
+      if (!list) return;
+      if (!documents || documents.length === 0) {{
+        renderEmptyReadonlyList(list, "No documents");
+        setText("document-detail-title", "Document detail");
+        setText("document-detail-path", "");
+        setText("document-detail-type", "");
+        setText("document-detail-tags", "");
+        setHtml("document-detail", "");
+        return;
+      }}
+      list.replaceChildren();
+      documents.forEach((doc) => {{
+        const identifier = doc.id || doc.path;
+        const metaParts = [doc.id, doc.path, doc.type].filter(Boolean);
+        list.appendChild(readonlyListItem(doc.title, metaParts.join(" · "), () => openDocumentDetail(identifier)));
+      }});
+      const first = documents[0];
+      openDocumentDetail(first.id || first.path);
+    }}
+
+    async function openDocuments() {{
+      const response = await fetch("/api/docs");
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      renderDocumentsList(await response.json());
+      documentsDialog?.showModal();
+    }}
+
+    async function openDecisionDetail(identifier) {{
+      const response = await fetch(`/api/decisions/${{encodeURIComponent(identifier)}}`);
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      const decision = await response.json();
+      setText("decision-detail-title", `${{decision.id}} - ${{decision.title}}`);
+      setText("decision-detail-status", decision.status);
+      setText("decision-detail-date", decision.date);
+      setText("decision-detail-path", decision.path);
+      setHtml("decision-detail-context", decision.contextHtml);
+      setHtml("decision-detail-decision", decision.decisionHtml);
+      setHtml("decision-detail-consequences", decision.consequencesHtml);
+      setHtml("decision-detail-alternatives", decision.alternativesHtml);
+      renderMermaidDiagrams(decisionsDialog || document);
+    }}
+
+    function renderDecisionsList(decisions) {{
+      const list = document.getElementById("decisions-list");
+      if (!list) return;
+      if (!decisions || decisions.length === 0) {{
+        renderEmptyReadonlyList(list, "No decisions");
+        setText("decision-detail-title", "Decision detail");
+        setText("decision-detail-status", "");
+        setText("decision-detail-date", "");
+        setText("decision-detail-path", "");
+        setHtml("decision-detail-context", "");
+        setHtml("decision-detail-decision", "");
+        setHtml("decision-detail-consequences", "");
+        setHtml("decision-detail-alternatives", "");
+        return;
+      }}
+      list.replaceChildren();
+      decisions.forEach((decision) => {{
+        const metaParts = [decision.id, decision.status, decision.date].filter(Boolean);
+        list.appendChild(readonlyListItem(decision.title, metaParts.join(" · "), () => openDecisionDetail(decision.id)));
+      }});
+      openDecisionDetail(decisions[0].id);
+    }}
+
+    async function openDecisions() {{
+      const response = await fetch("/api/decisions");
+      if (!response.ok) {{
+        console.error(await response.text());
+        return;
+      }}
+      renderDecisionsList(await response.json());
+      decisionsDialog?.showModal();
     }}
 
     function selectedRange(textarea) {{
@@ -1732,6 +1974,8 @@ def render_board_html(project: BacklogProject) -> str:
     document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
     dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);
+    document.getElementById("documents-open")?.addEventListener("click", openDocuments);
+    document.getElementById("decisions-open")?.addEventListener("click", openDecisions);
     document.getElementById("service-status-open")?.addEventListener("click", openServiceStatus);
     document.getElementById("service-status-refresh")?.addEventListener("click", refreshServicePanel);
     serviceShutdownConfirm?.addEventListener("click", submitServiceShutdown);
@@ -1863,6 +2107,62 @@ def _board_shutdown_sse_event(shutdown_state: Mapping[str, object]) -> str:
 
 def _render_status_options(statuses: list[str]) -> str:
     return "".join(f'<option value="{escape(status)}">{escape(status)}</option>' for status in statuses)
+
+
+def _document_list_payload(project: BacklogProject) -> list[dict[str, object]]:
+    return [_document_summary_payload(document) for document in DocumentService(project).list_documents()]
+
+
+def _document_summary_payload(document: DocumentRecord) -> dict[str, object]:
+    return {
+        "id": document.id,
+        "title": document.title,
+        "type": _metadata_string(document.frontmatter.get("type")),
+        "path": document.path_relative,
+        "tags": _metadata_list(document.frontmatter.get("tags")),
+    }
+
+
+def _document_detail_payload(document: DocumentRecord) -> dict[str, object]:
+    payload = _document_summary_payload(document)
+    payload.update(
+        {
+            "content": document.content,
+            "contentHtml": _markdown_to_html(document.content),
+        }
+    )
+    return payload
+
+
+def _decision_list_payload(project: BacklogProject) -> list[dict[str, object]]:
+    return [_decision_summary_payload(decision) for decision in DecisionService(project).list_decisions()]
+
+
+def _decision_summary_payload(decision: DecisionRecord) -> dict[str, object]:
+    return {
+        "id": decision.id,
+        "title": decision.title,
+        "status": decision.status,
+        "date": decision.date,
+    }
+
+
+def _decision_detail_payload(decision: DecisionRecord) -> dict[str, object]:
+    payload = _decision_summary_payload(decision)
+    payload.update(
+        {
+            "path": decision.path_relative,
+            "context": decision.context,
+            "contextHtml": _markdown_to_html(decision.context),
+            "decision": decision.decision,
+            "decisionHtml": _markdown_to_html(decision.decision),
+            "consequences": decision.consequences,
+            "consequencesHtml": _markdown_to_html(decision.consequences),
+            "alternatives": decision.alternatives,
+            "alternativesHtml": _markdown_to_html(decision.alternatives or ""),
+        }
+    )
+    return payload
 
 
 def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
@@ -2103,6 +2403,26 @@ def _task_checklist_endpoint_task_id(path: str) -> str | None:
     if not encoded_task_id or "/" in encoded_task_id:
         return None
     return unquote(encoded_task_id)
+
+
+def _document_endpoint_id(path: str) -> str | None:
+    prefix = "/api/docs/"
+    if not path.startswith(prefix):
+        return None
+    encoded_document_id = path[len(prefix):]
+    if not encoded_document_id or "/" in encoded_document_id:
+        return None
+    return unquote(encoded_document_id)
+
+
+def _decision_endpoint_id(path: str) -> str | None:
+    prefix = "/api/decisions/"
+    if not path.startswith(prefix):
+        return None
+    encoded_decision_id = path[len(prefix):]
+    if not encoded_decision_id or "/" in encoded_decision_id:
+        return None
+    return unquote(encoded_decision_id)
 
 
 def _task_detail_endpoint_task_id(path: str) -> str | None:

@@ -100,6 +100,7 @@ do not block the first local-file agent cutover candidate.
 | browser:task-edit-form | implemented | basic browser task edit endpoint and form | browser:task-edit-form |
 | browser:task-archive-confirmation | implemented | browser task archive endpoint and confirmation dialog | browser:task-archive-confirmation |
 | browser:checklist-state-controls | implemented | browser checklist state endpoint and task detail controls | browser:checklist-state-controls |
+| browser:document-decision-readonly | implemented | browser read-only document and decision list/detail endpoints and dialogs | browser:document-decision-readonly |
 | browser:dod-defaults-settings | implemented | browser Definition of Done defaults settings dialog and endpoint | browser:dod-defaults-settings |
 | browser:general-settings | implemented | browser safe general project settings dialog and endpoint | browser:general-settings |
 | browser:safe-git-settings | implemented | browser safe git automation settings dialog and endpoint | browser:safe-git-settings |

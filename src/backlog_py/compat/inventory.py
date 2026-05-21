@@ -267,6 +267,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser checklist state endpoint and task detail controls",
         ),
         _implemented(
+            "browser:document-decision-readonly",
+            "browser-implemented",
+            "web documentation and decisions",
+            "browser read-only document and decision list/detail endpoints and dialogs",
+        ),
+        _implemented(
             "browser:dod-defaults-settings",
             "browser-implemented",
             "web settings",

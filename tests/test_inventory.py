@@ -35,6 +35,8 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["browser:task-archive-confirmation"].status == "implemented"
     assert by_name["browser:checklist-state-controls"].classification == "browser-implemented"
     assert by_name["browser:checklist-state-controls"].status == "implemented"
+    assert by_name["browser:document-decision-readonly"].classification == "browser-implemented"
+    assert by_name["browser:document-decision-readonly"].status == "implemented"
     assert by_name["browser:markdown-edit-toolbar"].classification == "browser-implemented"
     assert by_name["browser:markdown-edit-toolbar"].status == "implemented"
     assert by_name["browser:mermaid-rendering"].classification == "browser-implemented"

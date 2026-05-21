@@ -631,11 +631,11 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
-    assert "implemented: 97" in result.output
+    assert "implemented: 98" in result.output
     assert "deferred: 1" in result.output
-    assert "total: 98" in result.output
+    assert "total: 99" in result.output
     assert "cli: 45 implemented, 0 deferred, 45 total" in result.output
-    assert "browser: 22 implemented, 0 deferred, 22 total" in result.output
+    assert "browser: 23 implemented, 0 deferred, 23 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 3 implemented, 0 deferred, 3 total" in result.output
     assert "git: 3 implemented, 1 deferred, 4 total" in result.output
@@ -664,6 +664,7 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"browser:task-edit-form"' in result.output
     assert '"browser:task-archive-confirmation"' in result.output
     assert '"browser:checklist-state-controls"' in result.output
+    assert '"browser:document-decision-readonly"' in result.output
     assert '"browser:general-settings"' in result.output
     assert '"browser:safe-git-settings"' in result.output
     assert '"browser:live-refresh-polling"' in result.output

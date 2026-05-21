@@ -85,6 +85,9 @@ larger task commands:
   Notes, and Final Summary, including Mermaid fenced blocks rendered by the
   client-side Mermaid loader with strict security settings and escaped fallback
   source text.
+- Browser read-only document and decision list/detail endpoints and in-page
+  dialogs, including safe Markdown rendering for document bodies and decision
+  sections.
 - Basic browser task creation through the loopback service and in-page form,
   backed by the project write lock.
 - Basic browser task editing through the loopback service and in-page form for
@@ -130,7 +133,7 @@ larger task commands:
 
 | Area | Remaining upstream behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing remains deferred, and shell-hook execution plus hook-bypass settings stay CLI-only or explicitly deferred |
+| Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing remains deferred, and shell-hook execution plus hook-bypass settings stay CLI-only or explicitly deferred |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
 | Git automation | hook bypass | Local auto-commit, fetch-only remote operations, and read-only active branch snapshots are implemented; hook bypass rejected for first cutover |
 
