@@ -754,6 +754,23 @@ def render_board_html(project: BacklogProject) -> str:
       overflow-x: auto;
       white-space: pre;
     }}
+    .mermaid-diagram {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
+      margin: 0 0 10px;
+      padding: 10px;
+      overflow-x: auto;
+    }}
+    .mermaid {{
+      min-height: 32px;
+      white-space: pre;
+    }}
+    .mermaid-render-failed .mermaid {{
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }}
     .dialog-section ul {{
       margin: 0;
       padding-left: 20px;
@@ -1142,6 +1159,27 @@ def render_board_html(project: BacklogProject) -> str:
       if (element) element.innerHTML = value || '<p class="markdown-empty">No content</p>';
     }}
 
+    const mermaidModuleUrl = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    let mermaidModulePromise = null;
+
+    async function renderMermaidDiagrams(root = document) {{
+      const diagrams = Array.from(root.querySelectorAll("[data-mermaid-diagram] .mermaid"));
+      if (diagrams.length === 0) return;
+      try {{
+        mermaidModulePromise = mermaidModulePromise || import(mermaidModuleUrl);
+        const module = await mermaidModulePromise;
+        const mermaid = module.default || module;
+        mermaid.initialize({{startOnLoad: false, securityLevel: "strict"}});
+        await mermaid.run({{nodes: diagrams}});
+      }} catch (error) {{
+        console.error(error);
+        mermaidModulePromise = null;
+        diagrams.forEach((diagram) => {{
+          diagram.closest("[data-mermaid-diagram]")?.classList.add("mermaid-render-failed");
+        }});
+      }}
+    }}
+
     function hasOpenDialog() {{
       return Boolean(document.querySelector("dialog[open]"));
     }}
@@ -1350,6 +1388,7 @@ def render_board_html(project: BacklogProject) -> str:
       setHtml("task-dialog-description-html", task.descriptionHtml);
       setHtml("task-dialog-implementation-notes", task.implementationNotesHtml);
       setHtml("task-dialog-final-summary", task.finalSummaryHtml);
+      renderMermaidDiagrams(taskDialog || document);
       renderChecklist("task-dialog-acceptance", task.acceptanceCriteria, "acceptanceCriteria");
       renderChecklist("task-dialog-dod", task.definitionOfDone, "definitionOfDone");
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
@@ -1910,7 +1949,14 @@ def _markdown_to_html(text: str) -> str:
     def flush_code_block() -> None:
         language_class = _markdown_language_class(code_language)
         code = escape("\n".join(code_lines))
-        blocks.append(f'<pre class="markdown-code{language_class}"><code>{code}</code></pre>')
+        if _normalized_markdown_language(code_language) == "mermaid":
+            blocks.append(
+                '<div class="mermaid-diagram" data-mermaid-diagram="true">'
+                f'<div class="mermaid">{code}</div>'
+                "</div>"
+            )
+        else:
+            blocks.append(f'<pre class="markdown-code{language_class}"><code>{code}</code></pre>')
         code_lines.clear()
 
     for line in source.splitlines():
@@ -1968,8 +2014,12 @@ def _markdown_heading(line: str) -> tuple[int, str] | None:
 
 
 def _markdown_language_class(language: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9_-]", "", language.strip().lower())
+    normalized = _normalized_markdown_language(language)
     return f" language-{normalized}" if normalized else ""
+
+
+def _normalized_markdown_language(language: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "", language.strip().lower())
 
 
 def _render_inline_markdown(text: str) -> str:

@@ -210,6 +210,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:mermaid-rendering"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:rich-section-editing"
     command: ["backlog", "browser"]
     agent_critical: false

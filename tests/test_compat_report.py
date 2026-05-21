@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 95,
+        "implemented": 96,
         "deferred": 1,
-        "total": 96,
+        "total": 97,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 21,
+        "implemented": 22,
         "deferred": 0,
-        "total": 21,
+        "total": 22,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -76,6 +76,10 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:kanban-drag-drop"]["status"] == "implemented"
     assert items_by_name["browser:task-detail-view"]["status"] == "implemented"
     assert items_by_name["browser:markdown-detail-rendering"]["status"] == "implemented"
+    assert items_by_name["browser:mermaid-rendering"]["status"] == "implemented"
+    assert items_by_name["browser:mermaid-rendering"]["expected"] == (
+        "browser Mermaid diagram rendering for task detail Markdown fences"
+    )
     assert items_by_name["browser:rich-section-editing"]["status"] == "implemented"
     assert items_by_name["browser:markdown-edit-toolbar"]["status"] == "implemented"
     assert items_by_name["browser:markdown-edit-toolbar"]["expected"] == (

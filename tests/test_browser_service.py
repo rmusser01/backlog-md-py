@@ -478,7 +478,9 @@ def test_browser_task_detail_endpoint_returns_markdown_html_sections(tmp_path):
     assert "<h2>Rendered heading</h2>" in task["descriptionHtml"]
     assert "<li>First bullet</li>" in task["descriptionHtml"]
     assert "<strong>Second</strong>" in task["descriptionHtml"]
-    assert 'class="markdown-code language-mermaid"' in task["descriptionHtml"]
+    assert 'data-mermaid-diagram="true"' in task["descriptionHtml"]
+    assert 'class="mermaid"' in task["descriptionHtml"]
+    assert "A --&gt; B" in task["descriptionHtml"]
     assert "<li>Keep frontmatter order stable.</li>" in task["implementationNotesHtml"]
     assert task["finalSummaryHtml"] == "<p>No final summary yet.</p>"
 
@@ -513,7 +515,8 @@ def test_browser_task_detail_markdown_html_escapes_unsafe_content(tmp_path):
     assert "<script" not in html
     assert "<img" not in html
     assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html
-    assert 'class="markdown-code language-mermaid"' in html
+    assert 'data-mermaid-diagram="true"' in html
+    assert 'class="mermaid"' in html
     assert "A[&quot;&lt;script&gt;&quot;] --&gt; B" in html
 
 
@@ -555,6 +558,25 @@ def test_browser_board_html_exposes_markdown_detail_sections(tmp_path):
     assert "descriptionHtml" in html
     assert "implementationNotesHtml" in html
     assert "finalSummaryHtml" in html
+
+
+def test_browser_board_html_exposes_mermaid_renderer_hook(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert "renderMermaidDiagrams" in html
+    assert "mermaid.esm.min.mjs" in html
+    assert 'querySelectorAll("[data-mermaid-diagram] .mermaid")' in html
+    assert 'securityLevel: "strict"' in html
+    assert "mermaidModulePromise = null;\n        diagrams.forEach" in html
 
 
 def test_browser_task_create_endpoint_creates_task_under_project_lock(tmp_path, monkeypatch):
