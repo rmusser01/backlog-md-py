@@ -393,6 +393,16 @@ def test_agent_critical_inventory_tracks_browser_checklist_state_surface():
     assert item.expected == "browser checklist state endpoint and task detail controls"
 
 
+def test_agent_critical_inventory_tracks_browser_document_decision_readonly_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:document-decision-readonly"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser read-only document and decision list/detail endpoints and dialogs"
+
+
 def test_agent_critical_inventory_tracks_browser_sse_live_refresh_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

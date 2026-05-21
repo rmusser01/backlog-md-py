@@ -19,6 +19,7 @@ full clone unless explicitly rejected.
 | Responsive Kanban board | Required for full clone | Implemented for narrow viewports | The static board includes explicit mobile viewport rules for header actions, board columns, task actions, dialogs, and form actions while preserving the dependency-free browser service. |
 | drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
 | Task detail dialog | Required for full clone | Implemented for inspection, Markdown rendering, Mermaid diagrams, and checklist state | Browser cards can open a detail dialog backed by `/api/tasks/<id>` for metadata, safe Markdown-rendered description, client-side Mermaid diagrams, Implementation Notes, Final Summary, Acceptance Criteria, and Definition of Done. Checklist controls update AC/DoD check state through a locked `/api/tasks/<id>/checklist` endpoint. |
+| Document and decision detail | Required for full clone | Implemented for read-only inspection | Browser users can open read-only Documents and Decisions dialogs. The loopback service exposes `/api/docs`, `/api/docs/<id-or-path>`, `/api/decisions`, and `/api/decisions/<id>` for list/detail payloads, with safe Markdown HTML rendering for document bodies and decision sections. |
 | Task create/edit forms | Required for full clone | Basic create/edit plus metadata, Markdown toolbar, and rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including assignees, labels, priority, milestone, raw Markdown replacement for Implementation Notes and Final Summary, and a local Markdown formatting toolbar for raw textareas. Broader WYSIWYG edit flows remain deferred. |
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
@@ -39,7 +40,8 @@ A later browser milestone should not be marked complete until it has:
 - End-to-end browser tests for rich edit flows beyond the
   implemented drag-and-drop status movement, basic create/edit forms, Markdown
   edit toolbar, archive
-  confirmation, checklist-state controls, task detail inspection, safe
+  confirmation, checklist-state controls, document/decision read-only
+  inspection, task detail inspection, safe
   Markdown rendering, Mermaid detail diagrams, raw Markdown Implementation
   Notes/Final Summary replacement, metadata editing, Definition of Done
   default settings, safe general project settings, safe git automation

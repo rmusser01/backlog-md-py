@@ -520,6 +520,152 @@ def test_browser_task_detail_markdown_html_escapes_unsafe_content(tmp_path):
     assert "A[&quot;&lt;script&gt;&quot;] --&gt; B" in html
 
 
+def test_browser_documents_endpoints_return_readonly_markdown_payloads(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    docs_dir = repo / "backlog" / "docs" / "guides"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "setup.md").write_text(
+        "---\n"
+        "id: DOC-SETUP\n"
+        "title: Setup Guide\n"
+        "type: guide\n"
+        "tags:\n"
+        "  - setup\n"
+        "  - agents\n"
+        "---\n\n"
+        "## Install\n\n"
+        "Run `uv sync`.\n\n"
+        "```mermaid\n"
+        "graph TD\n"
+        "  A --> B\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        listing = _get_json(f"{service.root_url}/api/docs")
+        detail = _get_json(f"{service.root_url}/api/docs/DOC-SETUP")
+        detail_by_path = _get_json(f"{service.root_url}/api/docs/guides%2Fsetup.md")
+    finally:
+        service.shutdown()
+
+    assert listing == [
+        {
+            "id": "DOC-SETUP",
+            "title": "Setup Guide",
+            "type": "guide",
+            "path": "guides/setup.md",
+            "tags": ["setup", "agents"],
+        }
+    ]
+    assert detail["id"] == "DOC-SETUP"
+    assert detail["title"] == "Setup Guide"
+    assert detail["path"] == "guides/setup.md"
+    assert detail["content"].startswith("## Install")
+    assert "<h2>Install</h2>" in detail["contentHtml"]
+    assert "<code>uv sync</code>" in detail["contentHtml"]
+    assert 'data-mermaid-diagram="true"' in detail["contentHtml"]
+    assert "A --&gt; B" in detail["contentHtml"]
+    assert detail_by_path == detail
+
+
+def test_browser_document_detail_endpoint_rejects_invalid_encoded_path(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _get_json(f"{service.root_url}/api/docs/%2E%2E%2Fsecret")
+        body = json.loads(exc.value.read().decode("utf-8"))
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert body == {"error": "Invalid document path"}
+
+
+def test_browser_decisions_endpoints_return_readonly_markdown_payloads(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    decisions_dir = repo / "backlog" / "decisions"
+    decisions_dir.mkdir(parents=True)
+    (decisions_dir / "decision-1 - Use-SQLite.md").write_text(
+        "---\n"
+        "id: decision-1\n"
+        "title: Use SQLite\n"
+        "date: 2026-05-20 10:00\n"
+        "status: accepted\n"
+        "---\n\n"
+        "## Context\n\n"
+        "Need durable local state.\n\n"
+        "## Decision\n\n"
+        "Use **SQLite**.\n\n"
+        "## Consequences\n\n"
+        "- Simple backups\n",
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        listing = _get_json(f"{service.root_url}/api/decisions")
+        detail = _get_json(f"{service.root_url}/api/decisions/1")
+    finally:
+        service.shutdown()
+
+    assert listing == [
+        {
+            "id": "decision-1",
+            "title": "Use SQLite",
+            "status": "accepted",
+            "date": "2026-05-20 10:00",
+        }
+    ]
+    assert detail["id"] == "decision-1"
+    assert detail["title"] == "Use SQLite"
+    assert detail["path"] == "decision-1 - Use-SQLite.md"
+    assert detail["context"] == "Need durable local state."
+    assert detail["decision"] == "Use **SQLite**."
+    assert "<strong>SQLite</strong>" in detail["decisionHtml"]
+    assert "<li>Simple backups</li>" in detail["consequencesHtml"]
+
+
+def test_browser_board_html_exposes_document_and_decision_readonly_dialogs(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="documents-open"' in html
+    assert 'id="documents-dialog"' in html
+    assert 'id="documents-list"' in html
+    assert 'id="document-detail"' in html
+    assert 'id="decisions-open"' in html
+    assert 'id="decisions-dialog"' in html
+    assert 'id="decisions-list"' in html
+    assert 'id="decision-detail"' in html
+    assert "openDocuments" in html
+    assert "renderDocumentsList" in html
+    assert "openDecisions" in html
+    assert "renderDecisionsList" in html
+    assert "/api/docs" in html
+    assert "/api/decisions" in html
+
+
 def test_browser_board_html_exposes_readonly_task_detail_dialog(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)

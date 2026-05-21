@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 97,
+        "implemented": 98,
         "deferred": 1,
-        "total": 98,
+        "total": 99,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 22,
+        "implemented": 23,
         "deferred": 0,
-        "total": 22,
+        "total": 23,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -94,6 +94,10 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:task-edit-form"]["status"] == "implemented"
     assert items_by_name["browser:task-archive-confirmation"]["status"] == "implemented"
     assert items_by_name["browser:checklist-state-controls"]["status"] == "implemented"
+    assert items_by_name["browser:document-decision-readonly"]["status"] == "implemented"
+    assert items_by_name["browser:document-decision-readonly"]["expected"] == (
+        "browser read-only document and decision list/detail endpoints and dialogs"
+    )
     assert items_by_name["browser:dod-defaults-settings"]["status"] == "implemented"
     assert items_by_name["browser:general-settings"]["status"] == "implemented"
     assert items_by_name["browser:safe-git-settings"]["status"] == "implemented"

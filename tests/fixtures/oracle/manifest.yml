@@ -242,6 +242,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:document-decision-readonly"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:dod-defaults-settings"
     command: ["backlog", "browser"]
     agent_critical: false
