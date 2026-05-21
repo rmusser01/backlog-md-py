@@ -9,7 +9,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from backlog_py.core.models import BacklogProject
+from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.storage.config import load_config
 
 
@@ -46,7 +46,8 @@ def prepare_auto_commit(project: BacklogProject) -> AutoCommitContext:
 
 def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoCommitContext) -> None:
     """Commit mutation results when post-mutation config enables autoCommit."""
-    if not _auto_commit_enabled(project):
+    config = _auto_commit_config(project)
+    if not config.auto_commit:
         return
     if not context.git_available:
         logger.warning("Skipping auto-commit for {}: project is not inside a git worktree", operation)
@@ -62,7 +63,11 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
         logger.warning("Skipping auto-commit for {}: git add failed: {}", operation, _git_error(add))
         return
 
-    commit = _run_git(context.work_dir, "commit", "-m", f"backlog: {operation}")
+    commit_args = ["commit"]
+    if config.bypass_git_hooks:
+        commit_args.append("--no-verify")
+    commit_args.extend(("-m", f"backlog: {operation}"))
+    commit = _run_git(context.work_dir, *commit_args)
     if commit.returncode == 0:
         return
 
@@ -134,11 +139,11 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     return snapshots
 
 
-def _auto_commit_enabled(project: BacklogProject) -> bool:
+def _auto_commit_config(project: BacklogProject) -> BacklogConfig:
     try:
-        return load_config(project.config_path).auto_commit
+        return load_config(project.config_path)
     except (OSError, ValueError):
-        return project.config.auto_commit
+        return project.config
 
 
 def _is_git_worktree(work_dir: Path) -> bool:

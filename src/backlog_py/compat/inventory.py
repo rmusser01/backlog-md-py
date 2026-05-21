@@ -398,12 +398,11 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "ADVANCED-CONFIG.md",
             "autoCommit",
         ),
-        _deferred(
+        _implemented(
             "git:hook-bypass",
-            "git-deferred",
+            "git-implemented",
             "ADVANCED-CONFIG.md",
             "bypassGitHooks",
-            "Hook bypass remains unsupported for safety.",
         ),
     )
     return CompatibilityInventory(items=items)

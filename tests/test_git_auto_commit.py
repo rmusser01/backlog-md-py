@@ -50,10 +50,10 @@ def test_project_write_lock_skips_auto_commit_when_repo_was_dirty(tmp_path, monk
     }
 
 
-def test_project_write_lock_does_not_bypass_git_hooks(tmp_path, monkeypatch):
+def test_project_write_lock_runs_git_hooks_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
-    repo = _git_backlog_repo(tmp_path, auto_commit=True, bypass_git_hooks=True)
-    project = _project(repo, auto_commit=True, bypass_git_hooks=True)
+    repo = _git_backlog_repo(tmp_path, auto_commit=True, bypass_git_hooks=False)
+    project = _project(repo, auto_commit=True, bypass_git_hooks=False)
     hook = repo / ".git" / "hooks" / "pre-commit"
     hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     hook.chmod(0o755)
@@ -67,6 +67,24 @@ def test_project_write_lock_does_not_bypass_git_hooks(tmp_path, monkeypatch):
     assert _git(repo, "log", "-1", "--format=%s") == "initial"
     assert _git(repo, "diff", "--cached", "--name-only") == ""
     assert _status_entries(repo) == ["?? backlog/tasks/task-2 - Hooked.md"]
+
+
+def test_project_write_lock_bypasses_git_hooks_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = _git_backlog_repo(tmp_path, auto_commit=True, bypass_git_hooks=True)
+    project = _project(repo, auto_commit=True, bypass_git_hooks=True)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+    with_project_write_lock(
+        project,
+        "task_create",
+        lambda: _write_task(repo, "task-2 - Hook-bypass.md", "id: TASK-2\ntitle: Hook bypass\n"),
+    )
+
+    assert _git(repo, "log", "-1", "--format=%s") == "backlog: task_create"
+    assert _status_entries(repo) == []
 
 
 def test_project_write_lock_auto_commit_takes_effect_after_enabling(tmp_path, monkeypatch):

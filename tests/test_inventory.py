@@ -64,3 +64,5 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["core:task-timestamps"].status == "implemented"
     assert by_name["core:date-only-timestamps"].classification == "core-implemented"
     assert by_name["core:date-only-timestamps"].status == "implemented"
+    assert by_name["git:hook-bypass"].classification == "git-implemented"
+    assert by_name["git:hook-bypass"].status == "implemented"

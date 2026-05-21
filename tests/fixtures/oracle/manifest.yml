@@ -341,4 +341,4 @@ fixtures:
   - name: "git:hook-bypass"
     command: ["backlog", "task", "create", "Hook bypass example"]
     agent_critical: false
-    classification: "git-deferred"
+    classification: "git-implemented"

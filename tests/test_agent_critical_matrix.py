@@ -68,9 +68,7 @@ EXPECTED_AGENT_CRITICAL = {
     "mcp:definition-of-done-defaults-upsert",
 }
 
-EXPECTED_DEFERRED = {
-    "git:hook-bypass",
-}
+EXPECTED_DEFERRED: set[str] = set()
 
 
 def test_agent_critical_inventory_enumerates_cutover_and_deferral_scope():
@@ -221,6 +219,16 @@ def test_agent_critical_inventory_tracks_auto_commit_surface():
     assert item.status == "implemented"
     assert item.classification == "git-implemented"
     assert item.expected == "autoCommit"
+
+
+def test_agent_critical_inventory_tracks_hook_bypass_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["git:hook-bypass"]
+    assert item.status == "implemented"
+    assert item.classification == "git-implemented"
+    assert item.expected == "bypassGitHooks"
 
 
 def test_agent_critical_inventory_tracks_remote_operations_surface():
