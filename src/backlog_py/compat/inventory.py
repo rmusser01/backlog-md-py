@@ -381,6 +381,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "remote git operations",
         ),
         _implemented(
+            "git:active-branch-accuracy",
+            "git-implemented",
+            "ADVANCED-CONFIG.md",
+            "read-only active branch task snapshots",
+        ),
+        _implemented(
             "git:auto-commit",
             "git-implemented",
             "ADVANCED-CONFIG.md",

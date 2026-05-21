@@ -326,6 +326,10 @@ fixtures:
     command: ["backlog", "task", "create", "Remote operation example"]
     agent_critical: false
     classification: "git-implemented"
+  - name: "git:active-branch-accuracy"
+    command: ["backlog", "task", "list", "--plain"]
+    agent_critical: false
+    classification: "git-implemented"
   - name: "git:auto-commit"
     command: ["backlog", "task", "create", "Auto commit example"]
     agent_critical: false

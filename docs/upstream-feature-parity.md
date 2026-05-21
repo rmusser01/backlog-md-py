@@ -65,6 +65,11 @@ larger task commands:
 - Fetch-only remote operations: when `remoteOperations` and
   `checkActiveBranches` are enabled, repository reads refresh remote-tracking
   refs with `git fetch --all --prune` without pulling, merging, or pushing.
+- Read-only active branch accuracy: when `checkActiveBranches` is enabled,
+  repository reads include task snapshots from local branches, and from remote
+  branches when `remoteOperations` is enabled, whose branch tip is within
+  `activeBranchDays`. This uses `git for-each-ref`, `git ls-tree`, and
+  `git show` without checking out branches.
 - Loopback `backlog browser` service with `--port <port>`,
   `--no-open`, config-driven default port and auto-open behavior, health and
   board JSON endpoints, and a static board snapshot.
@@ -127,7 +132,7 @@ larger task commands:
 | --- | --- | --- |
 | Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar controls for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG editing remains deferred, and shell-hook execution plus hook-bypass settings stay CLI-only or explicitly deferred |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
-| Git automation | active-branch accuracy behavior beyond remote ref freshness, hook bypass | Local auto-commit and fetch-only remote operations implemented; hook bypass rejected for first cutover |
+| Git automation | hook bypass | Local auto-commit, fetch-only remote operations, and read-only active branch snapshots are implemented; hook bypass rejected for first cutover |
 
 ## Recommended Work Order
 
@@ -137,5 +142,5 @@ larger task commands:
    should explicitly advertise a headless/agent-focused compatibility scope.
 3. If browser parity is in scope, implement it separately from MCP/CLI runtime
    work and require end-to-end browser tests before claiming support.
-4. Treat remotes and hook bypass as separate security-sensitive milestones with
-   explicit opt-in behavior.
+4. Treat hook bypass as a separate security-sensitive milestone with explicit
+   opt-in behavior.
