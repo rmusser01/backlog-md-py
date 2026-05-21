@@ -706,6 +706,65 @@ def test_browser_board_html_exposes_markdown_detail_sections(tmp_path):
     assert "finalSummaryHtml" in html
 
 
+def test_browser_markdown_preview_endpoint_returns_safe_rendered_html(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/markdown/preview",
+            {"markdown": "## Preview\n\n<script>alert(1)</script>\n\n- item"},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    html = response["body"]["html"]
+    assert "<h2>Preview</h2>" in html
+    assert "<script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<li>item</li>" in html
+
+
+def test_browser_markdown_preview_endpoint_rejects_cross_origin(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/markdown/preview",
+                {"markdown": "**Preview**"},
+                origin="https://example.com",
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+
+
+def test_browser_markdown_preview_endpoint_rejects_non_string_markdown(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/markdown/preview", {"markdown": ["not", "text"]})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+
+
 def test_browser_board_html_exposes_mermaid_renderer_hook(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -1145,6 +1204,32 @@ def test_browser_board_html_exposes_markdown_edit_toolbar(tmp_path):
     assert "function applyMarkdownFormat(textarea, command)" in html
     assert "document.querySelectorAll(\"[data-markdown-command]\")" in html
     assert "textarea.setSelectionRange" in html
+
+
+def test_browser_board_html_exposes_markdown_edit_preview_controls(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert html.count('data-markdown-editor="true"') >= 4
+    assert html.count('data-markdown-mode="edit"') >= 4
+    assert html.count('data-markdown-mode="preview"') >= 4
+    assert html.count('data-markdown-preview-for=') >= 4
+    assert 'data-markdown-preview-for="task-create-description"' in html
+    assert 'data-markdown-preview-for="task-edit-description"' in html
+    assert 'data-markdown-preview-for="task-edit-implementation-notes"' in html
+    assert 'data-markdown-preview-for="task-edit-final-summary"' in html
+    assert "async function renderMarkdownPreview(textarea)" in html
+    assert "function showMarkdownPreview(textarea)" in html
+    assert "function showMarkdownEdit(textarea)" in html
+    assert 'fetch("/api/markdown/preview"' in html
 
 
 def test_browser_task_archive_endpoint_archives_task_under_project_lock(tmp_path, monkeypatch):
