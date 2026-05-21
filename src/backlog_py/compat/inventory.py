@@ -219,6 +219,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "safe browser Markdown rendering for task detail description, implementation notes, and final summary",
         ),
         _implemented(
+            "browser:mermaid-rendering",
+            "browser-implemented",
+            "web TaskDetailsModal",
+            "browser Mermaid diagram rendering for task detail Markdown fences",
+        ),
+        _implemented(
             "browser:rich-section-editing",
             "browser-implemented",
             "web task edit form",
