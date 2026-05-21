@@ -233,6 +233,16 @@ def test_agent_critical_inventory_tracks_remote_operations_surface():
     assert item.expected == "remote git operations"
 
 
+def test_agent_critical_inventory_tracks_active_branch_accuracy_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["git:active-branch-accuracy"]
+    assert item.status == "implemented"
+    assert item.classification == "git-implemented"
+    assert item.expected == "read-only active branch task snapshots"
+
+
 def test_agent_critical_inventory_tracks_browser_service_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

@@ -16,7 +16,11 @@ from backlog_py.core.ids import format_child_task_id, format_numbered_id
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
 from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown
-from backlog_py.runtime.git import maybe_fetch_remote_refs
+from backlog_py.runtime.git import (
+    current_task_snapshot_timestamp,
+    list_active_branch_task_snapshots,
+    maybe_fetch_remote_refs,
+)
 from backlog_py.search.simple import contains_query
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 from backlog_py.storage.config import load_config
@@ -50,11 +54,26 @@ class TaskRecord:
         return self.parsed.raw_source
 
 
+@dataclass(frozen=True)
+class _VisibleTaskRecord:
+    bucket: str
+    task: TaskRecord
+    committed_at: float
+
+
 class ReadOnlyRepository:
-    def __init__(self, project: BacklogProject, *, refresh_remote_refs: bool = True) -> None:
+    def __init__(
+        self,
+        project: BacklogProject,
+        *,
+        refresh_remote_refs: bool = True,
+        include_active_branch_snapshots: bool = True,
+    ) -> None:
         self.project = project
         self._refresh_remote_refs = refresh_remote_refs
+        self._include_active_branch_snapshots = include_active_branch_snapshots
         self._remote_refs_refreshed = False
+        self._visible_task_records: dict[str, list[TaskRecord]] | None = None
 
     @classmethod
     def from_path(cls, cwd: Path) -> "ReadOnlyRepository":
@@ -138,14 +157,43 @@ class ReadOnlyRepository:
         return board
 
     def _load_tasks(self) -> list[TaskRecord]:
-        self._ensure_remote_refs()
-        task_dir = self.project.backlog_dir / "tasks"
-        return _load_tasks_from_dir(task_dir)
+        return list(self._load_visible_task_records()["tasks"])
 
     def _load_completed_tasks(self) -> list[TaskRecord]:
+        return list(self._load_visible_task_records()["completed"])
+
+    def _load_visible_task_records(self) -> dict[str, list[TaskRecord]]:
+        if self._visible_task_records is not None:
+            return self._visible_task_records
         self._ensure_remote_refs()
-        completed_dir = self.project.backlog_dir / "completed"
-        return _load_tasks_from_dir(completed_dir)
+        candidates = [
+            *_current_branch_records(self.project, "tasks", self.project.backlog_dir / "tasks"),
+            *_current_branch_records(self.project, "completed", self.project.backlog_dir / "completed"),
+        ]
+        if self._include_active_branch_snapshots:
+            candidates.extend(_load_active_branch_records(self.project))
+
+        selected: dict[str, _VisibleTaskRecord] = {}
+        for candidate in candidates:
+            key = candidate.task.id.casefold()
+            current = selected.get(key)
+            if current is None or _visible_record_key(candidate) >= _visible_record_key(current):
+                selected[key] = candidate
+
+        visible = {
+            "tasks": [
+                candidate.task
+                for candidate in selected.values()
+                if candidate.bucket == "tasks"
+            ],
+            "completed": [
+                candidate.task
+                for candidate in selected.values()
+                if candidate.bucket == "completed"
+            ],
+        }
+        self._visible_task_records = visible
+        return visible
 
     def _ensure_remote_refs(self) -> None:
         if not self._refresh_remote_refs:
@@ -162,14 +210,68 @@ def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
     return [_load_task(path) for path in sorted(task_dir.glob("*.md"))]
 
 
+def _current_branch_records(project: BacklogProject, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
+    return [
+        _VisibleTaskRecord(bucket, task, current_task_snapshot_timestamp(project, task.path))
+        for task in _load_tasks_from_dir(task_dir)
+    ]
+
+
+def _load_active_branch_records(project: BacklogProject) -> list[_VisibleTaskRecord]:
+    records: list[_VisibleTaskRecord] = []
+    for snapshot in list_active_branch_task_snapshots(project):
+        bucket = _bucket_for_snapshot(project, snapshot.relative_path)
+        if bucket is None:
+            continue
+        try:
+            parsed = parse_task_markdown(snapshot.source)
+        except ValueError:
+            continue
+        records.append(
+            _VisibleTaskRecord(
+                bucket=bucket,
+                task=_task_record_from_parsed(project.root / snapshot.relative_path, parsed),
+                committed_at=snapshot.committed_at,
+            )
+        )
+    return records
+
+
+def _bucket_for_snapshot(project: BacklogProject, relative_path: str) -> str | None:
+    try:
+        backlog_path = project.backlog_dir.relative_to(project.root).as_posix()
+    except ValueError:
+        return None
+    if relative_path.startswith(f"{backlog_path}/tasks/"):
+        return "tasks"
+    if relative_path.startswith(f"{backlog_path}/completed/"):
+        return "completed"
+    return None
+
+
+def _visible_record_key(record: _VisibleTaskRecord) -> float:
+    return record.committed_at
+
+
 class TaskMutationError(ValueError):
     """Raised when a task mutation request is invalid or unsupported."""
 
 
 class MutableRepository(ReadOnlyRepository):
+    def __init__(self, project: BacklogProject, *, refresh_remote_refs: bool = True) -> None:
+        super().__init__(
+            project,
+            refresh_remote_refs=refresh_remote_refs,
+            include_active_branch_snapshots=False,
+        )
+
     @classmethod
     def from_path(cls, cwd: Path) -> "MutableRepository":
         return cls(discover_project(Path.cwd(), explicit_cwd=cwd))
+
+    def _load_visible_task_records(self) -> dict[str, list[TaskRecord]]:
+        self._visible_task_records = None
+        return super()._load_visible_task_records()
 
     def create_task(
         self,
@@ -512,6 +614,10 @@ class MutableRepository(ReadOnlyRepository):
 def _load_task(path: Path) -> TaskRecord:
     with path.open("r", encoding="utf-8", newline="") as task_file:
         parsed = parse_task_markdown(task_file.read())
+    return _task_record_from_parsed(path, parsed)
+
+
+def _task_record_from_parsed(path: Path, parsed: ParsedTaskMarkdown) -> TaskRecord:
     frontmatter = parsed.frontmatter
     task_id = str(frontmatter.get("id") or _id_from_filename(path))
     return TaskRecord(

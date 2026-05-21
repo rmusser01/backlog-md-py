@@ -110,6 +110,7 @@ do not block the first local-file agent cutover candidate.
 | core:task-timestamps | implemented | created_date on task/draft create and updated_date on task edits | core:task-timestamps |
 | core:date-only-timestamps | implemented | includeDatetimeInDates controls created_date and updated_date timestamp precision | core:date-only-timestamps |
 | git:remote-operations | implemented | remote git operations | git:remote-operations |
+| git:active-branch-accuracy | implemented | read-only active branch task snapshots | git:active-branch-accuracy |
 | git:auto-commit | implemented | autoCommit | git:auto-commit |
 
 ## Explicit Deferred Blockers

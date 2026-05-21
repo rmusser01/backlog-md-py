@@ -3,6 +3,8 @@ from __future__ import annotations
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from math import inf
 from pathlib import Path
 
 from loguru import logger
@@ -18,6 +20,16 @@ class AutoCommitContext:
     work_dir: Path
     git_available: bool
     clean_before: bool
+
+
+@dataclass(frozen=True)
+class GitTaskSnapshot:
+    """Task markdown captured from a git branch without checking it out."""
+
+    ref: str
+    relative_path: str
+    source: str
+    committed_at: float
 
 
 def prepare_auto_commit(project: BacklogProject) -> AutoCommitContext:
@@ -73,6 +85,55 @@ def maybe_fetch_remote_refs(project: BacklogProject) -> None:
         logger.warning("Skipping remote refresh: git fetch failed: {}", _git_error(fetch))
 
 
+def current_task_snapshot_timestamp(project: BacklogProject, path: Path) -> float:
+    """Return the current checkout timestamp for one task file."""
+    work_dir = project.root
+    if not _is_git_worktree(work_dir):
+        return inf
+    relative_path = _relative_path(project.root, path)
+    if relative_path is None:
+        return inf
+    if _has_path_changes(project.root, relative_path):
+        return inf
+    result = _run_git(work_dir, "log", "-1", "--format=%ct", "HEAD", "--", relative_path)
+    if result.returncode != 0:
+        return inf
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return inf
+
+
+def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSnapshot]:
+    """Load task markdown from recently active branches without mutating the worktree."""
+    if not project.config.check_active_branches:
+        return []
+    work_dir = project.root
+    if not _is_git_worktree(work_dir):
+        return []
+
+    backlog_path = _relative_backlog_path(project)
+    if backlog_path is None:
+        return []
+
+    snapshots: list[GitTaskSnapshot] = []
+    for ref in _recent_branch_refs(project):
+        paths = _task_paths_for_ref(work_dir, ref, backlog_path)
+        for relative_path, committed_at in paths.items():
+            show = _run_git(work_dir, "show", f"{ref}:{relative_path}")
+            if show.returncode != 0:
+                continue
+            snapshots.append(
+                GitTaskSnapshot(
+                    ref=ref,
+                    relative_path=relative_path,
+                    source=show.stdout,
+                    committed_at=committed_at,
+                )
+            )
+    return snapshots
+
+
 def _auto_commit_enabled(project: BacklogProject) -> bool:
     try:
         return load_config(project.config_path).auto_commit
@@ -88,6 +149,119 @@ def _is_git_worktree(work_dir: Path) -> bool:
 def _has_project_changes(work_dir: Path) -> bool:
     result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", ".")
     return bool(result.stdout.strip()) if result.returncode == 0 else False
+
+
+def _has_path_changes(work_dir: Path, relative_path: str) -> bool:
+    result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", relative_path)
+    return bool(result.stdout.strip()) if result.returncode == 0 else True
+
+
+def _relative_path(root: Path, path: Path) -> str | None:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return None
+
+
+def _relative_backlog_path(project: BacklogProject) -> str | None:
+    try:
+        return project.backlog_dir.relative_to(project.root).as_posix()
+    except ValueError:
+        return None
+
+
+def _recent_branch_refs(project: BacklogProject) -> list[str]:
+    days = max(project.config.active_branch_days, 0)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
+    namespaces = ["refs/heads"]
+    if project.config.remote_operations:
+        namespaces.append("refs/remotes")
+    result = _run_git(
+        project.root,
+        "for-each-ref",
+        "--format=%(refname)\t%(refname:short)\t%(committerdate:unix)",
+        *namespaces,
+    )
+    if result.returncode != 0:
+        return []
+    current = _current_branch_name(project.root)
+    refs: list[tuple[float, str]] = []
+    for line in result.stdout.splitlines():
+        refname, short_name, timestamp = _split_ref_line(line)
+        if refname is None or short_name is None or timestamp is None:
+            continue
+        if short_name == current or short_name.endswith("/HEAD"):
+            continue
+        if timestamp < cutoff:
+            continue
+        refs.append((timestamp, refname))
+    return [ref for _, ref in sorted(refs)]
+
+
+def _current_branch_name(work_dir: Path) -> str:
+    result = _run_git(work_dir, "branch", "--show-current")
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _split_ref_line(line: str) -> tuple[str | None, str | None, float | None]:
+    parts = line.split("\t")
+    if len(parts) != 3:
+        return None, None, None
+    try:
+        timestamp = float(parts[2])
+    except ValueError:
+        return None, None, None
+    return parts[0].strip(), parts[1].strip(), timestamp
+
+
+def _task_paths_for_ref(work_dir: Path, ref: str, backlog_path: str) -> dict[str, float]:
+    result = _run_git(
+        work_dir,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        ref,
+        "--",
+        f"{backlog_path}/tasks",
+        f"{backlog_path}/completed",
+    )
+    if result.returncode != 0:
+        return {}
+    return {
+        line.strip(): _ref_path_commit_timestamp(work_dir, ref, line.strip())
+        for line in result.stdout.splitlines()
+        if _is_task_markdown_path(line.strip(), backlog_path)
+    }
+
+
+def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
+    result = _run_git(work_dir, "log", "-1", "--format=%ct", ref)
+    if result.returncode != 0:
+        return 0.0
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def _ref_path_commit_timestamp(work_dir: Path, ref: str, relative_path: str) -> float:
+    result = _run_git(work_dir, "log", "-1", "--format=%ct", ref, "--", relative_path)
+    if result.returncode != 0 or not result.stdout.strip():
+        return _ref_commit_timestamp(work_dir, ref)
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return _ref_commit_timestamp(work_dir, ref)
+
+
+def _is_task_markdown_path(relative_path: str, backlog_path: str) -> bool:
+    return (
+        relative_path.endswith(".md")
+        and (
+            relative_path.startswith(f"{backlog_path}/tasks/")
+            or relative_path.startswith(f"{backlog_path}/completed/")
+        )
+    )
 
 
 def _git_error(result: subprocess.CompletedProcess[str]) -> str:

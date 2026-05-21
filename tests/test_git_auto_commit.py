@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
-from backlog_py.core.repository import ReadOnlyRepository
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.runtime.locks import with_project_write_lock
 
 
@@ -94,9 +95,10 @@ def test_repository_fetches_remote_refs_when_remote_operations_enabled(tmp_path)
 
     assert remote_branch not in _remote_branches(repo)
 
-    assert ReadOnlyRepository(project).list_tasks() == []
+    tasks = ReadOnlyRepository(project).list_tasks()
 
     assert remote_branch in _remote_branches(repo)
+    assert [task.id for task in tasks] == ["TASK-2"]
 
 
 def test_repository_skips_fetch_when_remote_operations_disabled(tmp_path):
@@ -121,6 +123,67 @@ def test_repository_skips_fetch_when_active_branch_checks_disabled(tmp_path):
     assert remote_branch not in _remote_branches(repo)
 
 
+def test_readonly_repository_prefers_recent_active_branch_task_state(tmp_path):
+    repo = _git_repo_with_recent_branch_status_update(tmp_path)
+    project = _project(repo, remote_operations=False, check_active_branches=True, active_branch_days=30)
+
+    board = ReadOnlyRepository(project).board()
+
+    assert [task.id for task in board.get("To Do", [])] == []
+    assert [(task.id, task.status) for task in board["Done"]] == [("TASK-1", "Done")]
+
+
+def test_readonly_repository_ignores_branch_state_outside_active_window(tmp_path):
+    repo = _git_repo_with_recent_branch_status_update(tmp_path)
+    project = _project(repo, remote_operations=False, check_active_branches=True, active_branch_days=0)
+
+    board = ReadOnlyRepository(project).board()
+
+    assert [(task.id, task.status) for task in board["To Do"]] == [("TASK-1", "To Do")]
+    assert [task.id for task in board.get("Done", [])] == []
+
+
+def test_unrelated_worktree_changes_do_not_disable_active_branch_accuracy(tmp_path):
+    repo = _git_repo_with_recent_branch_status_update(tmp_path)
+    (repo / "unrelated.txt").write_text("dirty\n", encoding="utf-8")
+    project = _project(repo, remote_operations=False, check_active_branches=True, active_branch_days=30)
+
+    board = ReadOnlyRepository(project).board()
+
+    assert [task.id for task in board.get("To Do", [])] == []
+    assert [(task.id, task.status) for task in board["Done"]] == [("TASK-1", "Done")]
+
+
+def test_recent_unrelated_branch_commit_does_not_resurrect_stale_task_state(tmp_path):
+    repo = _git_repo_with_stale_branch_task_and_recent_unrelated_commit(tmp_path)
+    project = _project(repo, remote_operations=False, check_active_branches=True, active_branch_days=30)
+
+    board = ReadOnlyRepository(project).board()
+
+    assert [(task.id, task.status) for task in board["In Progress"]] == [("TASK-1", "In Progress")]
+    assert [task.id for task in board.get("To Do", [])] == []
+
+
+def test_recent_current_unrelated_commit_does_not_hide_newer_branch_task_state(tmp_path):
+    repo = _git_repo_with_current_unrelated_commit_after_branch_task_update(tmp_path)
+    project = _project(repo, remote_operations=False, check_active_branches=True, active_branch_days=30)
+
+    board = ReadOnlyRepository(project).board()
+
+    assert [task.id for task in board.get("To Do", [])] == []
+    assert [(task.id, task.status) for task in board["Done"]] == [("TASK-1", "Done")]
+
+
+def test_mutable_repository_does_not_expose_branch_only_tasks(tmp_path):
+    repo = _git_repo_with_branch_only_task(tmp_path)
+    project = _project(repo, remote_operations=False, check_active_branches=True, active_branch_days=30)
+
+    assert [(task.id, task.title) for task in ReadOnlyRepository(project).list_tasks()] == [
+        ("TASK-2", "Branch Only")
+    ]
+    assert MutableRepository(project).list_tasks() == []
+
+
 def _git_backlog_repo(tmp_path: Path, *, auto_commit: bool, bypass_git_hooks: bool = False) -> Path:
     repo = tmp_path / "repo"
     (repo / "backlog" / "tasks").mkdir(parents=True)
@@ -140,6 +203,7 @@ def _project(
     bypass_git_hooks: bool = False,
     remote_operations: bool = True,
     check_active_branches: bool = True,
+    active_branch_days: int = 30,
 ) -> BacklogProject:
     return BacklogProject(
         root=repo,
@@ -151,6 +215,7 @@ def _project(
             bypass_git_hooks=bypass_git_hooks,
             remote_operations=remote_operations,
             check_active_branches=check_active_branches,
+            active_branch_days=active_branch_days,
         ),
     )
 
@@ -208,6 +273,165 @@ def _git_repo_with_unfetched_remote_branch(tmp_path: Path, *, remote_operations:
     return repo, branch
 
 
+def _git_repo_with_recent_branch_status_update(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "backlog" / "tasks").mkdir(parents=True)
+    _write_config(repo, auto_commit=False)
+    _write_task(
+        repo,
+        "task-1 - Cross Branch.md",
+        "\n".join(
+            [
+                "---",
+                "id: TASK-1",
+                "title: Cross Branch",
+                "status: To Do",
+                "assignee: []",
+                "created_date: '2026-05-20'",
+                "labels: []",
+                "dependencies: []",
+                "---",
+                "",
+            ]
+        ),
+    )
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "main task", env=_git_date_env("2026-05-20T10:00:00Z"))
+    _git(repo, "checkout", "-b", "feature/status-done")
+    task_path = repo / "backlog" / "tasks" / "task-1 - Cross Branch.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace("status: To Do", "status: Done"),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "mark task done")
+    _git(repo, "checkout", "main")
+    return repo
+
+
+def _git_repo_with_branch_only_task(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "backlog" / "tasks").mkdir(parents=True)
+    _write_config(repo, auto_commit=False)
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "main backlog")
+    _git(repo, "checkout", "-b", "feature/branch-only")
+    _write_task(
+        repo,
+        "task-2 - Branch Only.md",
+        "\n".join(
+            [
+                "---",
+                "id: TASK-2",
+                "title: Branch Only",
+                "status: To Do",
+                "assignee: []",
+                "created_date: '2026-05-20'",
+                "labels: []",
+                "dependencies: []",
+                "---",
+                "",
+            ]
+        ),
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "branch only task")
+    _git(repo, "checkout", "main")
+    return repo
+
+
+def _git_repo_with_stale_branch_task_and_recent_unrelated_commit(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "backlog" / "tasks").mkdir(parents=True)
+    _write_config(repo, auto_commit=False)
+    _write_task(
+        repo,
+        "task-1 - Cross Branch.md",
+        "\n".join(
+            [
+                "---",
+                "id: TASK-1",
+                "title: Cross Branch",
+                "status: To Do",
+                "assignee: []",
+                "created_date: '2026-05-20'",
+                "labels: []",
+                "dependencies: []",
+                "---",
+                "",
+            ]
+        ),
+    )
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "main task", env=_git_date_env("2026-05-20T10:00:00Z"))
+    _git(repo, "checkout", "-b", "feature/unrelated-work")
+    _git(repo, "checkout", "main")
+    task_path = repo / "backlog" / "tasks" / "task-1 - Cross Branch.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace("status: To Do", "status: In Progress"),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "advance task on main", env=_git_date_env("2026-05-20T10:00:01Z"))
+    _git(repo, "checkout", "feature/unrelated-work")
+    (repo / "feature.txt").write_text("recent unrelated branch work\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "recent unrelated branch work", env=_git_date_env("2026-05-20T10:00:02Z"))
+    _git(repo, "checkout", "main")
+    return repo
+
+
+def _git_repo_with_current_unrelated_commit_after_branch_task_update(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "backlog" / "tasks").mkdir(parents=True)
+    _write_config(repo, auto_commit=False)
+    _write_task(
+        repo,
+        "task-1 - Cross Branch.md",
+        "\n".join(
+            [
+                "---",
+                "id: TASK-1",
+                "title: Cross Branch",
+                "status: To Do",
+                "assignee: []",
+                "created_date: '2026-05-20'",
+                "labels: []",
+                "dependencies: []",
+                "---",
+                "",
+            ]
+        ),
+    )
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "main task", env=_git_date_env("2026-05-20T10:00:00Z"))
+    _git(repo, "checkout", "-b", "feature/status-done")
+    task_path = repo / "backlog" / "tasks" / "task-1 - Cross Branch.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace("status: To Do", "status: Done"),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "mark task done", env=_git_date_env("2026-05-20T10:00:01Z"))
+    _git(repo, "checkout", "main")
+    (repo / "current.txt").write_text("recent unrelated current work\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "recent unrelated current work", env=_git_date_env("2026-05-20T10:00:02Z"))
+    return repo
+
+
 def _replace_config_line(repo: Path, line: str) -> None:
     path = repo / "backlog" / "config.yml"
     text = path.read_text(encoding="utf-8")
@@ -230,15 +454,24 @@ def _yaml_bool(value: bool) -> str:
     return "true" if value else "false"
 
 
-def _git(repo: Path, *args: str) -> str:
+def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         ["git", *args],
         cwd=repo,
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     return result.stdout.strip()
+
+
+def _git_date_env(timestamp: str) -> dict[str, str]:
+    return {
+        **os.environ,
+        "GIT_AUTHOR_DATE": timestamp,
+        "GIT_COMMITTER_DATE": timestamp,
+    }
 
 
 def _status_entries(repo: Path) -> list[str]:

@@ -16,7 +16,7 @@ reviewable file operations are the first compatibility target.
 | Editor launch | Interactive TUI | Implemented for task view and board | `defaultEditor`, `VISUAL`, or `EDITOR` is split into argv without a shell and receives the task file path. |
 | Extended display/TUI config effects | Human-facing config | Implemented | Config read/write is supported, browser `defaultPort`/`autoOpenBrowser` behavior is implemented, task view consumes `defaultEditor`, and non-plain task detail respects `dateFormat` plus `includeDatetimeInDates` for Created/Updated display. |
 | hook bypass | Git safety bypass | Rejected for first cutover | Bypassing hooks conflicts with repo safety policy and must not be implemented as part of agent cutover. |
-| Remote operations | Git/network behavior | Implemented as fetch-only | When `remoteOperations` and `checkActiveBranches` are enabled, repository reads run a best-effort `git fetch --all --prune` to refresh remote-tracking refs without pulling, merging, pushing, or changing the working tree. |
+| Remote operations | Git/network behavior | Implemented as fetch-only plus read-only snapshots | When `remoteOperations` and `checkActiveBranches` are enabled, repository reads run a best-effort `git fetch --all --prune` to refresh remote-tracking refs, then load recent branch task snapshots without pulling, merging, pushing, checking out branches, or changing the working tree. |
 
 ## Required Before Enabling Deferred Behavior
 
@@ -59,8 +59,9 @@ The Python clone keeps these features out of the first cutover path:
   when the project had no pre-existing git changes, uses fixed `git` argv
   without a shell, does not push or pull remotes, and does not bypass hooks.
 - Remote operations are implemented as best-effort fetch-only remote-tracking
-  ref refreshes for read-time branch accuracy; `remoteOperations: false` keeps
-  repository reads offline.
+  ref refreshes plus read-only task snapshots from recent active branches;
+  `remoteOperations: false` keeps repository reads offline and limited to local
+  branch refs.
 - hook bypass is rejected for first cutover.
 - Remaining rich interactive UI behavior is later human-operator convenience,
   not an agent blocker.
