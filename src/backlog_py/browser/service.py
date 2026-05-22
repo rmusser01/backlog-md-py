@@ -1083,6 +1083,18 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Status
           <{select_tag} class="task-form-select" name="status">{status_options}</{select_tag}>
         </label>
+        <label>Priority
+          <input name="priority" autocomplete="off">
+        </label>
+        <label>Milestone
+          <input name="milestone" autocomplete="off">
+        </label>
+        <label>Assignees
+          <textarea name="assignees"></textarea>
+        </label>
+        <label>Labels
+          <textarea name="labels"></textarea>
+        </label>
         {task_edit_description_editor}
         <label>Acceptance Criteria
           <textarea name="acceptanceCriteria"></textarea>
