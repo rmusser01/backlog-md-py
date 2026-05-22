@@ -300,6 +300,20 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/markdown/preview":
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                payload = self._read_json_body()
+                if not isinstance(payload, dict) or not isinstance(payload.get("markdown"), str):
+                    raise ValueError("markdown must be a string")
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, {"html": _markdown_to_html(payload["markdown"])})
+            return
+
         if path == "/api/service/shutdown":
             if not self._origin_allowed():
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
@@ -539,7 +553,30 @@ def render_board_html(project: BacklogProject) -> str:
         _render_column(str(status), tasks)
         for status, tasks in columns.items()
     )
-    markdown_toolbar = _render_markdown_toolbar()
+    task_create_description_editor = _render_markdown_editor(
+        field_id="task-create-description",
+        name="description",
+        label="Description",
+        data_field="description",
+    )
+    task_edit_description_editor = _render_markdown_editor(
+        field_id="task-edit-description",
+        name="description",
+        label="Description",
+        data_field="description",
+    )
+    task_edit_implementation_notes_editor = _render_markdown_editor(
+        field_id="task-edit-implementation-notes",
+        name="implementationNotes",
+        label="Implementation Notes",
+        data_field="implementationNotes",
+    )
+    task_edit_final_summary_editor = _render_markdown_editor(
+        field_id="task-edit-final-summary",
+        name="finalSummary",
+        label="Final Summary",
+        data_field="finalSummary",
+    )
     select_tag = "select"
     status_options = _render_status_options(project.config.statuses or [])
     return f"""<!doctype html>
@@ -897,6 +934,41 @@ def render_board_html(project: BacklogProject) -> str:
       color: var(--accent);
       outline: none;
     }}
+    .markdown-editor-tabs {{
+      display: inline-flex;
+      width: fit-content;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--panel);
+    }}
+    .markdown-editor-tabs button {{
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 12px;
+      padding: 4px 9px;
+      cursor: pointer;
+    }}
+    .markdown-editor-tabs button[aria-selected="true"] {{
+      background: var(--accent);
+      color: var(--panel);
+    }}
+    .markdown-editor[data-markdown-mode="preview"] [data-markdown-toolbar],
+    .markdown-editor[data-markdown-mode="preview"] textarea {{
+      display: none;
+    }}
+    .markdown-preview {{
+      min-height: 88px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      padding: 9px;
+    }}
+    .markdown-preview[hidden] {{
+      display: none;
+    }}
     .task-form input[type="checkbox"] {{
       width: auto;
       justify-self: start;
@@ -974,11 +1046,7 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Labels
           <textarea name="labels"></textarea>
         </label>
-        <div class="task-form-field">
-          <label for="task-create-description">Description</label>
-          {markdown_toolbar}
-          <textarea id="task-create-description" name="description" data-markdown-input="true" data-markdown-field="description"></textarea>
-        </div>
+        {task_create_description_editor}
         <label>Acceptance Criteria
           <textarea name="acceptanceCriteria"></textarea>
         </label>
@@ -1004,24 +1072,12 @@ def render_board_html(project: BacklogProject) -> str:
         <label>Status
           <{select_tag} class="task-form-select" name="status">{status_options}</{select_tag}>
         </label>
-        <div class="task-form-field">
-          <label for="task-edit-description">Description</label>
-          {markdown_toolbar}
-          <textarea id="task-edit-description" name="description" data-markdown-input="true" data-markdown-field="description"></textarea>
-        </div>
+        {task_edit_description_editor}
         <label>Acceptance Criteria
           <textarea name="acceptanceCriteria"></textarea>
         </label>
-        <div class="task-form-field">
-          <label for="task-edit-implementation-notes">Implementation Notes</label>
-          {markdown_toolbar}
-          <textarea id="task-edit-implementation-notes" name="implementationNotes" data-markdown-input="true" data-markdown-field="implementationNotes"></textarea>
-        </div>
-        <div class="task-form-field">
-          <label for="task-edit-final-summary">Final Summary</label>
-          {markdown_toolbar}
-          <textarea id="task-edit-final-summary" name="finalSummary" data-markdown-input="true" data-markdown-field="finalSummary"></textarea>
-        </div>
+        {task_edit_implementation_notes_editor}
+        {task_edit_final_summary_editor}
         <div class="form-actions">
           <button class="secondary-button" type="button" id="task-edit-cancel">Cancel</button>
           <button class="primary-button" type="submit">Save</button>
@@ -1610,6 +1666,64 @@ def render_board_html(project: BacklogProject) -> str:
       return container ? container.querySelector("[data-markdown-input]") : null;
     }}
 
+    function markdownEditor(textarea) {{
+      return textarea ? textarea.closest("[data-markdown-editor]") : null;
+    }}
+
+    function markdownPreviewPanel(textarea) {{
+      const editor = markdownEditor(textarea);
+      return editor ? editor.querySelector("[data-markdown-preview-for]") : null;
+    }}
+
+    function setMarkdownEditorMode(textarea, mode) {{
+      const editor = markdownEditor(textarea);
+      const preview = markdownPreviewPanel(textarea);
+      if (!editor || !preview) return;
+      editor.dataset.markdownMode = mode;
+      preview.hidden = mode !== "preview";
+      editor.querySelectorAll("[data-markdown-mode]").forEach((button) => {{
+        button.setAttribute("aria-selected", button.dataset.markdownMode === mode ? "true" : "false");
+      }});
+    }}
+
+    async function renderMarkdownPreview(textarea) {{
+      if (!textarea) return false;
+      const preview = markdownPreviewPanel(textarea);
+      if (!preview) return false;
+      const response = await fetch("/api/markdown/preview", {{
+        method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{markdown: textarea.value || ""}}),
+      }});
+      if (!response.ok) {{
+        console.error(await response.text());
+        return false;
+      }}
+      const payload = await response.json();
+      preview.innerHTML = payload.html || '<p class="markdown-empty">No content</p>';
+      renderMermaidDiagrams(preview);
+      return true;
+    }}
+
+    function showMarkdownPreview(textarea) {{
+      renderMarkdownPreview(textarea).then((rendered) => {{
+        if (rendered) setMarkdownEditorMode(textarea, "preview");
+      }});
+    }}
+
+    function showMarkdownEdit(textarea) {{
+      setMarkdownEditorMode(textarea, "edit");
+      textarea?.focus();
+    }}
+
+    function resetMarkdownEditors(root) {{
+      root?.querySelectorAll("[data-markdown-input]").forEach((textarea) => {{
+        const preview = markdownPreviewPanel(textarea);
+        if (preview) preview.innerHTML = "";
+        setMarkdownEditorMode(textarea, "edit");
+      }});
+    }}
+
     async function openTaskDetails(taskId) {{
       const response = await fetch(`/api/tasks/${{encodeURIComponent(taskId)}}`);
       if (!response.ok) {{
@@ -1656,6 +1770,7 @@ def render_board_html(project: BacklogProject) -> str:
       taskEditForm.elements.acceptanceCriteria.value = checklistText(task.acceptanceCriteria);
       taskEditForm.elements.implementationNotes.value = task.implementationNotes || "";
       taskEditForm.elements.finalSummary.value = task.finalSummary || "";
+      resetMarkdownEditors(taskEditForm);
       setText("task-edit-title", `${{task.id}} - Edit task`);
       if (taskEditDialog && taskEditDialog.showModal) taskEditDialog.showModal();
       else if (taskEditDialog) taskEditDialog.setAttribute("open", "open");
@@ -1677,6 +1792,7 @@ def render_board_html(project: BacklogProject) -> str:
 
     function openTaskCreate() {{
       if (taskCreateForm) taskCreateForm.reset();
+      resetMarkdownEditors(taskCreateForm);
       if (taskCreateDialog && taskCreateDialog.showModal) taskCreateDialog.showModal();
       else if (taskCreateDialog) taskCreateDialog.setAttribute("open", "open");
     }}
@@ -1984,6 +2100,15 @@ def render_board_html(project: BacklogProject) -> str:
         applyMarkdownFormat(toolbarTextarea(button), button.dataset.markdownCommand);
       }});
     }});
+    document.querySelectorAll("button[data-markdown-mode]").forEach((button) => {{
+      button.addEventListener("click", () => {{
+        const target = button.dataset.markdownTarget || "";
+        const textarea = document.getElementById(target);
+        if (!(textarea instanceof HTMLTextAreaElement)) return;
+        if (button.dataset.markdownMode === "preview") showMarkdownPreview(textarea);
+        else showMarkdownEdit(textarea);
+      }});
+    }});
 
     document.querySelectorAll("[data-task-details]").forEach((button) => {{
       button.addEventListener("click", (event) => {{
@@ -2057,6 +2182,24 @@ def _render_markdown_toolbar() -> str:
         '<button type="button" data-markdown-command="link" aria-label="Link">Link</button>'
         "</span>"
     )
+
+
+def _render_markdown_editor(*, field_id: str, name: str, label: str, data_field: str) -> str:
+    escaped_id = escape(field_id)
+    escaped_name = escape(name)
+    escaped_label = escape(label)
+    escaped_data_field = escape(data_field)
+    toolbar = _render_markdown_toolbar()
+    return f"""<div class="task-form-field markdown-editor" data-markdown-editor="true" data-markdown-mode="edit">
+          <label for="{escaped_id}">{escaped_label}</label>
+          <div class="markdown-editor-tabs" role="tablist" aria-label="{escaped_label} mode">
+            <button type="button" role="tab" data-markdown-mode="edit" data-markdown-target="{escaped_id}" aria-selected="true">Edit</button>
+            <button type="button" role="tab" data-markdown-mode="preview" data-markdown-target="{escaped_id}" aria-selected="false">Preview</button>
+          </div>
+          {toolbar}
+          <textarea id="{escaped_id}" name="{escaped_name}" data-markdown-input="true" data-markdown-field="{escaped_data_field}"></textarea>
+          <div class="markdown-preview markdown-body" data-markdown-preview-for="{escaped_id}" hidden></div>
+        </div>"""
 
 
 def _render_column(status: str, raw_tasks: object) -> str:
