@@ -351,6 +351,16 @@ def test_agent_critical_inventory_tracks_browser_markdown_edit_toolbar_surface()
     assert item.expected == "browser Markdown edit toolbar for raw Markdown textareas"
 
 
+def test_agent_critical_inventory_tracks_browser_rich_markdown_editor_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    item = by_name["browser:rich-markdown-editor"]
+    assert item.status == "implemented"
+    assert item.classification == "browser-implemented"
+    assert item.expected == "browser Rich mode for the supported Markdown editing subset"
+
+
 def test_agent_critical_inventory_tracks_browser_mermaid_rendering_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

@@ -956,17 +956,28 @@ def render_board_html(project: BacklogProject) -> str:
       color: var(--panel);
     }}
     .markdown-editor[data-markdown-mode="preview"] [data-markdown-toolbar],
-    .markdown-editor[data-markdown-mode="preview"] textarea {{
+    .markdown-editor[data-markdown-mode="preview"] textarea,
+    .markdown-editor[data-markdown-mode="rich"] [data-markdown-toolbar],
+    .markdown-editor[data-markdown-mode="rich"] textarea {{
       display: none;
     }}
-    .markdown-preview {{
+    .markdown-preview,
+    .markdown-rich-editor {{
       min-height: 88px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--bg);
       padding: 9px;
     }}
-    .markdown-preview[hidden] {{
+    .markdown-rich-editor {{
+      font-weight: 400;
+      outline: none;
+    }}
+    .markdown-rich-editor:focus {{
+      border-color: var(--accent);
+    }}
+    .markdown-preview[hidden],
+    .markdown-rich-editor[hidden] {{
       display: none;
     }}
     .task-form input[type="checkbox"] {{
@@ -1675,12 +1686,215 @@ def render_board_html(project: BacklogProject) -> str:
       return editor ? editor.querySelector("[data-markdown-preview-for]") : null;
     }}
 
+    function markdownRichPanel(textarea) {{
+      const editor = markdownEditor(textarea);
+      return editor ? editor.querySelector("[data-markdown-rich-for]") : null;
+    }}
+
+    function safeRichHref(href) {{
+      const value = String(href || "").trim();
+      if (!value) return "";
+      const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(value);
+      if (scheme && !/^(https?|mailto)$/i.test(scheme[1])) return "#";
+      return value;
+    }}
+
+    function appendInlineMarkdown(parent, source) {{
+      const text = String(source || "");
+      const tokenPattern = /(\\*\\*[^*]+\\*\\*|`[^`]+`|\\[[^\\]]+\\]\\([^)]+\\)|\\*[^*]+\\*)/g;
+      let lastIndex = 0;
+      let match;
+      while ((match = tokenPattern.exec(text)) !== null) {{
+        if (match.index > lastIndex) parent.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+        parent.appendChild(inlineMarkdownNode(match[0]));
+        lastIndex = match.index + match[0].length;
+      }}
+      if (lastIndex < text.length) parent.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }}
+
+    function inlineMarkdownNode(token) {{
+      if (token.startsWith("**") && token.endsWith("**")) {{
+        const strong = document.createElement("strong");
+        strong.textContent = token.slice(2, -2);
+        return strong;
+      }}
+      if (token.startsWith("`") && token.endsWith("`")) {{
+        const code = document.createElement("code");
+        code.textContent = token.slice(1, -1);
+        return code;
+      }}
+      const linkMatch = /^\\[([^\\]]+)\\]\\(([^)]+)\\)$/.exec(token);
+      if (linkMatch) {{
+        const link = document.createElement("a");
+        link.textContent = linkMatch[1];
+        link.href = safeRichHref(linkMatch[2]);
+        return link;
+      }}
+      if (token.startsWith("*") && token.endsWith("*")) {{
+        const emphasis = document.createElement("em");
+        emphasis.textContent = token.slice(1, -1);
+        return emphasis;
+      }}
+      return document.createTextNode(token);
+    }}
+
+    function appendRichParagraph(root, text) {{
+      const paragraph = document.createElement("p");
+      appendInlineMarkdown(paragraph, text);
+      if (!paragraph.childNodes.length) paragraph.appendChild(document.createElement("br"));
+      root.appendChild(paragraph);
+    }}
+
+    function appendRichList(root, lines, ordered) {{
+      const list = document.createElement(ordered ? "ol" : "ul");
+      lines.forEach((line) => {{
+        const item = document.createElement("li");
+        appendInlineMarkdown(item, line);
+        list.appendChild(item);
+      }});
+      root.appendChild(list);
+    }}
+
+    function markdownToRichHtml(markdown) {{
+      const root = document.createElement("div");
+      const lines = String(markdown || "").replace(/\\r\\n/g, "\\n").split("\\n");
+      let index = 0;
+      while (index < lines.length) {{
+        const line = lines[index];
+        if (!line.trim()) {{
+          index += 1;
+          continue;
+        }}
+        const fence = /^```([^`]*)\\s*$/.exec(line);
+        if (fence) {{
+          const language = String(fence[1] || "").trim();
+          const codeLines = [];
+          index += 1;
+          while (index < lines.length && !lines[index].startsWith("```")) {{
+            codeLines.push(lines[index]);
+            index += 1;
+          }}
+          if (index < lines.length) index += 1;
+          const pre = document.createElement("pre");
+          if (language) pre.dataset.codeLanguage = language;
+          const code = document.createElement("code");
+          code.textContent = codeLines.join("\\n");
+          pre.appendChild(code);
+          root.appendChild(pre);
+          continue;
+        }}
+        const heading = /^(#{{1,6}})\\s+(.*)$/.exec(line);
+        if (heading) {{
+          const element = document.createElement("h" + heading[1].length);
+          appendInlineMarkdown(element, heading[2]);
+          root.appendChild(element);
+          index += 1;
+          continue;
+        }}
+        if (/^[-*]\\s+/.test(line)) {{
+          const items = [];
+          while (index < lines.length && /^[-*]\\s+/.test(lines[index])) {{
+            items.push(lines[index].replace(/^[-*]\\s+/, ""));
+            index += 1;
+          }}
+          appendRichList(root, items, false);
+          continue;
+        }}
+        if (/^\\d+\\.\\s+/.test(line)) {{
+          const items = [];
+          while (index < lines.length && /^\\d+\\.\\s+/.test(lines[index])) {{
+            items.push(lines[index].replace(/^\\d+\\.\\s+/, ""));
+            index += 1;
+          }}
+          appendRichList(root, items, true);
+          continue;
+        }}
+        const paragraphLines = [];
+        while (
+          index < lines.length &&
+          lines[index].trim() &&
+          !/^```/.test(lines[index]) &&
+          !/^(#{{1,6}})\\s+/.test(lines[index]) &&
+          !/^[-*]\\s+/.test(lines[index]) &&
+          !/^\\d+\\.\\s+/.test(lines[index])
+        ) {{
+          paragraphLines.push(lines[index]);
+          index += 1;
+        }}
+        appendRichParagraph(root, paragraphLines.join(" "));
+      }}
+      if (!root.childNodes.length) appendRichParagraph(root, "");
+      return root.innerHTML;
+    }}
+
+    function inlineMarkdownFromNode(node) {{
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      const element = node;
+      const tag = element.tagName;
+      if (tag === "BR") return "\\n";
+      const content = Array.from(element.childNodes).map(inlineMarkdownFromNode).join("");
+      if (tag === "STRONG" || tag === "B") return `**${{content}}**`;
+      if (tag === "EM" || tag === "I") return `*${{content}}*`;
+      if (tag === "CODE" && element.closest("pre")) return element.textContent || "";
+      if (tag === "CODE") return "`" + (element.textContent || "") + "`";
+      if (tag === "A") return `[${{content}}](${{safeRichHref(element.getAttribute("href") || "")}})`;
+      return content;
+    }}
+
+    function richBlockToMarkdown(node) {{
+      if (node.nodeType === Node.TEXT_NODE) return (node.textContent || "").trim();
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      const element = node;
+      const tag = element.tagName;
+      if (/^H[1-6]$/.test(tag)) {{
+        return "#".repeat(Number(tag.slice(1))) + " " + inlineMarkdownFromNode(element).trim();
+      }}
+      if (tag === "UL" || tag === "OL") {{
+        return Array.from(element.children)
+          .filter((item) => item.tagName === "LI")
+          .map((item, index) => (tag === "OL" ? `${{index + 1}}. ` : "- ") + inlineMarkdownFromNode(item).trim())
+          .join("\\n");
+      }}
+      if (tag === "PRE") {{
+        const code = element.querySelector("code") || element;
+        const language = element.dataset.codeLanguage || "";
+        return "```" + language + "\\n" + (code.textContent || "").replace(/\\n$/, "") + "\\n```";
+      }}
+      return inlineMarkdownFromNode(element).trim();
+    }}
+
+    function richHtmlToMarkdown(root) {{
+      if (!root) return "";
+      return Array.from(root.childNodes)
+        .map(richBlockToMarkdown)
+        .filter((block) => block.length > 0)
+        .join("\\n\\n")
+        .trim();
+    }}
+
+    function syncRichEditorToTextarea(textarea) {{
+      const editor = markdownEditor(textarea);
+      const rich = markdownRichPanel(textarea);
+      if (!textarea || !editor || !rich || editor.dataset.markdownMode !== "rich") return;
+      textarea.value = richHtmlToMarkdown(rich);
+      textarea.dispatchEvent(new Event("input", {{bubbles: true}}));
+    }}
+
+    function syncAllRichEditors(root) {{
+      root?.querySelectorAll("[data-markdown-input]").forEach((textarea) => {{
+        syncRichEditorToTextarea(textarea);
+      }});
+    }}
+
     function setMarkdownEditorMode(textarea, mode) {{
       const editor = markdownEditor(textarea);
       const preview = markdownPreviewPanel(textarea);
-      if (!editor || !preview) return;
+      const rich = markdownRichPanel(textarea);
+      if (!editor || !preview || !rich) return;
       editor.dataset.markdownMode = mode;
       preview.hidden = mode !== "preview";
+      rich.hidden = mode !== "rich";
       editor.querySelectorAll("[data-markdown-mode]").forEach((button) => {{
         button.setAttribute("aria-selected", button.dataset.markdownMode === mode ? "true" : "false");
       }});
@@ -1688,6 +1902,7 @@ def render_board_html(project: BacklogProject) -> str:
 
     async function renderMarkdownPreview(textarea) {{
       if (!textarea) return false;
+      syncRichEditorToTextarea(textarea);
       const preview = markdownPreviewPanel(textarea);
       if (!preview) return false;
       const response = await fetch("/api/markdown/preview", {{
@@ -1706,20 +1921,33 @@ def render_board_html(project: BacklogProject) -> str:
     }}
 
     function showMarkdownPreview(textarea) {{
+      syncRichEditorToTextarea(textarea);
       renderMarkdownPreview(textarea).then((rendered) => {{
         if (rendered) setMarkdownEditorMode(textarea, "preview");
       }});
     }}
 
     function showMarkdownEdit(textarea) {{
+      syncRichEditorToTextarea(textarea);
       setMarkdownEditorMode(textarea, "edit");
       textarea?.focus();
+    }}
+
+    function showMarkdownRich(textarea) {{
+      if (!textarea) return;
+      const rich = markdownRichPanel(textarea);
+      if (!rich) return;
+      rich.innerHTML = markdownToRichHtml(textarea.value || "");
+      setMarkdownEditorMode(textarea, "rich");
+      rich.focus();
     }}
 
     function resetMarkdownEditors(root) {{
       root?.querySelectorAll("[data-markdown-input]").forEach((textarea) => {{
         const preview = markdownPreviewPanel(textarea);
         if (preview) preview.innerHTML = "";
+        const rich = markdownRichPanel(textarea);
+        if (rich) rich.innerHTML = "";
         setMarkdownEditorMode(textarea, "edit");
       }});
     }}
@@ -1928,6 +2156,7 @@ def render_board_html(project: BacklogProject) -> str:
     async function submitTaskCreate(event) {{
       event.preventDefault();
       const form = event.currentTarget;
+      syncAllRichEditors(taskCreateForm);
       const data = new FormData(form);
       const criteria = String(data.get("acceptanceCriteria") || "")
         .split("\\n")
@@ -1955,6 +2184,7 @@ def render_board_html(project: BacklogProject) -> str:
       const form = event.currentTarget;
       const taskId = form.dataset.taskId;
       if (!taskId) return;
+      syncAllRichEditors(taskEditForm);
       const data = new FormData(form);
       const criteria = String(data.get("acceptanceCriteria") || "")
         .split("\\n")
@@ -2106,7 +2336,15 @@ def render_board_html(project: BacklogProject) -> str:
         const textarea = document.getElementById(target);
         if (!(textarea instanceof HTMLTextAreaElement)) return;
         if (button.dataset.markdownMode === "preview") showMarkdownPreview(textarea);
+        else if (button.dataset.markdownMode === "rich") showMarkdownRich(textarea);
         else showMarkdownEdit(textarea);
+      }});
+    }});
+    document.querySelectorAll("[data-markdown-rich-for]").forEach((rich) => {{
+      rich.addEventListener("input", () => {{
+        const target = rich.dataset.markdownRichFor || "";
+        const textarea = document.getElementById(target);
+        if (textarea instanceof HTMLTextAreaElement) syncRichEditorToTextarea(textarea);
       }});
     }});
 
@@ -2195,10 +2433,12 @@ def _render_markdown_editor(*, field_id: str, name: str, label: str, data_field:
           <div class="markdown-editor-tabs" role="tablist" aria-label="{escaped_label} mode">
             <button type="button" role="tab" data-markdown-mode="edit" data-markdown-target="{escaped_id}" aria-selected="true">Edit</button>
             <button type="button" role="tab" data-markdown-mode="preview" data-markdown-target="{escaped_id}" aria-selected="false">Preview</button>
+            <button type="button" role="tab" data-markdown-mode="rich" data-markdown-target="{escaped_id}" aria-selected="false">Rich</button>
           </div>
           {toolbar}
           <textarea id="{escaped_id}" name="{escaped_name}" data-markdown-input="true" data-markdown-field="{escaped_data_field}"></textarea>
           <div class="markdown-preview markdown-body" data-markdown-preview-for="{escaped_id}" hidden></div>
+          <div class="markdown-rich-editor markdown-body" data-markdown-rich-for="{escaped_id}" contenteditable="true" hidden></div>
         </div>"""
 
 
@@ -2466,11 +2706,38 @@ def _normalized_markdown_language(language: str) -> str:
 
 
 def _render_inline_markdown(text: str) -> str:
+    rendered_parts: list[str] = []
+    parts = re.split(r"(`[^`]+`)", text)
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("`") and part.endswith("`"):
+            rendered_parts.append(f"<code>{escape(part[1:-1])}</code>")
+            continue
+        rendered_parts.append(_render_inline_markdown_segment(part))
+    return "".join(rendered_parts)
+
+
+def _render_inline_markdown_segment(text: str) -> str:
     rendered = escape(text)
-    rendered = re.sub(r"`([^`]+)`", r"<code>\1</code>", rendered)
+    rendered = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _render_markdown_link, rendered)
     rendered = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", rendered)
     rendered = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", rendered)
     return rendered
+
+
+def _render_markdown_link(match: re.Match[str]) -> str:
+    label = match.group(1)
+    href = _safe_markdown_href(match.group(2))
+    return f'<a href="{href}">{label}</a>'
+
+
+def _safe_markdown_href(href: str) -> str:
+    value = href.strip()
+    scheme = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):", value)
+    if scheme and scheme.group(1).lower() not in {"http", "https", "mailto"}:
+        return "#"
+    return value
 
 
 def _render_task_meta(*, priority: str | None, assignees: list[object], labels: list[object]) -> str:

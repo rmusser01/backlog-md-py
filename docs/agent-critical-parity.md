@@ -94,6 +94,7 @@ do not block the first local-file agent cutover candidate.
 | browser:markdown-detail-rendering | implemented | safe browser Markdown rendering for task detail description, implementation notes, and final summary | browser:markdown-detail-rendering |
 | browser:rich-section-editing | implemented | browser edit form updates Implementation Notes and Final Summary Markdown sections | browser:rich-section-editing |
 | browser:markdown-edit-toolbar | implemented | browser Markdown edit toolbar for raw Markdown textareas | browser:markdown-edit-toolbar |
+| browser:rich-markdown-editor | implemented | browser Rich mode for the supported Markdown editing subset | browser:rich-markdown-editor |
 | browser:mermaid-rendering | implemented | browser Mermaid diagram rendering for task detail Markdown fences | browser:mermaid-rendering |
 | browser:metadata-editing | implemented | browser edit form updates assignees, labels, priority, and milestone | browser:metadata-editing |
 | browser:task-create-form | implemented | basic browser task create endpoint and form | browser:task-create-form |
