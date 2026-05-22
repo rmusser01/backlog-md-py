@@ -145,21 +145,24 @@ Before enabling this in another project, also run the full local validation and
 copied-repo mutation smoke documented in `docs/cutover-validation.md`. Mutation
 smoke commands must use a temporary copy, not the live repository backlog.
 
-Browser editor/settings gaps and the remaining hook-bypass decision are
-tracked separately from the first agent cutover candidate:
+Browser release readiness is tracked separately from the first agent cutover
+candidate:
 
 - `docs/browser-parity.md` records browser requirements such as rich Markdown
   editing and mobile behavior. The custom-port browser service with responsive
   board layout, drag/drop status movement, basic task creation/editing, task
   archive confirmation, and read-only task detail dialog with checklist state
-  controls are implemented. The browser also includes a Markdown toolbar,
-  preview mode, and Rich mode v1 for a supported Markdown subset, while full
-  WYSIWYG editing remains deferred.
+  controls are implemented. The browser also includes metadata editing,
+  settings dialogs, service lifecycle controls, SSE refresh/shutdown handling,
+  a Markdown toolbar, preview mode, and Rich mode v1 for the supported Markdown
+  subset. Complex full-WYSIWYG Markdown round trips remain outside the current
+  release scope.
 - `docs/interactive-deferrals.md` records the implemented task detail/editor,
-  search filter, board, and overview flows, remaining CLI/TUI deferrals, hook
-  bypass, fetch-only remote operations, and the opt-in auto-commit runtime policy.
+  search filter, board, and overview flows, fetch-only remote operations, and
+  the opt-in auto-commit runtime policy.
 - `docs/upstream-feature-parity.md` records the current upstream feature-set
-  audit, the implemented feature inventory, and release gates that still need
-  evidence before claiming full browser release readiness.
+  audit, the implemented feature inventory, and the browser release-validation
+  gates.
 - `docs/browser-release-validation.md` records the release evidence manifest
-  format consumed by `backlog-py compat status --release-evidence`.
+  format consumed by `backlog-py compat status --release-evidence`, plus the
+  latest completed browser release-readiness validation record.
