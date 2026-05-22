@@ -1,55 +1,27 @@
-name: CI
+name: Release
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
 
 jobs:
-  tests:
-    name: Tests (Python ${{ matrix.python-version }})
+  release:
+    name: Build and publish release
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version:
-          - "3.11"
-          - "3.12"
-          - "3.13"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install package and test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      - name: Run tests
-        run: python -m pytest tests -v
-
-      - name: Run Bandit
-        run: python -m bandit -r src
-
-  package:
-    name: Package build
-    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/backlog-md-py
 
     steps:
       - name: Checkout
@@ -96,3 +68,21 @@ jobs:
           cat "${MCP_RESPONSE_PATH}"
           /tmp/backlog-md-py-mcp-smoke/bin/python -c 'import json, os, pathlib; response = json.loads(pathlib.Path(os.environ["MCP_RESPONSE_PATH"]).read_text()); assert "error" not in response, response; assert response["result"]["serverInfo"]["name"] == "backlog-md-py", response'
           /tmp/backlog-md-py-mcp-smoke/bin/python -c 'from backlog_py.mcp.server import create_server; server = create_server(); assert server.name == "backlog-md-py"; assert type(server).__name__ == "SdkFreeMcpServer"'
+
+      - name: Upload distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backlog-md-py-dist
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

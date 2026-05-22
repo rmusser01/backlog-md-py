@@ -17,7 +17,14 @@ is still `backlog-py`.
 
 ## Installing In Another Project
 
-Until package publishing is configured, install directly from GitHub:
+Tagged releases publish distributions to PyPI and attach the same artifacts to
+the GitHub Release. After a tagged release is available, install with:
+
+```bash
+python -m pip install backlog-md-py
+```
+
+For unreleased commits, install directly from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
