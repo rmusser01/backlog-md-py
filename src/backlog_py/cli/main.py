@@ -900,9 +900,21 @@ def compat_group() -> None:
 
 @compat_group.command("status")
 @click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
-def compat_status_command(as_json: bool) -> None:
+@click.option(
+    "--release-evidence",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="JSON evidence manifest for browser release-validation gates.",
+)
+def compat_status_command(as_json: bool, release_evidence: Path | None) -> None:
     """Print implemented and deferred compatibility coverage."""
-    report = build_compatibility_report(load_builtin_inventory())
+    try:
+        report = build_compatibility_report(
+            load_builtin_inventory(),
+            release_evidence_path=release_evidence,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     if as_json:
         click.echo(json.dumps(report, indent=2, sort_keys=True))
         return

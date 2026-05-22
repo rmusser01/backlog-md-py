@@ -38,7 +38,8 @@ full clone unless explicitly rejected.
 `backlog-py compat status` tracks these release checks separately from feature
 coverage. The browser feature inventory can be implemented while
 `fullBrowserReleaseReady` remains false until the release-validation gates below
-have evidence.
+have evidence. The machine-readable evidence format is documented in
+`docs/browser-release-validation.md`.
 
 A later browser milestone should not be marked complete until it has:
 

@@ -45,12 +45,14 @@ Check the built-in cutover inventory without mutating a project:
 ```bash
 backlog-py compat status
 backlog-py compat status --json
+backlog-py compat status --release-evidence browser-release-evidence.json
 ```
 
 The compatibility report separates implemented upstream feature coverage from
 release-validation gates. `agentCutoverReady` can be true while
 `fullBrowserReleaseReady` remains false until browser E2E and screenshot
-evidence exists for a release that advertises full browser parity.
+evidence exists for a release that advertises full browser parity. See
+`docs/browser-release-validation.md` for the evidence manifest format.
 
 Install shell completion for the `backlog-py` command:
 
@@ -159,3 +161,5 @@ tracked separately from the first agent cutover candidate:
 - `docs/upstream-feature-parity.md` records the current upstream feature-set
   audit, the implemented feature inventory, and release gates that still need
   evidence before claiming full browser release readiness.
+- `docs/browser-release-validation.md` records the release evidence manifest
+  format consumed by `backlog-py compat status --release-evidence`.

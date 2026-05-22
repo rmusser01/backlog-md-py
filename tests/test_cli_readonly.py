@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -682,6 +683,69 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"core:date-only-timestamps"' in result.output
     assert '"git:hook-bypass"' in result.output
     assert '"status": "implemented"' in result.output
+
+
+def test_compat_status_accepts_release_evidence_manifest(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "release_gates": {
+                    "browser:rich-edit-e2e-release-check": {
+                        "status": "passed",
+                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
+                    },
+                    "browser:desktop-mobile-screenshot-release-check": {
+                        "status": "passed",
+                        "artifacts": [
+                            "artifacts/browser-desktop.png",
+                            "artifacts/browser-mobile.png",
+                        ],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _invoke("compat", "status", "--release-evidence", str(evidence_path))
+
+    assert result.exit_code == 0
+    assert "fullBrowserReleaseReady: true" in result.output
+    assert "browser:rich-edit-e2e-release-check: passed" in result.output
+    assert "browser:desktop-mobile-screenshot-release-check: passed" in result.output
+
+
+def test_compat_status_json_includes_release_evidence_artifacts(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "release_gates": {
+                    "browser:rich-edit-e2e-release-check": {
+                        "status": "passed",
+                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
+                    },
+                    "browser:desktop-mobile-screenshot-release-check": {
+                        "status": "passed",
+                        "artifacts": [
+                            "artifacts/browser-desktop.png",
+                            "artifacts/browser-mobile.png",
+                        ],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _invoke("compat", "status", "--json", "--release-evidence", str(evidence_path))
+
+    assert result.exit_code == 0
+    assert '"full_browser_release_ready": true' in result.output
+    assert '"artifacts": [' in result.output
+    assert '"artifacts/browser-desktop.png"' in result.output
+    assert '"artifacts/browser-mobile.png"' in result.output
 
 
 def test_task_list_plain_filters_by_metadata(tmp_path):
