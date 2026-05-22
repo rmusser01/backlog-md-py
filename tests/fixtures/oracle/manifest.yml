@@ -222,6 +222,10 @@ fixtures:
     command: ["backlog", "browser"]
     agent_critical: false
     classification: "browser-implemented"
+  - name: "browser:rich-markdown-editor"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-implemented"
   - name: "browser:metadata-editing"
     command: ["backlog", "browser"]
     agent_critical: false

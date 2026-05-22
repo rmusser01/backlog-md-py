@@ -7,9 +7,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["summary"] == {
-        "implemented": 99,
+        "implemented": 100,
         "deferred": 0,
-        "total": 99,
+        "total": 100,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -22,9 +22,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 22,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 23,
+        "implemented": 24,
         "deferred": 0,
-        "total": 23,
+        "total": 24,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -90,6 +90,10 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:markdown-edit-toolbar"]["status"] == "implemented"
     assert items_by_name["browser:markdown-edit-toolbar"]["expected"] == (
         "browser Markdown edit toolbar for raw Markdown textareas"
+    )
+    assert items_by_name["browser:rich-markdown-editor"]["status"] == "implemented"
+    assert items_by_name["browser:rich-markdown-editor"]["expected"] == (
+        "browser Rich mode for the supported Markdown editing subset"
     )
     assert items_by_name["browser:metadata-editing"]["status"] == "implemented"
     assert items_by_name["browser:task-create-form"]["status"] == "implemented"

@@ -729,6 +729,49 @@ def test_browser_markdown_preview_endpoint_returns_safe_rendered_html(tmp_path):
     assert "<li>item</li>" in html
 
 
+def test_browser_markdown_preview_endpoint_renders_safe_links(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/markdown/preview",
+            {"markdown": "[Docs](docs/setup.md) [Bad](javascript:alert(1))"},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    html = response["body"]["html"]
+    assert '<a href="docs/setup.md">Docs</a>' in html
+    assert '<a href="#">Bad</a>' in html
+    assert "javascript:alert" not in html
+
+
+def test_browser_markdown_preview_endpoint_does_not_render_links_inside_code_spans(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/markdown/preview",
+            {"markdown": "`[Docs](docs/setup.md)` [Docs](docs/setup.md)"},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    html = response["body"]["html"]
+    assert "<code>[Docs](docs/setup.md)</code>" in html
+    assert html.count('<a href="docs/setup.md">Docs</a>') == 1
+
+
 def test_browser_markdown_preview_endpoint_rejects_cross_origin(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -1230,6 +1273,51 @@ def test_browser_board_html_exposes_markdown_edit_preview_controls(tmp_path):
     assert "function showMarkdownPreview(textarea)" in html
     assert "function showMarkdownEdit(textarea)" in html
     assert 'fetch("/api/markdown/preview"' in html
+
+
+def test_browser_board_html_exposes_markdown_rich_editor_controls(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert html.count('data-markdown-mode="rich"') >= 4
+    assert html.count('contenteditable="true"') >= 4
+    assert html.count('data-markdown-rich-for=') >= 4
+    assert 'data-markdown-rich-for="task-create-description"' in html
+    assert 'data-markdown-rich-for="task-edit-description"' in html
+    assert 'data-markdown-rich-for="task-edit-implementation-notes"' in html
+    assert 'data-markdown-rich-for="task-edit-final-summary"' in html
+    assert "function markdownToRichHtml(markdown)" in html
+    assert "function richHtmlToMarkdown(root)" in html
+    assert "function showMarkdownRich(textarea)" in html
+    assert "function syncRichEditorToTextarea(textarea)" in html
+
+
+def test_browser_board_html_syncs_markdown_rich_editor_before_submit_and_preview(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert "function syncAllRichEditors(root)" in html
+    assert "syncRichEditorToTextarea(textarea);" in html
+    assert "syncAllRichEditors(taskCreateForm);" in html
+    assert "syncAllRichEditors(taskEditForm);" in html
+    preview_block = html[html.index("function showMarkdownPreview(textarea)") : html.index("function showMarkdownEdit(textarea)")]
+    assert "syncRichEditorToTextarea(textarea);" in preview_block
 
 
 def test_browser_task_archive_endpoint_archives_task_under_project_lock(tmp_path, monkeypatch):

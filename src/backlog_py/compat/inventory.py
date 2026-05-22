@@ -237,6 +237,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser Markdown edit toolbar for raw Markdown textareas",
         ),
         _implemented(
+            "browser:rich-markdown-editor",
+            "browser-implemented",
+            "web task edit form",
+            "browser Rich mode for the supported Markdown editing subset",
+        ),
+        _implemented(
             "browser:metadata-editing",
             "browser-implemented",
             "web task edit form",
