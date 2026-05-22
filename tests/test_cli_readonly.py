@@ -631,6 +631,7 @@ def test_compat_status_outputs_cutover_summary():
 
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
+    assert "fullBrowserReleaseReady: false" in result.output
     assert "implemented: 100" in result.output
     assert "deferred: 0" in result.output
     assert "total: 100" in result.output
@@ -639,6 +640,9 @@ def test_compat_status_outputs_cutover_summary():
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 3 implemented, 0 deferred, 3 total" in result.output
     assert "git: 4 implemented, 0 deferred, 4 total" in result.output
+    assert "releaseGates:" in result.output
+    assert "browser:rich-edit-e2e-release-check: required" in result.output
+    assert "browser:desktop-mobile-screenshot-release-check: required" in result.output
 
 
 def test_compat_status_json_outputs_deferred_items():
@@ -646,6 +650,9 @@ def test_compat_status_json_outputs_deferred_items():
 
     assert result.exit_code == 0
     assert '"agent_cutover_ready": true' in result.output
+    assert '"full_browser_release_ready": false' in result.output
+    assert '"browser:rich-edit-e2e-release-check"' in result.output
+    assert '"browser:desktop-mobile-screenshot-release-check"' in result.output
     assert '"cli:interactive-task-view-editor"' in result.output
     assert '"cli:interactive-overview"' in result.output
     assert '"cli:task-plain-detail"' in result.output

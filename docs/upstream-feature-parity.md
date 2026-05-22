@@ -7,6 +7,7 @@ Backlog.md feature set beyond the first local-file agent cutover gate.
 
 - Upstream package: `backlog.md@1.45.1`
 - Audit date: 2026-05-16
+- Latest release check: 2026-05-22, GitHub latest release still `v1.45.1`
 - Sources: upstream `README.md`, `CLI-INSTRUCTIONS.md`, `ADVANCED-CONFIG.md`,
   and `package.json`.
 
@@ -141,6 +142,26 @@ larger task commands:
 | Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar, safe preview controls, and dependency-free Rich mode v1 for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG parity remains deferred for complex Markdown round trips, and shell-hook execution plus hook-bypass settings stay CLI-only |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
 | Git automation | none currently tracked | Local auto-commit, explicit auto-commit hook bypass, fetch-only remote operations, and read-only active branch snapshots are implemented |
+
+## Release Validation Gates
+
+`backlog-py compat status` reports implemented feature coverage and release
+validation separately. A `100/100` implemented inventory means the audited
+upstream feature items in this clone are covered. It does not by itself mean a
+release should advertise full browser parity.
+
+The current browser release gates are:
+
+- Required: browser E2E coverage for rich edit flows before advertising full
+  browser parity.
+- Required: desktop and mobile browser screenshots before advertising full
+  browser parity.
+- Not applicable unless explicitly scoped later: complex Markdown full-WYSIWYG
+  round-trip guarantees.
+- Passed by policy: browser API does not expose shell-hook execution or
+  hook-bypass settings.
+- Passed for current transports: SSE/polling/shutdown service transport policy
+  is documented.
 
 ## Recommended Work Order
 

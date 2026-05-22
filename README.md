@@ -47,6 +47,11 @@ backlog-py compat status
 backlog-py compat status --json
 ```
 
+The compatibility report separates implemented upstream feature coverage from
+release-validation gates. `agentCutoverReady` can be true while
+`fullBrowserReleaseReady` remains false until browser E2E and screenshot
+evidence exists for a release that advertises full browser parity.
+
 Install shell completion for the `backlog-py` command:
 
 ```bash
@@ -145,10 +150,12 @@ tracked separately from the first agent cutover candidate:
   editing and mobile behavior. The custom-port browser service with responsive
   board layout, drag/drop status movement, basic task creation/editing, task
   archive confirmation, and read-only task detail dialog with checklist state
-  controls are implemented. The browser also includes a basic Markdown toolbar
-  for raw textareas, while full WYSIWYG editing remains deferred.
+  controls are implemented. The browser also includes a Markdown toolbar,
+  preview mode, and Rich mode v1 for a supported Markdown subset, while full
+  WYSIWYG editing remains deferred.
 - `docs/interactive-deferrals.md` records the implemented task detail/editor,
   search filter, board, and overview flows, remaining CLI/TUI deferrals, hook
   bypass, fetch-only remote operations, and the opt-in auto-commit runtime policy.
 - `docs/upstream-feature-parity.md` records the current upstream feature-set
-  audit and the work that remains before claiming full clone parity.
+  audit, the implemented feature inventory, and release gates that still need
+  evidence before claiming full browser release readiness.
