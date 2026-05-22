@@ -135,11 +135,11 @@ larger task commands:
 - Browser service shutdown state through idempotent stop scheduling and
   `/api/service/status` shutdown metadata.
 
-## Remaining Full-Parity Work
+## Remaining Scope Decisions
 
-| Area | Remaining upstream behavior | Current decision |
+| Area | Future or rejected behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | full WYSIWYG Markdown editing, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar, safe preview controls, and dependency-free Rich mode v1 for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; full WYSIWYG parity remains deferred for complex Markdown round trips, and shell-hook execution plus hook-bypass settings stay CLI-only |
+| Browser UI | complex full-WYSIWYG Markdown round trips, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar, safe preview controls, and dependency-free Rich mode v1 for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; complex full-WYSIWYG Markdown round trips remain outside the current release scope, and shell-hook execution plus hook-bypass settings stay CLI-only |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
 | Git automation | none currently tracked | Local auto-commit, explicit auto-commit hook bypass, fetch-only remote operations, and read-only active branch snapshots are implemented |
 
@@ -147,8 +147,8 @@ larger task commands:
 
 `backlog-py compat status` reports implemented feature coverage and release
 validation separately. A `100/100` implemented inventory means the audited
-upstream feature items in this clone are covered. It does not by itself mean a
-release should advertise full browser parity. Use
+upstream feature items in this clone are covered. A release that advertises
+browser parity must also provide browser release evidence. Use
 `backlog-py compat status --release-evidence <manifest.json>` with the manifest
 format in `docs/browser-release-validation.md` to promote externally generated
 release evidence into machine-readable readiness.
@@ -170,10 +170,11 @@ The current browser release gates are:
 
 1. Keep the oracle manifest and compatibility inventory pinned to the audited
    upstream release before adding new runtime behavior.
-2. Decide whether full parity requires the browser UI or whether the project
-   should explicitly advertise a headless/agent-focused compatibility scope.
-3. If browser parity is in scope, implement it separately from MCP/CLI runtime
-   work and require end-to-end browser tests before claiming support.
-4. Keep any future shell-hook or browser-exposed automation behind separate
+2. For release packaging, attach a fresh browser release-evidence manifest and
+   run `backlog-py compat status --release-evidence <manifest.json>` before
+   claiming full browser readiness.
+3. Keep any future shell-hook or browser-exposed automation behind separate
    security review; the CLI-only hook-bypass milestone is complete for
    explicit local auto-commit opt-in.
+4. Treat complex full-WYSIWYG Markdown round-trip guarantees as a future
+   milestone, not as part of the current audited browser release scope.
