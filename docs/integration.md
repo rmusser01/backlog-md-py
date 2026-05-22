@@ -56,12 +56,14 @@ The compatibility report is read-only and does not need a project path:
 ```bash
 backlog-py compat status
 backlog-py compat status --json
+backlog-py compat status --release-evidence browser-release-evidence.json
 ```
 
 The report distinguishes feature coverage from release evidence. A fully
 implemented inventory can still report `fullBrowserReleaseReady: false` when
 browser release gates such as rich-edit E2E coverage and desktop/mobile
-screenshot checks still need recorded evidence.
+screenshot checks still need recorded evidence. See
+`docs/browser-release-validation.md` for the JSON manifest format.
 
 Unfiltered `search` output includes matching tasks, documents, and decisions.
 Use `--type task`, `--type document`, or `--type decision` to narrow result
@@ -157,6 +159,7 @@ For a quick machine-readable inventory check before deeper validation:
 
 ```bash
 backlog-py compat status --json
+backlog-py compat status --json --release-evidence browser-release-evidence.json
 ```
 
 Read both `agent_cutover_ready` and `full_browser_release_ready`. The first

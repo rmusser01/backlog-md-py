@@ -1,3 +1,5 @@
+import json
+
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
 
@@ -142,3 +144,85 @@ def test_compatibility_report_separates_release_validation_from_feature_counts()
     assert gates_by_name["browser:complex-wysiwyg-round-trip"]["status"] == "not_applicable"
     assert gates_by_name["browser:shell-hook-settings"]["status"] == "passed"
     assert gates_by_name["browser:shell-hook-settings"]["scope"] == "rejected-in-browser"
+
+
+def test_compatibility_report_marks_browser_release_ready_with_evidence_manifest(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "release_gates": {
+                    "browser:rich-edit-e2e-release-check": {
+                        "status": "passed",
+                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
+                    },
+                    "browser:desktop-mobile-screenshot-release-check": {
+                        "status": "passed",
+                        "artifacts": [
+                            "artifacts/browser-desktop.png",
+                            "artifacts/browser-mobile.png",
+                        ],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_compatibility_report(
+        load_builtin_inventory(),
+        release_evidence_path=evidence_path,
+    )
+    gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
+
+    assert report["full_browser_release_ready"] is True
+    assert report["release_gates"]["summary"] == {
+        "passed": 4,
+        "required": 0,
+        "not_applicable": 1,
+        "total": 5,
+    }
+    assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "passed"
+    assert gates_by_name["browser:rich-edit-e2e-release-check"]["artifacts"] == [
+        "artifacts/browser-rich-edit-e2e.txt"
+    ]
+    assert gates_by_name["browser:desktop-mobile-screenshot-release-check"]["status"] == "passed"
+    assert gates_by_name["browser:desktop-mobile-screenshot-release-check"]["artifacts"] == [
+        "artifacts/browser-desktop.png",
+        "artifacts/browser-mobile.png",
+    ]
+
+
+def test_compatibility_report_keeps_screenshot_gate_required_without_desktop_and_mobile(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "release_gates": {
+                    "browser:rich-edit-e2e-release-check": {
+                        "status": "passed",
+                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
+                    },
+                    "browser:desktop-mobile-screenshot-release-check": {
+                        "status": "passed",
+                        "artifacts": ["artifacts/browser-desktop.png"],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_compatibility_report(
+        load_builtin_inventory(),
+        release_evidence_path=evidence_path,
+    )
+    gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
+
+    assert report["full_browser_release_ready"] is False
+    assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "passed"
+    assert gates_by_name["browser:desktop-mobile-screenshot-release-check"]["status"] == "required"
+    assert (
+        "desktop and mobile"
+        in gates_by_name["browser:desktop-mobile-screenshot-release-check"]["evidence_error"]
+    )

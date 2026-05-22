@@ -148,7 +148,10 @@ larger task commands:
 `backlog-py compat status` reports implemented feature coverage and release
 validation separately. A `100/100` implemented inventory means the audited
 upstream feature items in this clone are covered. It does not by itself mean a
-release should advertise full browser parity.
+release should advertise full browser parity. Use
+`backlog-py compat status --release-evidence <manifest.json>` with the manifest
+format in `docs/browser-release-validation.md` to promote externally generated
+release evidence into machine-readable readiness.
 
 The current browser release gates are:
 
