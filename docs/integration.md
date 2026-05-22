@@ -8,9 +8,16 @@ The project is still experimental, but the first agent-critical local-file
 cutover validation passed on 2026-05-13. Keep live-repository mutation behind
 copied-repository smoke tests and review for each consuming project.
 
-## Install From GitHub
+## Install
 
-Until package publishing is configured, install directly from the repository:
+Tagged releases publish distributions to PyPI and attach the same artifacts to
+the GitHub Release. After a tagged release is available, install with:
+
+```bash
+python -m pip install backlog-md-py
+```
+
+For unreleased commits, install directly from the repository:
 
 ```bash
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"

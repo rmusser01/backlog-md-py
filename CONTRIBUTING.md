@@ -36,6 +36,22 @@ For consuming-project cutovers, follow `docs/cutover-validation.md` so mutation
 smoke tests run against a copied repository before live Backlog.md files are
 changed.
 
+## Release Process
+
+Releases are tag-driven. Pushing a `v*` tag runs `.github/workflows/release.yml`,
+which builds the source distribution and wheel, runs `twine check`, smoke-tests
+the installed wheel and SDK-free MCP entry point, attaches `dist/*` to the
+GitHub Release, and publishes the same artifacts to PyPI through trusted
+publishing.
+
+Before pushing a release tag:
+
+- Confirm `src/backlog_py/__init__.py` has the intended `__version__`.
+- Confirm PyPI has a trusted publisher for project `backlog-md-py`, repository
+  `rmusser01/backlog-md-py`, workflow `.github/workflows/release.yml`, and
+  environment `pypi`.
+- Run the full local validation gate above.
+
 ## Compatibility Scope
 
 The current cutover target is non-interactive local-file agent workflows:
