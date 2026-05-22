@@ -1195,6 +1195,10 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert 'id="task-edit-dialog"' in html
     assert 'id="task-edit-form"' in html
     assert 'data-task-edit="TASK-1"' in html
+    edit_form = html.split('<form class="task-form" id="task-edit-form">', maxsplit=1)[1].split(
+        '<div class="form-actions">',
+        maxsplit=1,
+    )[0]
     edit_submit = html.split("async function submitTaskEdit", maxsplit=1)[1].split(
         "async function submitTaskChecklistState",
         maxsplit=1,
@@ -1205,10 +1209,10 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert 'name="acceptanceCriteria"' in html
     assert 'name="implementationNotes"' in html
     assert 'name="finalSummary"' in html
-    assert 'name="assignees"' in html
-    assert 'name="labels"' in html
-    assert 'name="priority"' in html
-    assert 'name="milestone"' in html
+    assert 'name="assignees"' in edit_form
+    assert 'name="labels"' in edit_form
+    assert 'name="priority"' in edit_form
+    assert 'name="milestone"' in edit_form
     assert "taskEditForm.elements.implementationNotes.value" in html
     assert "taskEditForm.elements.finalSummary.value" in html
     assert "taskEditForm.elements.assignees.value" in html
