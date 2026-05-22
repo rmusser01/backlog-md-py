@@ -58,6 +58,11 @@ backlog-py compat status
 backlog-py compat status --json
 ```
 
+The report distinguishes feature coverage from release evidence. A fully
+implemented inventory can still report `fullBrowserReleaseReady: false` when
+browser release gates such as rich-edit E2E coverage and desktop/mobile
+screenshot checks still need recorded evidence.
+
 Unfiltered `search` output includes matching tasks, documents, and decisions.
 Use `--type task`, `--type document`, or `--type decision` to narrow result
 classes. Task-specific filters such as `--status`, `--priority`, and
@@ -153,6 +158,11 @@ For a quick machine-readable inventory check before deeper validation:
 ```bash
 backlog-py compat status --json
 ```
+
+Read both `agent_cutover_ready` and `full_browser_release_ready`. The first
+answers whether agent-critical CLI/MCP/file-format coverage is implemented; the
+second answers whether browser-specific release gates have enough evidence for
+a full-browser-parity release claim.
 
 Before switching a project to `backlog-md-py`, run at least:
 

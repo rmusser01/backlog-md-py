@@ -909,6 +909,7 @@ def compat_status_command(as_json: bool) -> None:
 
     summary = report["summary"]
     click.echo(f"agentCutoverReady: {_bool_text(report['agent_cutover_ready'])}")
+    click.echo(f"fullBrowserReleaseReady: {_bool_text(report['full_browser_release_ready'])}")
     click.echo(f"implemented: {summary['implemented']}")
     click.echo(f"deferred: {summary['deferred']}")
     click.echo(f"total: {summary['total']}")
@@ -922,6 +923,9 @@ def compat_status_command(as_json: bool) -> None:
         click.echo("deferredItems:")
         for item in report["deferred_items"]:
             click.echo(f"  - {item['name']}: {item['reason']}")
+    click.echo("releaseGates:")
+    for gate in report["release_gates"]["gates"]:
+        click.echo(f"  - {gate['name']}: {gate['status']} ({gate['scope']})")
 
 
 @main.group("config", invoke_without_command=True, no_args_is_help=False)

@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from backlog_py.compat.inventory import CompatibilityInventory, CompatibilityItem
 
 
+@dataclass(frozen=True)
+class ReleaseGate:
+    name: str
+    status: str
+    scope: str
+    requirement: str
+    evidence: str
+
+
 def build_compatibility_report(inventory: CompatibilityInventory) -> dict[str, Any]:
     """Build a stable machine-readable compatibility report."""
     summary = _status_counts(inventory.items)
+    release_gates = _release_gates()
     categories: dict[str, dict[str, int]] = {}
     by_category: dict[str, list[CompatibilityItem]] = defaultdict(list)
     for item in inventory.items:
@@ -30,10 +41,15 @@ def build_compatibility_report(inventory: CompatibilityInventory) -> dict[str, A
 
     return {
         "agent_cutover_ready": _agent_cutover_ready(inventory.items),
+        "full_browser_release_ready": _full_browser_release_ready(release_gates),
         "summary": summary,
         "categories": categories,
         "items": [_item_to_dict(item) for item in inventory.items],
         "deferred_items": deferred_items,
+        "release_gates": {
+            "summary": _release_gate_counts(release_gates),
+            "gates": [_release_gate_to_dict(gate) for gate in release_gates],
+        },
     }
 
 
@@ -64,3 +80,67 @@ def _agent_cutover_ready(items: tuple[CompatibilityItem, ...]) -> bool:
         for item in items
         if item.classification == "golden-required"
     )
+
+
+def _full_browser_release_ready(gates: tuple[ReleaseGate, ...]) -> bool:
+    return all(gate.status != "required" for gate in gates)
+
+
+def _release_gates() -> tuple[ReleaseGate, ...]:
+    return (
+        ReleaseGate(
+            name="browser:rich-edit-e2e-release-check",
+            status="required",
+            scope="full-browser-release",
+            requirement="Run browser E2E coverage for rich edit flows before advertising full browser parity.",
+            evidence="docs/browser-parity.md",
+        ),
+        ReleaseGate(
+            name="browser:desktop-mobile-screenshot-release-check",
+            status="required",
+            scope="full-browser-release",
+            requirement="Capture desktop and mobile browser screenshots before advertising full browser parity.",
+            evidence="docs/browser-parity.md",
+        ),
+        ReleaseGate(
+            name="browser:complex-wysiwyg-round-trip",
+            status="not_applicable",
+            scope="deferred-until-full-wysiwyg-scope",
+            requirement="Only required if a future milestone claims full WYSIWYG editing for complex Markdown.",
+            evidence="docs/browser-parity.md",
+        ),
+        ReleaseGate(
+            name="browser:shell-hook-settings",
+            status="passed",
+            scope="rejected-in-browser",
+            requirement="Keep shell-hook execution and hook-bypass settings out of the browser API.",
+            evidence="docs/upstream-feature-parity.md",
+        ),
+        ReleaseGate(
+            name="browser:service-transport-shutdown",
+            status="passed",
+            scope="implemented-sse-contract",
+            requirement="Document shutdown policy for the implemented SSE/polling service transport.",
+            evidence="docs/browser-parity.md",
+        ),
+    )
+
+
+def _release_gate_counts(gates: tuple[ReleaseGate, ...]) -> dict[str, int]:
+    counts = Counter(gate.status for gate in gates)
+    return {
+        "passed": counts.get("passed", 0),
+        "required": counts.get("required", 0),
+        "not_applicable": counts.get("not_applicable", 0),
+        "total": len(gates),
+    }
+
+
+def _release_gate_to_dict(gate: ReleaseGate) -> dict[str, Any]:
+    return {
+        "name": gate.name,
+        "status": gate.status,
+        "scope": gate.scope,
+        "requirement": gate.requirement,
+        "evidence": gate.evidence,
+    }

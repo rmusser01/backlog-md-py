@@ -6,6 +6,7 @@ def test_compatibility_report_summarizes_inventory_statuses():
     report = build_compatibility_report(load_builtin_inventory())
 
     assert report["agent_cutover_ready"] is True
+    assert report["full_browser_release_ready"] is False
     assert report["summary"] == {
         "implemented": 100,
         "deferred": 0,
@@ -40,6 +41,12 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "implemented": 4,
         "deferred": 0,
         "total": 4,
+    }
+    assert report["release_gates"]["summary"] == {
+        "passed": 2,
+        "required": 2,
+        "not_applicable": 1,
+        "total": 5,
     }
 
 
@@ -120,3 +127,18 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
         "browser SSE shutdown event and client transport teardown policy"
     )
     assert "git:hook-bypass" not in deferred_by_name
+
+
+def test_compatibility_report_separates_release_validation_from_feature_counts():
+    report = build_compatibility_report(load_builtin_inventory())
+
+    gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
+
+    assert report["summary"]["implemented"] == 100
+    assert report["summary"]["deferred"] == 0
+    assert report["full_browser_release_ready"] is False
+    assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
+    assert gates_by_name["browser:desktop-mobile-screenshot-release-check"]["status"] == "required"
+    assert gates_by_name["browser:complex-wysiwyg-round-trip"]["status"] == "not_applicable"
+    assert gates_by_name["browser:shell-hook-settings"]["status"] == "passed"
+    assert gates_by_name["browser:shell-hook-settings"]["scope"] == "rejected-in-browser"
