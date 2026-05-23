@@ -19,6 +19,8 @@
   dependencies.
 - Add a TUI dependency shortcut to jump to the selected task's first visible
   dependency.
+- Make repeated TUI dependency jumps cycle through additional visible
+  dependencies for the same source task.
 - Add a TUI dependent shortcut to jump to the first visible task that depends
   on the selection.
 - Make repeated TUI dependent jumps cycle through additional visible dependents

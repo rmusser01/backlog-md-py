@@ -153,10 +153,11 @@ The TUI is a board workspace:
 - Dependency display is informational: task cards and the inspector may show
   done/open/missing dependency counts from the current snapshot, but dependency
   state does not block movement in this slice. The dependency shortcut selects
-  the first listed dependency that is visible in the current filtered board,
-  and the dependent shortcut selects the first visible task that depends on the
-  selected task. Repeating the dependent shortcut cycles through the remaining
-  visible dependents for the same source task.
+  the first listed dependency that is visible in the current filtered board and
+  then cycles through remaining visible dependencies for the same source task.
+  The dependent shortcut selects the first visible task that depends on the
+  selected task and then cycles through the remaining visible dependents for the
+  same source task.
 
 Primary bindings:
 
@@ -164,7 +165,8 @@ Primary bindings:
   navigation aliases.
 - `shift+h` and `shift+l` move the selected task to the adjacent status through
   the same mutation path used by the move dialog.
-- `d` jumps to the selected task's first visible dependency.
+- `d` jumps to the selected task's first visible dependency, then cycles through
+  additional visible dependencies.
 - `shift+d` jumps to the first visible task that depends on the selection, then
   cycles through additional visible dependents.
 - Mouse clicks select cards and activate visible controls where practical.

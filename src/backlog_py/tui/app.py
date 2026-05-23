@@ -93,6 +93,7 @@ class BacklogTuiApp(App[None]):
         self.deferred_refresh = False
         self.deferred_snapshot: BoardSnapshot | None = None
         self.reselect_task_id: str | None = None
+        self.dependency_jump_source_task_id: str | None = None
         self.dependent_jump_source_task_id: str | None = None
         self.editor_runner = editor_runner or default_editor_runner
 
@@ -456,20 +457,36 @@ class BacklogTuiApp(App[None]):
         task = self._selected_task()
         if task is None or self.visible_snapshot is None:
             return
-        if not task.dependencies:
-            self.notify(f"{task.id} has no dependencies", severity="information")
+        visible_tasks = self._visible_tasks_in_order()
+        by_id = {item.id.casefold(): item for item in visible_tasks}
+        source_task = task
+        if self.dependency_jump_source_task_id is not None:
+            remembered_source = by_id.get(self.dependency_jump_source_task_id.casefold())
+            if remembered_source is not None and _task_depends_on(remembered_source, task.id):
+                source_task = remembered_source
+
+        if not source_task.dependencies:
+            self.dependency_jump_source_task_id = None
+            self.notify(f"{source_task.id} has no dependencies", severity="information")
             return
-        by_id = {
-            item.id.casefold(): item.id
-            for tasks in self.visible_snapshot.columns.values()
-            for item in tasks
-        }
-        for dependency in task.dependencies:
-            dependency_id = by_id.get(dependency.casefold())
-            if dependency_id is not None:
-                self.select_task(dependency_id)
-                return
-        self.notify(f"{task.id} dependencies are not visible on this board", severity="warning")
+
+        visible_dependencies = [
+            dependency_task
+            for dependency in source_task.dependencies
+            if (dependency_task := by_id.get(dependency.casefold())) is not None
+        ]
+        if not visible_dependencies:
+            self.dependency_jump_source_task_id = None
+            self.notify(f"{source_task.id} dependencies are not visible on this board", severity="warning")
+            return
+
+        current_index = next(
+            (index for index, dependency in enumerate(visible_dependencies) if dependency.id == task.id),
+            -1,
+        )
+        target = visible_dependencies[(current_index + 1) % len(visible_dependencies)]
+        self.dependency_jump_source_task_id = source_task.id
+        self.select_task(target.id)
 
     def _jump_to_first_visible_dependent(self) -> None:
         task = self._selected_task()
