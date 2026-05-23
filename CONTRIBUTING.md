@@ -12,7 +12,7 @@ and populate a project-local virtual environment:
 ```bash
 uv venv --python 3.13 .venv
 source .venv/bin/activate
-uv pip install -e ".[dev,mcp]"
+uv pip install -e ".[dev]"
 ```
 
 ## Validation
@@ -20,7 +20,7 @@ uv pip install -e ".[dev,mcp]"
 Run the full local gate before opening a pull request:
 
 ```bash
-uv run --extra dev --extra mcp python -m pytest tests -v
+uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
