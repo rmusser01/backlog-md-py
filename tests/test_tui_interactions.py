@@ -205,10 +205,10 @@ async def test_filter_input_accepts_vim_navigation_letters():
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause()
         await pilot.press("/")
-        await _type_text(pilot, "hjk labels")
+        await _type_text(pilot, "hjk dep labels")
         await pilot.pause()
 
-        assert app.filter_state.text == "hjk labels"
+        assert app.filter_state.text == "hjk dep labels"
 
 
 @pytest.mark.asyncio

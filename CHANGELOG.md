@@ -17,6 +17,8 @@
 - Add Vim-style TUI navigation aliases and direct adjacent-status task moves.
 - Show TUI dependency status counts for done, open, and missing task
   dependencies.
+- Add a TUI dependency shortcut to jump to the selected task's first visible
+  dependency.
 
 ### Validation
 

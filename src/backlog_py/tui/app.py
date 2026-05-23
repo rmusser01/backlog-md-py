@@ -66,6 +66,7 @@ class BacklogTuiApp(App[None]):
         Binding("n", "create_task", "New"),
         Binding("a", "archive_task", "Archive"),
         Binding("e", "edit_task", "Edit"),
+        Binding("d", "jump_to_dependency", "Dependency"),
         Binding("enter", "focus_inspector", "Detail"),
     ]
 
@@ -207,6 +208,9 @@ class BacklogTuiApp(App[None]):
 
     def action_move_task_left(self) -> None:
         self._move_selected_task_to_adjacent_status(-1)
+
+    def action_jump_to_dependency(self) -> None:
+        self._jump_to_first_known_dependency()
 
     def key_right(self) -> None:
         self.action_cursor_right()
@@ -442,6 +446,25 @@ class BacklogTuiApp(App[None]):
             reselect_task_id=task.id,
             name="mutation:move",
         )
+
+    def _jump_to_first_known_dependency(self) -> None:
+        task = self._selected_task()
+        if task is None or self.visible_snapshot is None:
+            return
+        if not task.dependencies:
+            self.notify(f"{task.id} has no dependencies", severity="information")
+            return
+        by_id = {
+            item.id.casefold(): item.id
+            for tasks in self.visible_snapshot.columns.values()
+            for item in tasks
+        }
+        for dependency in task.dependencies:
+            dependency_id = by_id.get(dependency.casefold())
+            if dependency_id is not None:
+                self.select_task(dependency_id)
+                return
+        self.notify(f"{task.id} dependencies are not visible on this board", severity="warning")
 
     @staticmethod
     def _first_selection(snapshot: BoardSnapshot) -> SelectionState:
