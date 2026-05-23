@@ -106,8 +106,8 @@ visible dependency; repeated `d` presses cycle through additional visible
 dependencies for the same source task. Press `shift+d` to jump to the first
 visible task that depends on the selection; repeated `shift+d` presses cycle
 through additional visible dependents for the same source task. It
-opportunistically uses an already-healthy singleton daemon, but it never starts
-one.
+keeps a dependency-navigation history on `backspace`. It opportunistically uses
+an already-healthy singleton daemon, but it never starts one.
 
 ## Python API Use
 

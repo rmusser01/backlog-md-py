@@ -157,7 +157,8 @@ The TUI is a board workspace:
   then cycles through remaining visible dependencies for the same source task.
   The dependent shortcut selects the first visible task that depends on the
   selected task and then cycles through the remaining visible dependents for the
-  same source task.
+  same source task. Dependency navigation pushes the source task onto a local
+  history stack so users can return without re-finding it.
 
 Primary bindings:
 
@@ -169,6 +170,7 @@ Primary bindings:
   additional visible dependencies.
 - `shift+d` jumps to the first visible task that depends on the selection, then
   cycles through additional visible dependents.
+- `backspace` returns through dependency navigation history.
 - Mouse clicks select cards and activate visible controls where practical.
 - Enter focuses/expands the right-side inspector for the selected task. The
   first slice should not add a separate detail screen or modal unless later

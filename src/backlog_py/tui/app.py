@@ -68,6 +68,7 @@ class BacklogTuiApp(App[None]):
         Binding("e", "edit_task", "Edit"),
         Binding("d", "jump_to_dependency", "Dependency"),
         Binding("shift+d", "jump_to_dependent", "Dependent"),
+        Binding("backspace", "jump_back", "Back"),
         Binding("enter", "focus_inspector", "Detail"),
     ]
 
@@ -95,6 +96,7 @@ class BacklogTuiApp(App[None]):
         self.reselect_task_id: str | None = None
         self.dependency_jump_source_task_id: str | None = None
         self.dependent_jump_source_task_id: str | None = None
+        self.jump_history: list[str] = []
         self.editor_runner = editor_runner or default_editor_runner
 
     @property
@@ -217,6 +219,9 @@ class BacklogTuiApp(App[None]):
 
     def action_jump_to_dependent(self) -> None:
         self._jump_to_first_visible_dependent()
+
+    def action_jump_back(self) -> None:
+        self._jump_back()
 
     def key_right(self) -> None:
         self.action_cursor_right()
@@ -486,6 +491,7 @@ class BacklogTuiApp(App[None]):
         )
         target = visible_dependencies[(current_index + 1) % len(visible_dependencies)]
         self.dependency_jump_source_task_id = source_task.id
+        self._record_jump_source(source_task.id, target.id)
         self.select_task(target.id)
 
     def _jump_to_first_visible_dependent(self) -> None:
@@ -513,7 +519,29 @@ class BacklogTuiApp(App[None]):
         current_index = next((index for index, candidate in enumerate(dependents) if candidate.id == task.id), -1)
         target = dependents[(current_index + 1) % len(dependents)]
         self.dependent_jump_source_task_id = source_task.id
+        self._record_jump_source(source_task.id, target.id)
         self.select_task(target.id)
+
+    def _record_jump_source(self, source_task_id: str, target_task_id: str) -> None:
+        if source_task_id != target_task_id:
+            self.jump_history.append(source_task_id)
+
+    def _jump_back(self) -> None:
+        while self.jump_history:
+            task_id = self.jump_history.pop()
+            if self._visible_task_id(task_id) is not None:
+                self.dependency_jump_source_task_id = None
+                self.dependent_jump_source_task_id = None
+                self.select_task(task_id)
+                return
+        self.notify("No dependency navigation history", severity="information")
+
+    def _visible_task_id(self, task_id: str) -> str | None:
+        folded_task_id = task_id.casefold()
+        for task in self._visible_tasks_in_order():
+            if task.id.casefold() == folded_task_id:
+                return task.id
+        return None
 
     def _visible_tasks_in_order(self) -> tuple[TaskView, ...]:
         if self.visible_snapshot is None:

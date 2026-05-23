@@ -25,6 +25,7 @@
   on the selection.
 - Make repeated TUI dependent jumps cycle through additional visible dependents
   for the same source task.
+- Add TUI dependency-navigation history with `backspace`.
 
 ### Validation
 

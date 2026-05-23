@@ -102,8 +102,9 @@ Vim-style aliases, and `shift+h` / `shift+l` move the selected task to the
 adjacent status. Press `d` to jump to the selected task's first visible
 dependency; repeat `d` to cycle through additional visible dependencies. Press
 `shift+d` to jump to the first visible task that depends on the selection;
-repeat `shift+d` to cycle through additional visible dependents. The plain CLI
-and MCP tools remain the recommended automation surfaces.
+repeat `shift+d` to cycle through additional visible dependents. Press
+`backspace` to return through dependency navigation history. The plain CLI and
+MCP tools remain the recommended automation surfaces.
 
 ## MCP And Multi-Agent Use
 
