@@ -158,7 +158,9 @@ The TUI is a board workspace:
   The dependent shortcut selects the first visible task that depends on the
   selected task and then cycles through the remaining visible dependents for the
   same source task. Dependency navigation pushes the source task onto a local
-  history stack so users can return without re-finding it.
+  history stack so users can return without re-finding it. Manual task
+  selection resets dependency/dependent cycle source state so subsequent jumps
+  start from the newly selected task.
 
 Primary bindings:
 

@@ -186,6 +186,10 @@ class BacklogTuiApp(App[None]):
         await self.query_one(BoardScreen).render_snapshot(self.visible_snapshot, self.selection, self.filter_state)
 
     def select_task(self, task_id: str) -> None:
+        self._clear_jump_cycle_sources()
+        self._select_task(task_id)
+
+    def _select_task(self, task_id: str) -> None:
         if self.visible_snapshot is None:
             return
         for status in self.visible_snapshot.statuses:
@@ -492,7 +496,7 @@ class BacklogTuiApp(App[None]):
         target = visible_dependencies[(current_index + 1) % len(visible_dependencies)]
         self.dependency_jump_source_task_id = source_task.id
         self._record_jump_source(source_task.id, target.id)
-        self.select_task(target.id)
+        self._select_task(target.id)
 
     def _jump_to_first_visible_dependent(self) -> None:
         task = self._selected_task()
@@ -520,7 +524,7 @@ class BacklogTuiApp(App[None]):
         target = dependents[(current_index + 1) % len(dependents)]
         self.dependent_jump_source_task_id = source_task.id
         self._record_jump_source(source_task.id, target.id)
-        self.select_task(target.id)
+        self._select_task(target.id)
 
     def _record_jump_source(self, source_task_id: str, target_task_id: str) -> None:
         if source_task_id != target_task_id:
@@ -530,11 +534,14 @@ class BacklogTuiApp(App[None]):
         while self.jump_history:
             task_id = self.jump_history.pop()
             if self._visible_task_id(task_id) is not None:
-                self.dependency_jump_source_task_id = None
-                self.dependent_jump_source_task_id = None
-                self.select_task(task_id)
+                self._clear_jump_cycle_sources()
+                self._select_task(task_id)
                 return
         self.notify("No dependency navigation history", severity="information")
+
+    def _clear_jump_cycle_sources(self) -> None:
+        self.dependency_jump_source_task_id = None
+        self.dependent_jump_source_task_id = None
 
     def _visible_task_id(self, task_id: str) -> str | None:
         folded_task_id = task_id.casefold()

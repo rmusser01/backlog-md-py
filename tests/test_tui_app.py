@@ -260,6 +260,46 @@ async def test_back_shortcut_returns_from_dependency_jump_source():
         assert pilot.app.selected_task_id == "TASK-2"
 
 
+async def test_manual_selection_resets_dependency_cycle_source():
+    first_dependency = _task_view("TASK-1", "First dependency", "Done")
+    second_dependency = _task_view("TASK-2", "Second dependency", "In Progress", dependencies=("TASK-4",))
+    nested_dependency = _task_view("TASK-4", "Nested dependency", "Done")
+    dependent = _task_view(
+        "TASK-3",
+        "Dependent task",
+        "To Do",
+        dependencies=("TASK-1", "TASK-2"),
+    )
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={
+            "To Do": (dependent,),
+            "In Progress": (second_dependency,),
+            "Done": (first_dependency, nested_dependency),
+        },
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-3"
+
+        await pilot.press("d")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-1"
+
+        pilot.app.select_task("TASK-2")
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.pause()
+
+        assert pilot.app.selected_task_id == "TASK-4"
+
+
 async def test_dependent_shortcut_jumps_to_first_visible_dependent():
     dependency = _task_view("TASK-1", "Shared dependency", "Done")
     first_dependent = _task_view(
@@ -376,6 +416,43 @@ async def test_back_shortcut_returns_from_dependent_jump_source():
         await pilot.press("backspace")
         await pilot.pause()
         assert pilot.app.selected_task_id == "TASK-1"
+
+
+async def test_manual_selection_resets_dependent_cycle_source():
+    dependency = _task_view("TASK-1", "Dependency", "Done")
+    first_dependent = _task_view("TASK-2", "First dependent", "In Progress", dependencies=("TASK-1",))
+    second_dependent = _task_view("TASK-3", "Second dependent", "To Do", dependencies=("TASK-1",))
+    nested_dependent = _task_view("TASK-4", "Nested dependent", "Done", dependencies=("TASK-3",))
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={
+            "To Do": (second_dependent,),
+            "In Progress": (first_dependent,),
+            "Done": (dependency, nested_dependent),
+        },
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        pilot.app.select_task("TASK-1")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-1"
+
+        await pilot.press("shift+d")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-3"
+
+        pilot.app.select_task("TASK-3")
+        await pilot.pause()
+        await pilot.press("shift+d")
+        await pilot.pause()
+
+        assert pilot.app.selected_task_id == "TASK-4"
 
 
 def _project() -> BacklogProject:
