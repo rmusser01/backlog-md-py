@@ -27,6 +27,8 @@
   for the same source task.
 - Add TUI dependency-navigation history with `backspace`.
 - Reset TUI dependency-cycle state after manual task selection.
+- Avoid duplicate TUI dependency-navigation history entries during repeated
+  cycles.
 
 ### Validation
 

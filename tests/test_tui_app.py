@@ -229,6 +229,34 @@ async def test_dependency_shortcut_cycles_through_visible_dependencies():
         assert pilot.app.selected_task_id == "TASK-2"
 
 
+async def test_dependency_cycle_records_source_once_in_jump_history():
+    first_dependency = _task_view("TASK-1", "First dependency", "Done")
+    second_dependency = _task_view("TASK-2", "Second dependency", "In Progress")
+    dependent = _task_view(
+        "TASK-3",
+        "Dependent task",
+        "To Do",
+        dependencies=("TASK-1", "TASK-2"),
+    )
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (dependent,), "In Progress": (second_dependency,), "Done": (first_dependency,)},
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.press("d")
+        await pilot.pause()
+
+        assert pilot.app.jump_history == ["TASK-3"]
+
+
 async def test_back_shortcut_returns_from_dependency_jump_source():
     dependency = _task_view("TASK-1", "Dependency", "Done")
     dependent = _task_view(
@@ -383,6 +411,35 @@ async def test_dependent_shortcut_cycles_through_visible_dependents():
         await pilot.press("shift+d")
         await pilot.pause()
         assert pilot.app.selected_task_id == "TASK-2"
+
+
+async def test_dependent_cycle_records_source_once_in_jump_history():
+    dependency = _task_view("TASK-1", "Shared dependency", "Done")
+    first_dependent = _task_view("TASK-2", "First dependent", "In Progress", dependencies=("TASK-1",))
+    second_dependent = _task_view("TASK-3", "Second dependent", "To Do", dependencies=("TASK-1",))
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={
+            "To Do": (second_dependent,),
+            "In Progress": (first_dependent,),
+            "Done": (dependency,),
+        },
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        pilot.app.select_task("TASK-1")
+        await pilot.pause()
+        await pilot.press("shift+d")
+        await pilot.press("shift+d")
+        await pilot.pause()
+
+        assert pilot.app.jump_history == ["TASK-1"]
 
 
 async def test_back_shortcut_returns_from_dependent_jump_source():

@@ -527,7 +527,7 @@ class BacklogTuiApp(App[None]):
         self._select_task(target.id)
 
     def _record_jump_source(self, source_task_id: str, target_task_id: str) -> None:
-        if source_task_id != target_task_id:
+        if source_task_id != target_task_id and (not self.jump_history or self.jump_history[-1] != source_task_id):
             self.jump_history.append(source_task_id)
 
     def _jump_back(self) -> None:
