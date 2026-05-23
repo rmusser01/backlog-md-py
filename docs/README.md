@@ -24,6 +24,14 @@ validating, or contributing to `backlog-md-py`.
 - [Cutover validation result](cutover-validation-results-2026-05-13.md): the
   first completed agent-critical validation record.
 
+## Check Release Status
+
+- [Stability policy](stability-policy.md): the beta supported contract, change
+  policy, compatibility baseline, and release gate.
+- [Beta release readiness](release-readiness-beta-2026-05-23.md): the 0.2.0
+  beta promotion checklist and validation record.
+- [Changelog](../CHANGELOG.md): release notes by package version.
+
 ## Understand Parity Or Release Readiness
 
 - [Agent-critical parity](agent-critical-parity.md): the local-file CLI, MCP,
