@@ -102,8 +102,9 @@ HTTP/MCP path because those surfaces are deterministic and easier to parse. The
 TUI supports arrows plus `h/j/k/l` for navigation, `shift+h` / `shift+l` for
 adjacent-status moves, and dependency status display for known, open, and
 missing dependencies. Press `d` to jump from the selected task to its first
-visible dependency. It opportunistically uses an already-healthy singleton
-daemon, but it never starts one.
+visible dependency, or `shift+d` to jump to the first visible task that depends
+on the selection. It opportunistically uses an already-healthy singleton daemon,
+but it never starts one.
 
 ## Python API Use
 

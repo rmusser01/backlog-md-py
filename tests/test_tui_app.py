@@ -197,6 +197,47 @@ async def test_dependency_shortcut_jumps_to_first_known_dependency():
         assert pilot.app.selected_task_id == "TASK-2"
 
 
+async def test_dependent_shortcut_jumps_to_first_visible_dependent():
+    dependency = _task_view("TASK-1", "Shared dependency", "Done")
+    first_dependent = _task_view(
+        "TASK-2",
+        "First dependent",
+        "In Progress",
+        dependencies=("task-1",),
+    )
+    second_dependent = _task_view(
+        "TASK-3",
+        "Second dependent",
+        "To Do",
+        dependencies=("TASK-1",),
+    )
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={
+            "To Do": (second_dependent,),
+            "In Progress": (first_dependent,),
+            "Done": (dependency,),
+        },
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("right")
+        await pilot.press("right")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-1"
+
+        await pilot.press("shift+d")
+        await pilot.pause()
+
+        assert pilot.app.selected_task_id == "TASK-3"
+
+
 def _project() -> BacklogProject:
     root = Path("/tmp/backlog-tui-demo")
     return BacklogProject(

@@ -19,6 +19,8 @@
   dependencies.
 - Add a TUI dependency shortcut to jump to the selected task's first visible
   dependency.
+- Add a TUI dependent shortcut to jump to the first visible task that depends
+  on the selection.
 
 ### Validation
 

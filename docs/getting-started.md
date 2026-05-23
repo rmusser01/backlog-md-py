@@ -100,7 +100,8 @@ dependency visibility, filters, create/move/archive actions, and
 configured-editor launch. Arrow keys move the selection, `h/j/k/l` provide
 Vim-style aliases, and `shift+h` / `shift+l` move the selected task to the
 adjacent status. Press `d` to jump to the selected task's first visible
-dependency. The plain CLI and MCP tools remain the recommended automation
+dependency, or `shift+d` to jump to the first visible task that depends on the
+selection. The plain CLI and MCP tools remain the recommended automation
 surfaces.
 
 ## MCP And Multi-Agent Use
