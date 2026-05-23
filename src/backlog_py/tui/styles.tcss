@@ -68,6 +68,10 @@ BacklogTuiApp {
     margin-bottom: 1;
 }
 
+.task-card.blocked {
+    border-left: thick $warning;
+}
+
 .task-card.selected {
     background: $accent;
     color: $text;

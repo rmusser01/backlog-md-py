@@ -168,6 +168,32 @@ async def test_dependency_state_is_visible_on_card_and_inspector():
         assert "Missing Dependencies: TASK-99" in inspector
 
 
+async def test_blocked_dependency_card_is_styleable():
+    done = _task_view("TASK-1", "Done dependency", "Done")
+    open_task = _task_view("TASK-2", "Open dependency", "In Progress")
+    dependent = _task_view(
+        "TASK-3",
+        "Dependent task",
+        "To Do",
+        dependencies=("TASK-1", "TASK-2"),
+    )
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (dependent,), "In Progress": (open_task,), "Done": (done,)},
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+
+        assert pilot.app.query_one("#task-card-TASK-3").has_class("blocked")
+        assert not pilot.app.query_one("#task-card-TASK-1").has_class("blocked")
+
+
 async def test_dependency_shortcut_jumps_to_first_known_dependency():
     done = _task_view("TASK-1", "Done dependency", "Done")
     open_task = _task_view("TASK-2", "Open dependency", "In Progress")

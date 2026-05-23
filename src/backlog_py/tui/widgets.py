@@ -64,6 +64,8 @@ class FilterBar(Static):
 class TaskCard(Static):
     def __init__(self, task: TaskView, *, selected: bool, dependency_state: DependencyState | None = None) -> None:
         classes = "task-card"
+        if dependency_state is not None and dependency_state.is_blocked:
+            classes = f"{classes} blocked"
         if selected:
             classes = f"{classes} selected"
         super().__init__(
