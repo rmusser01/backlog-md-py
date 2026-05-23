@@ -212,6 +212,37 @@ async def test_filter_input_accepts_vim_navigation_letters():
 
 
 @pytest.mark.asyncio
+async def test_filter_input_backspace_edits_text_instead_of_jump_history():
+    dependency = _task_view("TASK-1", "Dependency", "Done")
+    dependent = _task_view("TASK-2", "Dependent", "To Do", dependencies=("TASK-1",))
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "Done"),
+        columns={"To Do": (dependent,), "Done": (dependency,)},
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_MutableSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.pause()
+        assert app.selected_task_id == "TASK-1"
+        assert app.jump_history == ["TASK-2"]
+
+        await pilot.press("/")
+        await _type_text(pilot, "TASK-1")
+        await pilot.press("backspace")
+        await pilot.pause()
+
+        assert app.filter_state.text == "TASK-"
+        assert app.selected_task_id == "TASK-1"
+        assert app.jump_history == ["TASK-2"]
+
+
+@pytest.mark.asyncio
 async def test_metadata_filter_controls_limit_visible_cards():
     source = _MutableSource(_snapshot_with_two_tasks())
     app = BacklogTuiApp(project=_project(), data_source=source)
@@ -279,6 +310,7 @@ def _task_view(
     *,
     priority: str | None = None,
     assignees: tuple[str, ...] = (),
+    dependencies: tuple[str, ...] = (),
     raw_source: str | None = None,
 ) -> TaskView:
     return TaskView(
@@ -289,6 +321,7 @@ def _task_view(
         path=Path(f"backlog/tasks/{task_id.lower()}.md"),
         priority=priority,
         assignees=assignees,
+        dependencies=dependencies,
         raw_source=raw_source,
     )
 
