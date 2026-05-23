@@ -37,6 +37,43 @@ async def test_keyboard_selection_moves_between_cards_and_columns():
         assert pilot.app.selected_task_id == "TASK-2"
 
 
+async def test_vim_navigation_aliases_move_between_cards_and_columns():
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={
+            "To Do": (
+                _task_view("TASK-1", "First", "To Do"),
+                _task_view("TASK-2", "Second", "To Do"),
+            ),
+            "In Progress": (_task_view("TASK-3", "Third", "In Progress"),),
+            "Done": (),
+        },
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("j")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-2"
+
+        await pilot.press("k")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-1"
+
+        await pilot.press("l")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-3"
+
+        await pilot.press("h")
+        await pilot.pause()
+        assert pilot.app.selected_task_id == "TASK-1"
+
+
 async def test_mouse_click_selects_task_card_where_headless_textual_supports_it():
     app = BacklogTuiApp(project=_project(), data_source=_StaticSource(_snapshot()))
 

@@ -54,6 +54,12 @@ class BacklogTuiApp(App[None]):
         Binding("right", "cursor_right", "Right"),
         Binding("up", "cursor_up", "Up"),
         Binding("down", "cursor_down", "Down"),
+        Binding("h", "cursor_left", "Left", show=False),
+        Binding("l", "cursor_right", "Right", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("shift+h", "move_task_left", "Move Left"),
+        Binding("shift+l", "move_task_right", "Move Right"),
         Binding("r", "refresh", "Refresh"),
         Binding("/", "focus_filter", "Filter"),
         Binding("m", "move_task", "Move"),
@@ -196,6 +202,12 @@ class BacklogTuiApp(App[None]):
     def action_cursor_up(self) -> None:
         self._move_rows(-1)
 
+    def action_move_task_right(self) -> None:
+        self._move_selected_task_to_adjacent_status(1)
+
+    def action_move_task_left(self) -> None:
+        self._move_selected_task_to_adjacent_status(-1)
+
     def key_right(self) -> None:
         self.action_cursor_right()
 
@@ -209,6 +221,8 @@ class BacklogTuiApp(App[None]):
         self.action_cursor_up()
 
     def on_key(self, event: events.Key) -> None:
+        if isinstance(self.focused, Input):
+            return
         if event.key == "right":
             self.action_cursor_right()
             event.stop()
@@ -408,6 +422,26 @@ class BacklogTuiApp(App[None]):
         row = min(max(self.selection.row + delta, 0), len(tasks) - 1)
         self.selection = SelectionState(task_id=tasks[row].id, status=self.selection.status, row=row)
         self.call_later(self._render_board)
+
+    def _move_selected_task_to_adjacent_status(self, delta: int) -> None:
+        task = self._selected_task()
+        if task is None or self.snapshot is None:
+            return
+        statuses = move_status_choices(self.project, self.snapshot.statuses)
+        try:
+            current_index = statuses.index(task.status)
+        except ValueError:
+            self.notify(f"{task.id} has unknown status: {task.status}", severity="warning")
+            return
+        target_index = current_index + delta
+        if target_index < 0 or target_index >= len(statuses):
+            return
+        target_status = statuses[target_index]
+        self._run_mutation(
+            lambda: self.data_source.move_task(task.id, target_status),
+            reselect_task_id=task.id,
+            name="mutation:move",
+        )
 
     @staticmethod
     def _first_selection(snapshot: BoardSnapshot) -> SelectionState:

@@ -26,6 +26,40 @@ async def test_move_dialog_updates_selected_task_status():
 
 
 @pytest.mark.asyncio
+async def test_shift_l_moves_selected_task_to_next_status_without_dialog():
+    source = _MutableSource(_snapshot())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("shift+l")
+        await pilot.pause()
+
+        assert source.moves == [("TASK-1", "In Progress")]
+        assert app.snapshot.columns["In Progress"][0].id == "TASK-1"
+        assert app.selected_task_id == "TASK-1"
+
+
+@pytest.mark.asyncio
+async def test_shift_h_moves_selected_task_to_previous_status_without_dialog():
+    source = _MutableSource(_snapshot_with_two_tasks())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("l")
+        await pilot.pause()
+        assert app.selected_task_id == "TASK-2"
+
+        await pilot.press("shift+h")
+        await pilot.pause()
+
+        assert source.moves == [("TASK-2", "To Do")]
+        assert app.snapshot.columns["To Do"][-1].id == "TASK-2"
+        assert app.selected_task_id == "TASK-2"
+
+
+@pytest.mark.asyncio
 async def test_create_dialog_creates_task_with_first_slice_fields():
     source = _MutableSource(_snapshot())
     app = BacklogTuiApp(project=_project(), data_source=source)
@@ -161,6 +195,20 @@ async def test_text_filter_limits_visible_cards_without_raw_markdown_match():
 
         assert pilot.app.query("#task-card-TASK-1").nodes == []
         assert pilot.app.query_one("#task-card-TASK-2")
+
+
+@pytest.mark.asyncio
+async def test_filter_input_accepts_vim_navigation_letters():
+    source = _MutableSource(_snapshot_with_two_tasks())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await _type_text(pilot, "hjk labels")
+        await pilot.pause()
+
+        assert app.filter_state.text == "hjk labels"
 
 
 @pytest.mark.asyncio

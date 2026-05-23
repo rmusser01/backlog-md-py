@@ -96,8 +96,10 @@ backlog-py --cwd /path/to/project tui
 ```
 
 Use it for human board work when you want keyboard navigation, task detail,
-filters, create/move/archive actions, and configured-editor launch. The plain
-CLI and MCP tools remain the recommended automation surfaces.
+filters, create/move/archive actions, and configured-editor launch. Arrow keys
+move the selection, `h/j/k/l` provide Vim-style aliases, and `shift+h` /
+`shift+l` move the selected task to the adjacent status. The plain CLI and MCP
+tools remain the recommended automation surfaces.
 
 ## MCP And Multi-Agent Use
 

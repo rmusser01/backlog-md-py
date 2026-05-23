@@ -153,7 +153,10 @@ The TUI is a board workspace:
 
 Primary bindings:
 
-- Arrow keys move between cards and columns.
+- Arrow keys move between cards and columns. `h/j/k/l` provide Vim-style
+  navigation aliases.
+- `shift+h` and `shift+l` move the selected task to the adjacent status through
+  the same mutation path used by the move dialog.
 - Mouse clicks select cards and activate visible controls where practical.
 - Enter focuses/expands the right-side inspector for the selected task. The
   first slice should not add a separate detail screen or modal unless later

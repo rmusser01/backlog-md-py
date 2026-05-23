@@ -99,8 +99,9 @@ for your target project is satisfied and the aliasing decision is explicit.
 `backlog-py tui` is a human-facing Textual interface for keyboard board work.
 Agents and scripts should keep using plain CLI output, MCP tools, or the daemon
 HTTP/MCP path because those surfaces are deterministic and easier to parse. The
-TUI opportunistically uses an already-healthy singleton daemon, but it never
-starts one.
+TUI supports arrows plus `h/j/k/l` for navigation, `shift+h` / `shift+l` for
+adjacent-status moves, and opportunistically uses an already-healthy singleton
+daemon, but it never starts one.
 
 ## Python API Use
 

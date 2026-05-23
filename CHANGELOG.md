@@ -14,6 +14,7 @@
   GitHub commits.
 - Add an optional Textual Kanban board through `backlog-py tui` behind the
   `tui` extra.
+- Add Vim-style TUI navigation aliases and direct adjacent-status task moves.
 
 ### Validation
 
