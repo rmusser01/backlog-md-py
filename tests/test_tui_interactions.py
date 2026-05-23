@@ -264,6 +264,28 @@ async def test_filter_input_escape_clears_filter_and_returns_board_focus():
 
 
 @pytest.mark.asyncio
+async def test_filter_input_escape_keeps_selection_from_filtered_view():
+    source = _MutableSource(_snapshot_with_two_tasks())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await _type_text(pilot, "second")
+        await pilot.pause()
+        assert app.selected_task_id == "TASK-2"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert app.filter_state.text == ""
+        assert app.selected_task_id == "TASK-2"
+        assert pilot.app.query_one("#task-card-TASK-1")
+        assert pilot.app.query_one("#task-card-TASK-2")
+        assert pilot.app.focused is pilot.app.query_one("#board-columns")
+
+
+@pytest.mark.asyncio
 async def test_metadata_filter_controls_limit_visible_cards():
     source = _MutableSource(_snapshot_with_two_tasks())
     app = BacklogTuiApp(project=_project(), data_source=source)
