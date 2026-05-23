@@ -1,7 +1,5 @@
 import json
 import shutil
-import sys
-import types
 from pathlib import Path
 
 import click
@@ -117,14 +115,17 @@ def test_tui_command_without_extra_shows_install_hint(monkeypatch):
     assert "Install with backlog-md-py[tui]" in result.output
 
 
-def test_tui_command_wraps_placeholder_runtime_error_when_extra_is_installed(monkeypatch):
-    monkeypatch.setitem(sys.modules, "textual", types.ModuleType("textual"))
+def test_tui_command_invokes_implemented_tui_app(monkeypatch):
+    from backlog_py.cli import main as cli_main
+    from backlog_py.tui import app as tui_app
+
+    calls = []
+    monkeypatch.setattr(tui_app.BacklogTuiApp, "run", lambda self: calls.append(self.project.root))
 
     result = _invoke("tui")
 
-    assert result.exit_code != 0
-    assert isinstance(result.exception, SystemExit)
-    assert "Textual TUI app is not implemented yet." in result.output
+    assert result.exit_code == 0
+    assert calls == [FIXTURE_REPO]
 
 
 def test_task_list_plain_outputs_task_id():
