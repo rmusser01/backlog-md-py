@@ -32,7 +32,7 @@ try:
     from textual.app import App, ComposeResult, SuspendNotSupported
     from textual.binding import Binding
     from textual.widgets import Footer, Header, Input
-    from textual.worker import Worker
+    from textual.worker import Worker, WorkerFailed
 
     from backlog_py.tui.dialogs import ArchiveTaskDialog, CreateTaskDialog, EditorConfirmDialog, MoveTaskDialog
     from backlog_py.tui.screens import BoardScreen
@@ -361,7 +361,7 @@ class BacklogTuiApp(App[None]):
         )
         try:
             await worker.wait()
-        except Exception:
+        except WorkerFailed:
             pass
 
     def _run_mutation(
