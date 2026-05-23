@@ -77,6 +77,18 @@ class CreateTaskInput:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class DependencyState:
+    total: int
+    complete: tuple[str, ...] = ()
+    open: tuple[str, ...] = ()
+    missing: tuple[str, ...] = ()
+
+    @property
+    def is_blocked(self) -> bool:
+        return bool(self.open or self.missing)
+
+
 def checklist_items_from_parsed(parsed: ParsedTaskMarkdown, name: str) -> tuple[ChecklistItemView, ...]:
     return tuple(
         ChecklistItemView(item_id=item.item_id, text=item.text, checked=item.checked)
@@ -187,6 +199,42 @@ def create_status_choices(project: BacklogProject, board_statuses: Sequence[str]
     return tuple(statuses)
 
 
+def dependency_states(snapshot: BoardSnapshot) -> Mapping[str, DependencyState]:
+    return {
+        task.id: dependency_state_for_task(snapshot, task)
+        for tasks in snapshot.columns.values()
+        for task in tasks
+        if task.dependencies
+    }
+
+
+def dependency_state_for_task(snapshot: BoardSnapshot, task: TaskView) -> DependencyState:
+    if not task.dependencies:
+        return DependencyState(total=0)
+    by_id = {
+        item.id.casefold(): item
+        for tasks in snapshot.columns.values()
+        for item in tasks
+    }
+    complete: list[str] = []
+    open_dependencies: list[str] = []
+    missing: list[str] = []
+    for dependency in task.dependencies:
+        dependency_task = by_id.get(dependency.casefold())
+        if dependency_task is None:
+            missing.append(dependency)
+        elif _is_complete_dependency_status(dependency_task.status):
+            complete.append(dependency)
+        else:
+            open_dependencies.append(dependency)
+    return DependencyState(
+        total=len(task.dependencies),
+        complete=tuple(complete),
+        open=tuple(open_dependencies),
+        missing=tuple(missing),
+    )
+
+
 def select_after_refresh(
     previous: BoardSnapshot,
     current: BoardSnapshot,
@@ -238,6 +286,10 @@ def _optional_string(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _is_complete_dependency_status(status: str) -> bool:
+    return status.strip().casefold() in {"done", "complete", "completed", "archived"}
 
 
 def _payload_checklist(value: object) -> tuple[ChecklistItemView, ...]:

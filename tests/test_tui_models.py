@@ -7,6 +7,7 @@ import yaml
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.storage.project import discover_project
+from backlog_py.tui import models as tui_models
 from backlog_py.tui.models import (
     BoardSnapshot,
     FilterState,
@@ -153,6 +154,33 @@ def test_filter_snapshot_matches_normalized_fields_without_raw_markdown_body():
     assert filter_snapshot(snapshot, FilterState(text="release 1")).columns["In Progress"] == ()
     assert filter_snapshot(snapshot, FilterState(text="TASK-0")).columns["In Progress"] == ()
     assert filter_snapshot(snapshot, FilterState(text="raw-only-secret")).columns["In Progress"] == ()
+
+
+def test_dependency_state_marks_complete_open_and_missing_dependencies():
+    done = _task_view("TASK-1", "Done dependency", "Done")
+    open_task = _task_view("TASK-2", "Open dependency", "In Progress")
+    dependent = _task_view(
+        "TASK-3",
+        "Dependent task",
+        "To Do",
+        dependencies=("TASK-1", "task-2", "TASK-99"),
+    )
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=Path("/tmp/demo"),
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (dependent,), "In Progress": (open_task,), "Done": (done,)},
+        source="local",
+        revision=None,
+    )
+
+    state = tui_models.dependency_state_for_task(snapshot, dependent)
+
+    assert state.total == 3
+    assert state.complete == ("TASK-1",)
+    assert state.open == ("task-2",)
+    assert state.missing == ("TASK-99",)
+    assert state.is_blocked is True
 
 
 def test_create_status_choices_include_default_status_for_unconfigured_board(tmp_path):

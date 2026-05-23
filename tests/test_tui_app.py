@@ -137,6 +137,37 @@ async def test_enter_focuses_task_inspector():
         assert pilot.app.focused is pilot.app.query_one("#task-inspector")
 
 
+async def test_dependency_state_is_visible_on_card_and_inspector():
+    done = _task_view("TASK-1", "Done dependency", "Done")
+    open_task = _task_view("TASK-2", "Open dependency", "In Progress")
+    dependent = _task_view(
+        "TASK-3",
+        "Dependent task",
+        "To Do",
+        dependencies=("TASK-1", "TASK-2", "TASK-99"),
+    )
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (dependent,), "In Progress": (open_task,), "Done": (done,)},
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+
+        card = pilot.app.query_one("#task-card-TASK-3", Static).visual.plain
+        inspector = pilot.app.query_one("#task-inspector", Static).visual.plain
+
+        assert "Deps: 1/3 done, 1 open, 1 missing" in card
+        assert "Dependency Status: 1/3 done, 1 open, 1 missing" in inspector
+        assert "Open Dependencies: TASK-2" in inspector
+        assert "Missing Dependencies: TASK-99" in inspector
+
+
 def _project() -> BacklogProject:
     root = Path("/tmp/backlog-tui-demo")
     return BacklogProject(
@@ -175,6 +206,7 @@ def _task_view(
     description: str = "",
     priority: str | None = None,
     labels: tuple[str, ...] = (),
+    dependencies: tuple[str, ...] = (),
     acceptance_criteria: tuple[ChecklistItemView, ...] = (),
     definition_of_done: tuple[ChecklistItemView, ...] = (),
 ) -> TaskView:
@@ -186,6 +218,7 @@ def _task_view(
         path=Path(f"backlog/tasks/{task_id.lower()}.md"),
         priority=priority,
         labels=labels,
+        dependencies=dependencies,
         acceptance_criteria=acceptance_criteria,
         definition_of_done=definition_of_done,
     )

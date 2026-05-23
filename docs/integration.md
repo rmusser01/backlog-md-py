@@ -100,7 +100,8 @@ for your target project is satisfied and the aliasing decision is explicit.
 Agents and scripts should keep using plain CLI output, MCP tools, or the daemon
 HTTP/MCP path because those surfaces are deterministic and easier to parse. The
 TUI supports arrows plus `h/j/k/l` for navigation, `shift+h` / `shift+l` for
-adjacent-status moves, and opportunistically uses an already-healthy singleton
+adjacent-status moves, and dependency status display for known, open, and
+missing dependencies. It opportunistically uses an already-healthy singleton
 daemon, but it never starts one.
 
 ## Python API Use

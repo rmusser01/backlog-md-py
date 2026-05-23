@@ -150,6 +150,9 @@ The TUI is a board workspace:
 - Main area: horizontally scrollable status columns on the left and a right-side
   inspector for the selected task.
 - Footer: key bindings and the current action hint.
+- Dependency display is informational: task cards and the inspector may show
+  done/open/missing dependency counts from the current snapshot, but dependency
+  state does not block movement in this slice.
 
 Primary bindings:
 

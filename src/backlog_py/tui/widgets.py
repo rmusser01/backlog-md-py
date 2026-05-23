@@ -5,7 +5,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Input, Static
 
-from backlog_py.tui.models import BoardSnapshot, FilterState, TaskView
+from backlog_py.tui.models import BoardSnapshot, DependencyState, FilterState, TaskView
 
 
 class BoardHeader(Horizontal):
@@ -28,11 +28,20 @@ class BoardHeader(Horizontal):
 
 
 class BoardColumn(VerticalScroll):
-    def __init__(self, *, status: str, tasks: tuple[TaskView, ...], selected_task_id: str | None, id: str) -> None:
+    def __init__(
+        self,
+        *,
+        status: str,
+        tasks: tuple[TaskView, ...],
+        selected_task_id: str | None,
+        dependency_states: dict[str, DependencyState],
+        id: str,
+    ) -> None:
         super().__init__(id=id, classes="board-column")
         self.status = status
         self.tasks = tasks
         self.selected_task_id = selected_task_id
+        self.dependency_states = dependency_states
 
     def compose(self) -> ComposeResult:
         yield Static(f"{self.status} ({len(self.tasks)})", classes="column-title", markup=False)
@@ -40,7 +49,11 @@ class BoardColumn(VerticalScroll):
             yield Static("No tasks", classes="empty-column", markup=False)
             return
         for task in self.tasks:
-            yield TaskCard(task, selected=task.id == self.selected_task_id)
+            yield TaskCard(
+                task,
+                selected=task.id == self.selected_task_id,
+                dependency_state=self.dependency_states.get(task.id),
+            )
 
 
 class FilterBar(Static):
@@ -49,11 +62,16 @@ class FilterBar(Static):
 
 
 class TaskCard(Static):
-    def __init__(self, task: TaskView, *, selected: bool) -> None:
+    def __init__(self, task: TaskView, *, selected: bool, dependency_state: DependencyState | None = None) -> None:
         classes = "task-card"
         if selected:
             classes = f"{classes} selected"
-        super().__init__(_task_card_text(task), id=f"task-card-{_widget_id(task.id)}", classes=classes, markup=False)
+        super().__init__(
+            _task_card_text(task, dependency_state),
+            id=f"task-card-{_widget_id(task.id)}",
+            classes=classes,
+            markup=False,
+        )
         self.task_view = task
 
     def on_click(self, event: events.Click) -> None:
@@ -62,19 +80,22 @@ class TaskCard(Static):
 
 
 class TaskInspector(Static, can_focus=True):
-    def update_task(self, task: TaskView | None) -> None:
+    def update_task(self, task: TaskView | None, dependency_state: DependencyState | None = None) -> None:
         if task is None:
             self.update("No task selected")
             return
-        self.update(_inspector_text(task))
+        self.update(_inspector_text(task, dependency_state))
 
 
-def _task_card_text(task: TaskView) -> str:
+def _task_card_text(task: TaskView, dependency_state: DependencyState | None = None) -> str:
     priority = f" [{task.priority}]" if task.priority else ""
-    return f"{task.id}{priority}\n{task.title}"
+    lines = [f"{task.id}{priority}", task.title]
+    if dependency_state is not None and dependency_state.total:
+        lines.append(f"Deps: {_dependency_summary_text(dependency_state)}")
+    return "\n".join(lines)
 
 
-def _inspector_text(task: TaskView) -> str:
+def _inspector_text(task: TaskView, dependency_state: DependencyState | None = None) -> str:
     lines = [
         f"{task.id} - {task.title}",
         f"Status: {task.status}",
@@ -90,6 +111,12 @@ def _inspector_text(task: TaskView) -> str:
         lines.append(f"Milestone: {task.milestone}")
     if task.dependencies:
         lines.append(f"Dependencies: {', '.join(task.dependencies)}")
+    if dependency_state is not None and dependency_state.total:
+        lines.append(f"Dependency Status: {_dependency_summary_text(dependency_state)}")
+        if dependency_state.open:
+            lines.append(f"Open Dependencies: {', '.join(dependency_state.open)}")
+        if dependency_state.missing:
+            lines.append(f"Missing Dependencies: {', '.join(dependency_state.missing)}")
     if task.description:
         lines.extend(["", task.description])
     if task.acceptance_criteria:
@@ -108,6 +135,15 @@ def _checklist_lines(items) -> list[str]:
         item_id = f" #{item.item_id}" if item.item_id else ""
         lines.append(f"- [{marker}]{item_id} {item.text}")
     return lines
+
+
+def _dependency_summary_text(state: DependencyState) -> str:
+    parts = [f"{len(state.complete)}/{state.total} done"]
+    if state.open:
+        parts.append(f"{len(state.open)} open")
+    if state.missing:
+        parts.append(f"{len(state.missing)} missing")
+    return ", ".join(parts)
 
 
 def _filter_summary(filters: FilterState) -> str:

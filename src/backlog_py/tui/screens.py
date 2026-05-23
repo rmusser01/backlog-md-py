@@ -4,7 +4,7 @@ from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, HorizontalScroll
 
 from backlog_py.core.models import BacklogProject
-from backlog_py.tui.models import BoardSnapshot, FilterState, SelectionState
+from backlog_py.tui.models import BoardSnapshot, FilterState, SelectionState, dependency_states
 from backlog_py.tui.widgets import BoardColumn, BoardHeader, FilterBar, TaskInspector
 
 
@@ -33,19 +33,25 @@ class BoardScreen(Container):
         column_strip = self.query_one("#board-column-strip")
         await column_strip.remove_children()
         seen: dict[str, int] = {}
+        dependency_state_by_task = dependency_states(snapshot)
         await column_strip.mount(
             *[
                 BoardColumn(
                     status=status,
                     tasks=snapshot.columns.get(status, ()),
                     selected_task_id=selection.task_id,
+                    dependency_states=dependency_state_by_task,
                     id=column_widget_id(status, seen),
                 )
                 for status in snapshot.statuses
             ]
         )
 
-        self.query_one(TaskInspector).update_task(_selected_task(snapshot, selection.task_id))
+        selected = _selected_task(snapshot, selection.task_id)
+        self.query_one(TaskInspector).update_task(
+            selected,
+            None if selected is None else dependency_state_by_task.get(selected.id),
+        )
 
 
 def widget_id(value: str) -> str:
