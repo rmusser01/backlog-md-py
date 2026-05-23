@@ -12,6 +12,8 @@
   changelog, and release-readiness evidence.
 - Keep install guidance split between released PyPI packages and unreleased
   GitHub commits.
+- Add an optional Textual Kanban board through `backlog-py tui` behind the
+  `tui` extra.
 
 ### Validation
 

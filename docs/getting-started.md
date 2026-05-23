@@ -86,6 +86,19 @@ agent-cutover gate. See
 [browser-release-validation.md](browser-release-validation.md) for the release
 evidence manifest.
 
+## Optional Textual TUI
+
+The Textual board is not part of the base install:
+
+```bash
+python -m pip install "backlog-md-py[tui]"
+backlog-py --cwd /path/to/project tui
+```
+
+Use it for human board work when you want keyboard navigation, task detail,
+filters, create/move/archive actions, and configured-editor launch. The plain
+CLI and MCP tools remain the recommended automation surfaces.
+
 ## MCP And Multi-Agent Use
 
 Run the SDK-free MCP stdio entry point directly:

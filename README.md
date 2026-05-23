@@ -44,6 +44,9 @@ backlog-py --cwd /path/to/project browser --port 6420 --no-open
 backlog-py compat status
 ```
 
+- Optional terminal Kanban board: `python -m pip install "backlog-md-py[tui]"`
+  and run `backlog-py --cwd /path/to/project tui`.
+
 The browser board is optional; see the
 [browser release validation guide](docs/browser-release-validation.md) for the
 release-readiness evidence model.
