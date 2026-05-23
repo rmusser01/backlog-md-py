@@ -155,7 +155,8 @@ The TUI is a board workspace:
   state does not block movement in this slice. The dependency shortcut selects
   the first listed dependency that is visible in the current filtered board,
   and the dependent shortcut selects the first visible task that depends on the
-  selected task.
+  selected task. Repeating the dependent shortcut cycles through the remaining
+  visible dependents for the same source task.
 
 Primary bindings:
 
@@ -164,7 +165,8 @@ Primary bindings:
 - `shift+h` and `shift+l` move the selected task to the adjacent status through
   the same mutation path used by the move dialog.
 - `d` jumps to the selected task's first visible dependency.
-- `shift+d` jumps to the first visible task that depends on the selection.
+- `shift+d` jumps to the first visible task that depends on the selection, then
+  cycles through additional visible dependents.
 - Mouse clicks select cards and activate visible controls where practical.
 - Enter focuses/expands the right-side inspector for the selected task. The
   first slice should not add a separate detail screen or modal unless later

@@ -93,6 +93,7 @@ class BacklogTuiApp(App[None]):
         self.deferred_refresh = False
         self.deferred_snapshot: BoardSnapshot | None = None
         self.reselect_task_id: str | None = None
+        self.dependent_jump_source_task_id: str | None = None
         self.editor_runner = editor_runner or default_editor_runner
 
     @property
@@ -474,15 +475,37 @@ class BacklogTuiApp(App[None]):
         task = self._selected_task()
         if task is None or self.visible_snapshot is None:
             return
-        selected_id = task.id.casefold()
-        for status in self.visible_snapshot.statuses:
-            for candidate in self.visible_snapshot.columns.get(status, ()):
-                if candidate.id == task.id:
-                    continue
-                if any(dependency.casefold() == selected_id for dependency in candidate.dependencies):
-                    self.select_task(candidate.id)
-                    return
-        self.notify(f"No visible tasks depend on {task.id}", severity="information")
+        visible_tasks = self._visible_tasks_in_order()
+        by_id = {item.id.casefold(): item for item in visible_tasks}
+        source_task = task
+        if self.dependent_jump_source_task_id is not None:
+            remembered_source = by_id.get(self.dependent_jump_source_task_id.casefold())
+            if remembered_source is not None and _task_depends_on(task, remembered_source.id):
+                source_task = remembered_source
+
+        dependents = [
+            candidate
+            for candidate in visible_tasks
+            if candidate.id != source_task.id and _task_depends_on(candidate, source_task.id)
+        ]
+        if not dependents:
+            self.dependent_jump_source_task_id = None
+            self.notify(f"No visible tasks depend on {source_task.id}", severity="information")
+            return
+
+        current_index = next((index for index, candidate in enumerate(dependents) if candidate.id == task.id), -1)
+        target = dependents[(current_index + 1) % len(dependents)]
+        self.dependent_jump_source_task_id = source_task.id
+        self.select_task(target.id)
+
+    def _visible_tasks_in_order(self) -> tuple[TaskView, ...]:
+        if self.visible_snapshot is None:
+            return ()
+        return tuple(
+            task
+            for status in self.visible_snapshot.statuses
+            for task in self.visible_snapshot.columns.get(status, ())
+        )
 
     @staticmethod
     def _first_selection(snapshot: BoardSnapshot) -> SelectionState:
@@ -491,6 +514,11 @@ class BacklogTuiApp(App[None]):
             if tasks:
                 return SelectionState(task_id=tasks[0].id, status=status, row=0)
         return SelectionState()
+
+
+def _task_depends_on(task: TaskView, dependency_id: str) -> bool:
+    folded_dependency_id = dependency_id.casefold()
+    return any(dependency.casefold() == folded_dependency_id for dependency in task.dependencies)
 
 
 def run_tui_app(project: BacklogProject) -> None:
