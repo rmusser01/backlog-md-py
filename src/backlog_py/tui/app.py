@@ -241,6 +241,11 @@ class BacklogTuiApp(App[None]):
 
     def on_key(self, event: events.Key) -> None:
         if isinstance(self.focused, Input):
+            if self.focused.id == "filter-text" and event.key == "escape":
+                self.query_one("#filter-text", Input).value = ""
+                self.call_later(self.set_filters, text="")
+                self.set_focus(self.query_one("#board-columns"))
+                event.stop()
             return
         if event.key == "right":
             self.action_cursor_right()

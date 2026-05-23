@@ -29,6 +29,7 @@
 - Reset TUI dependency-cycle state after manual task selection.
 - Avoid duplicate TUI dependency-navigation history entries during repeated
   cycles.
+- Clear the focused TUI filter with `escape` and return focus to the board.
 
 ### Validation
 

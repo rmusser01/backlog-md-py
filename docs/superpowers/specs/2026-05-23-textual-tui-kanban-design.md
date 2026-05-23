@@ -185,6 +185,8 @@ Primary bindings:
 - `e` opens editor confirmation, then launches the configured editor.
 - `r` refreshes immediately.
 - `/` focuses the filter input.
+- `escape` clears the filter and returns focus to the board when the filter
+  input is focused.
 - `q` or `ctrl+q` exits.
 
 The move dialog lists only statuses that repository mutation accepts:
