@@ -5,7 +5,7 @@ from textual.containers import Container, Horizontal, HorizontalScroll
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.tui.models import BoardSnapshot, FilterState, SelectionState
-from backlog_py.tui.widgets import BoardColumn, BoardHeader, TaskInspector
+from backlog_py.tui.widgets import BoardColumn, BoardHeader, FilterBar, TaskInspector
 
 
 class BoardScreen(Container):
@@ -15,6 +15,7 @@ class BoardScreen(Container):
 
     def compose(self) -> ComposeResult:
         yield BoardHeader(self.project.config.project_name)
+        yield FilterBar(id="filter-bar")
         with Container(id="board-root"):
             with HorizontalScroll(id="board-columns", classes="board-columns"):
                 yield Horizontal(id="board-column-strip")

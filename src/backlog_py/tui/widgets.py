@@ -3,7 +3,7 @@ from __future__ import annotations
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 from backlog_py.tui.models import BoardSnapshot, FilterState, TaskView
 
@@ -41,6 +41,11 @@ class BoardColumn(VerticalScroll):
             return
         for task in self.tasks:
             yield TaskCard(task, selected=task.id == self.selected_task_id)
+
+
+class FilterBar(Static):
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="Filter", id="filter-text")
 
 
 class TaskCard(Static):

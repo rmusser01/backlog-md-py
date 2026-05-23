@@ -12,6 +12,15 @@ BacklogTuiApp {
     layout: horizontal;
 }
 
+#filter-bar {
+    height: 3;
+    padding: 0 1;
+}
+
+#filter-text {
+    width: 1fr;
+}
+
 #board-title {
     height: 1;
     padding: 0 1;
@@ -75,4 +84,29 @@ BacklogTuiApp {
     border-left: solid $panel;
     padding: 1;
     overflow-y: auto;
+}
+
+.dialog {
+    width: 60;
+    max-height: 90%;
+    padding: 1 2;
+    border: thick $accent;
+    background: $surface;
+}
+
+.dialog-title {
+    text-style: bold;
+    height: 1;
+    margin-bottom: 1;
+}
+
+#create-ac,
+#create-dod,
+#create-description {
+    height: 4;
+}
+
+#create-error {
+    color: $error;
+    height: 1;
 }

@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from backlog_py.core.models import BacklogProject
+from backlog_py.runtime.locks import with_project_write_lock
+from backlog_py.security.paths import assert_path_within_base
 from backlog_py.tui.data import BoardDataSource, DaemonReadError, LocalBoardDataSource, create_board_data_source
-from backlog_py.tui.models import BoardSnapshot, FilterState, SelectionState, filter_snapshot, select_after_refresh
+from backlog_py.tui.models import (
+    BoardSnapshot,
+    CreateTaskInput,
+    FilterState,
+    SelectionState,
+    TaskView,
+    create_status_choices,
+    filter_snapshot,
+    move_status_choices,
+    select_after_refresh,
+)
 
 
 INSTALL_HINT = "Install with backlog-md-py[tui] to use the Textual TUI."
@@ -16,16 +29,20 @@ class TuiDependencyError(RuntimeError):
 
 try:
     from textual import events
-    from textual.app import App, ComposeResult
+    from textual.app import App, ComposeResult, SuspendNotSupported
     from textual.binding import Binding
-    from textual.widgets import Footer, Header
+    from textual.widgets import Footer, Header, Input
     from textual.worker import Worker
 
+    from backlog_py.tui.dialogs import ArchiveTaskDialog, CreateTaskDialog, EditorConfirmDialog, MoveTaskDialog
     from backlog_py.tui.screens import BoardScreen
 except ModuleNotFoundError as exc:
     if exc.name == "textual":
         raise TuiDependencyError(INSTALL_HINT) from exc
     raise
+
+
+EditorRunner = Callable[[BacklogProject, Path], object]
 
 
 class BacklogTuiApp(App[None]):
@@ -53,6 +70,7 @@ class BacklogTuiApp(App[None]):
         *,
         fallback_source_factory: Callable[[BacklogProject], BoardDataSource] = LocalBoardDataSource,
         refresh_interval: float = 5.0,
+        editor_runner: EditorRunner | None = None,
     ) -> None:
         super().__init__()
         self.project = project
@@ -65,6 +83,9 @@ class BacklogTuiApp(App[None]):
         self.selection = SelectionState()
         self.modal_depth = 0
         self.deferred_refresh = False
+        self.deferred_snapshot: BoardSnapshot | None = None
+        self.reselect_task_id: str | None = None
+        self.editor_runner = editor_runner or default_editor_runner
 
     @property
     def selected_task_id(self) -> str | None:
@@ -78,6 +99,7 @@ class BacklogTuiApp(App[None]):
     def on_mount(self) -> None:
         self.refresh_board()
         self.set_interval(self.refresh_interval, self.refresh_board, name="board_refresh")
+        self.set_focus(self.query_one("#board-columns"))
 
     def refresh_board(self) -> Worker[BoardSnapshot]:
         return self.run_worker(
@@ -92,11 +114,29 @@ class BacklogTuiApp(App[None]):
         return self.data_source.load_board()
 
     async def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        if event.worker.name != "load_board" or not event.state.name == "SUCCESS":
-            if event.worker.name == "load_board" and event.state.name == "ERROR":
+        if event.state.name == "ERROR":
+            if event.worker.name == "load_board":
                 await self._handle_load_error(event.worker.error)
+            elif event.worker.name.startswith("mutation:") or event.worker.name == "editor":
+                if event.worker.error is not None:
+                    self.notify(str(event.worker.error), severity="error")
+                self.refresh_board()
             return
-        await self._apply_snapshot(event.worker.result)
+        if event.state.name != "SUCCESS":
+            return
+        if event.worker.name.startswith("mutation:"):
+            self.reselect_task_id = (
+                event.worker.result.id
+                if isinstance(event.worker.result, TaskView)
+                else self.selection.task_id
+            )
+            self.refresh_board()
+            return
+        if event.worker.name == "editor":
+            self.refresh_board()
+            return
+        if event.worker.name == "load_board":
+            await self._apply_snapshot(event.worker.result)
 
     async def _handle_load_error(self, error: BaseException | None) -> None:
         if isinstance(error, DaemonReadError):
@@ -108,10 +148,22 @@ class BacklogTuiApp(App[None]):
             self.notify(str(error), severity="error")
 
     async def _apply_snapshot(self, snapshot: BoardSnapshot) -> None:
+        if self.modal_depth > 0:
+            self.deferred_snapshot = snapshot
+            self.deferred_refresh = True
+            return
         previous = self.visible_snapshot or self.snapshot or snapshot
         self.snapshot = snapshot
         self.visible_snapshot = filter_snapshot(snapshot, self.filter_state)
-        self.selection = select_after_refresh(previous, self.visible_snapshot, self.selection)
+        if self.reselect_task_id is not None:
+            self.selection = select_after_refresh(
+                previous,
+                self.visible_snapshot,
+                SelectionState(task_id=self.reselect_task_id, status=self.selection.status, row=self.selection.row),
+            )
+            self.reselect_task_id = None
+        else:
+            self.selection = select_after_refresh(previous, self.visible_snapshot, self.selection)
         if self.selection.task_id is None:
             self.selection = self._first_selection(self.visible_snapshot)
         await self._render_board()
@@ -174,22 +226,162 @@ class BacklogTuiApp(App[None]):
         self.refresh_board()
 
     def action_focus_filter(self) -> None:
-        self.notify("Filters will be interactive in the next TUI slice.")
+        self.set_focus(self.query_one("#filter-text", Input))
 
     def action_move_task(self) -> None:
-        self.notify("Move is implemented in the next TUI slice.")
+        task = self._selected_task()
+        if task is None or self.snapshot is None:
+            return
+        self._push_modal(
+            MoveTaskDialog(move_status_choices(self.project, self.snapshot.statuses), task.status),
+            self._move_task_result,
+        )
 
     def action_create_task(self) -> None:
-        self.notify("Create is implemented in the next TUI slice.")
+        if self.snapshot is None:
+            return
+        statuses = create_status_choices(self.project, self.snapshot.statuses)
+        self._push_modal(
+            CreateTaskDialog(statuses, self.project.config.default_status),
+            self._create_task_result,
+        )
 
     def action_archive_task(self) -> None:
-        self.notify("Archive is implemented in the next TUI slice.")
+        task = self._selected_task()
+        if task is None:
+            return
+        self._push_modal(ArchiveTaskDialog(task.id, task.title), self._archive_task_result)
 
     def action_edit_task(self) -> None:
-        self.notify("Edit is implemented in the next TUI slice.")
+        task = self._selected_task()
+        if task is None:
+            return
+        try:
+            path = self.data_source.task_path(task.id)
+        except Exception as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self._push_modal(
+            EditorConfirmDialog(task.id, path),
+            lambda confirmed: self._edit_task_result(confirmed, task.id, path),
+        )
 
     def action_focus_inspector(self) -> None:
         self.set_focus(self.query_one("#task-inspector"))
+
+    async def set_filters(
+        self,
+        *,
+        text: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        assignee: str | None = None,
+        label: str | None = None,
+    ) -> None:
+        self.filter_state = FilterState(
+            text=self.filter_state.text if text is None else text,
+            status=self.filter_state.status if status is None else status,
+            priority=self.filter_state.priority if priority is None else priority,
+            assignee=self.filter_state.assignee if assignee is None else assignee,
+            label=self.filter_state.label if label is None else label,
+        )
+        if self.snapshot is None:
+            return
+        previous = self.visible_snapshot or self.snapshot
+        self.visible_snapshot = filter_snapshot(self.snapshot, self.filter_state)
+        self.selection = select_after_refresh(previous, self.visible_snapshot, self.selection)
+        if self.selection.task_id is None:
+            self.selection = self._first_selection(self.visible_snapshot)
+        await self._render_board()
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "filter-text":
+            await self.set_filters(text=event.value)
+
+    def _push_modal(self, screen, callback) -> None:
+        self.modal_depth += 1
+
+        def wrapped(result) -> None:
+            try:
+                callback(result)
+            except Exception as exc:
+                self.notify(str(exc), severity="error")
+            finally:
+                self.modal_depth = max(0, self.modal_depth - 1)
+                if self.deferred_refresh and self.deferred_snapshot is not None:
+                    snapshot = self.deferred_snapshot
+                    self.deferred_snapshot = None
+                    self.deferred_refresh = False
+                    self.call_later(self._apply_snapshot, snapshot)
+
+        self.push_screen(screen, wrapped)
+
+    def _move_task_result(self, status: str | None) -> None:
+        if status is None or self.selection.task_id is None:
+            return
+        task_id = self.selection.task_id
+        self._run_mutation(
+            lambda: self.data_source.move_task(task_id, status),
+            reselect_task_id=task_id,
+            name="mutation:move",
+        )
+
+    def _create_task_result(self, input: CreateTaskInput | None) -> None:
+        if input is None:
+            return
+        self._run_mutation(lambda: self.data_source.create_task(input), name="mutation:create")
+
+    def _archive_task_result(self, confirmed: bool) -> None:
+        if not confirmed or self.selection.task_id is None:
+            return
+        task_id = self.selection.task_id
+        self._run_mutation(lambda: self.data_source.archive_task(task_id), name="mutation:archive")
+
+    def _edit_task_result(self, confirmed: bool, task_id: str, path: Path) -> None:
+        if not confirmed:
+            return
+        safe_path = assert_path_within_base(self.project.root.resolve(), path)
+        self.reselect_task_id = task_id
+        self.call_later(self._run_editor_flow, safe_path)
+
+    async def _run_editor_flow(self, path: Path) -> None:
+        try:
+            with self.suspend():
+                await self._run_editor_worker(path)
+        except SuspendNotSupported:
+            await self._run_editor_worker(path)
+
+    async def _run_editor_worker(self, path: Path) -> None:
+        worker = self.run_worker(
+            lambda: self.editor_runner(self.project, path),
+            thread=True,
+            exclusive=True,
+            name="editor",
+            exit_on_error=False,
+        )
+        try:
+            await worker.wait()
+        except Exception:
+            pass
+
+    def _run_mutation(
+        self,
+        operation: Callable[[], TaskView],
+        *,
+        name: str,
+        reselect_task_id: str | None = None,
+    ) -> None:
+        self.reselect_task_id = reselect_task_id
+        self.run_worker(operation, thread=True, exclusive=False, name=name, exit_on_error=False)
+
+    def _selected_task(self) -> TaskView | None:
+        if self.visible_snapshot is None or self.selection.task_id is None:
+            return None
+        for tasks in self.visible_snapshot.columns.values():
+            for task in tasks:
+                if task.id == self.selection.task_id:
+                    return task
+        return None
 
     def _move_columns(self, delta: int) -> None:
         if self.visible_snapshot is None or not self.visible_snapshot.statuses:
@@ -228,3 +420,14 @@ class BacklogTuiApp(App[None]):
 
 def run_tui_app(project: BacklogProject) -> None:
     BacklogTuiApp(project).run()
+
+
+def default_editor_runner(project: BacklogProject, path: Path) -> None:
+    from backlog_py.cli.main import _configured_editor_command, _run_editor_command
+
+    command = _configured_editor_command(project)
+
+    def edit_task_file() -> None:
+        _run_editor_command(command, path)
+
+    with_project_write_lock(project, "tui_task_editor", edit_task_file)
