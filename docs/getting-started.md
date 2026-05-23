@@ -13,13 +13,13 @@ decision after local validation.
 
 ## Install
 
-After the first tagged release is published, install from PyPI:
+For released versions, install from PyPI:
 
 ```bash
 python -m pip install backlog-md-py
 ```
 
-Until then, the reliable current path is installing from GitHub:
+For unreleased commits, install from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
@@ -118,6 +118,9 @@ backlog-py compat status --json
 Use it as a quick inventory check before deeper project validation. It reports
 agent cutover readiness separately from browser release readiness.
 
+See [stability-policy.md](stability-policy.md) for the beta supported contract
+and release gate.
+
 ## Mutation Safety Checklist
 
 - Start with read-only commands against the target project.
@@ -132,6 +135,7 @@ agent cutover readiness separately from browser release readiness.
 ## Next Steps
 
 - [Integration guide](integration.md) for CLI, Python helper, and MCP details.
+- [Stability policy](stability-policy.md) for the beta support contract.
 - [Singleton daemon guide](singleton-daemon.md) for multi-agent process reuse.
 - [Cutover validation checklist](cutover-validation.md) for migration gates.
 - [Browser release validation](browser-release-validation.md) for browser

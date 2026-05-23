@@ -1,6 +1,6 @@
 # Contributing
 
-`backlog-md-py` is an experimental Python compatibility implementation of
+`backlog-md-py` is a beta-stage Python compatibility implementation of
 Backlog.md. Runtime code should stay free of Node/Bun dependencies; upstream
 Backlog.md tooling is only for fixture refresh or parity-generation work.
 
@@ -47,6 +47,8 @@ publishing.
 Before pushing a release tag:
 
 - Confirm `src/backlog_py/__init__.py` has the intended `__version__`.
+- Confirm `pyproject.toml`, `CHANGELOG.md`, and `docs/stability-policy.md`
+  describe the intended release status.
 - Confirm PyPI has a trusted publisher for project `backlog-md-py`, repository
   `rmusser01/backlog-md-py`, workflow `.github/workflows/release.yml`, and
   environment `pypi`.
@@ -54,7 +56,8 @@ Before pushing a release tag:
 
 ## Compatibility Scope
 
-The current cutover target is non-interactive local-file agent workflows:
+The beta supported contract is defined in `docs/stability-policy.md`. In short,
+the current cutover target covers:
 
 - Plain CLI task, document, milestone, board, search, and config operations.
 - Pure Python MCP helper functions and workflow resources.
@@ -62,7 +65,7 @@ The current cutover target is non-interactive local-file agent workflows:
   traversal.
 
 Browser UI, interactive TUI behavior, shell completion, hooks, auto-commit, and
-remote git behavior are tracked as explicit deferrals in `docs/`.
+remote git behavior are tracked in the compatibility inventory and parity docs.
 
 ## Change Guidelines
 

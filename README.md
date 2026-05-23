@@ -6,22 +6,29 @@ without a Node/Bun runtime dependency.
 
 ## Status And Safety
 
-This project is alpha/experimental. The agent-critical cutover gate has passed
-for the documented local-file CLI, Python helper, and MCP workflows, but live
-mutation should still be validated in copied repositories before use.
+This project is in beta. The agent-critical cutover gate and audited parity
+inventory have passed for the documented local-file CLI, Python helper, MCP,
+daemon, and browser-board workflows. Beta means the supported contract is ready
+for real project integration after validation, but it is not yet a 1.0 API
+freeze.
+
+Before live mutation in a consuming project, run copied-repository smoke tests
+and review the resulting Backlog.md diff. See the
+[stability policy](docs/stability-policy.md) for the supported contract and
+release gate.
 
 Do not alias `backlog-py` to `backlog` unless the target project has made an
 explicit project cutover decision.
 
 ## Quick Start
 
-After the first tagged release is published, install from PyPI:
+For released versions, install from PyPI:
 
 ```bash
 python -m pip install backlog-md-py
 ```
 
-Until then, the reliable current path is installing from GitHub:
+For unreleased commits, install from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
@@ -67,9 +74,11 @@ Start with the [documentation index](docs/README.md). The most commonly used
 references are:
 
 - [Integration guide](docs/integration.md)
+- [Stability policy](docs/stability-policy.md)
 - [Singleton daemon guide](docs/singleton-daemon.md)
 - [Cutover validation checklist](docs/cutover-validation.md)
 - [Browser release validation](docs/browser-release-validation.md)
+- [Changelog](CHANGELOG.md)
 - [Contributing guide](CONTRIBUTING.md)
 
 ## Development

@@ -32,6 +32,22 @@ def test_pyproject_derives_distribution_version_from_package_attribute():
     }
 
 
+def test_beta_release_metadata_and_docs_are_declared():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+
+    assert __version__ == "0.2.0"
+    assert "Development Status :: 4 - Beta" in pyproject["project"]["classifiers"]
+    assert "Development Status :: 3 - Alpha" not in pyproject["project"]["classifiers"]
+
+    stability_policy = Path("docs/stability-policy.md").read_text()
+    changelog = Path("CHANGELOG.md").read_text()
+
+    assert "Supported Contract" in stability_policy
+    assert "Beta Release Gate" in stability_policy
+    assert "## 0.2.0" in changelog
+    assert "Beta" in changelog
+
+
 def test_pyproject_exposes_sdk_free_mcp_script_without_mcp_extra():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
 

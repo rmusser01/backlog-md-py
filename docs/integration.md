@@ -4,14 +4,15 @@
 projects that need local-file Backlog.md compatibility without a Node or Bun
 runtime dependency.
 
-The project is still experimental, but the first agent-critical local-file
-cutover validation passed on 2026-05-13. Keep live-repository mutation behind
+The project is in beta. The first agent-critical local-file cutover validation
+passed on 2026-05-13, and the supported release contract is documented in
+`docs/stability-policy.md`. Keep live-repository mutation behind
 copied-repository smoke tests and review for each consuming project.
 
 ## Install
 
 Tagged releases publish distributions to PyPI and attach the same artifacts to
-the GitHub Release. After a tagged release is available, install with:
+the GitHub Release. For released versions, install with:
 
 ```bash
 python -m pip install backlog-md-py
@@ -36,8 +37,8 @@ uv pip install -e ".[dev]"
 
 ## CLI Entry Points
 
-The installed command is intentionally named `backlog-py` while compatibility is
-still experimental:
+The installed command is intentionally named `backlog-py` so projects make an
+explicit cutover decision before replacing an upstream `backlog` command:
 
 ```bash
 backlog-py --help

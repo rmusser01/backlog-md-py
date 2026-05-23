@@ -15,7 +15,7 @@ authors = [
 ]
 keywords = ["backlog.md", "backlog", "markdown", "mcp", "task-management"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
@@ -35,6 +35,8 @@ dependencies = [
 Homepage = "https://github.com/rmusser01/backlog-md-py"
 Repository = "https://github.com/rmusser01/backlog-md-py"
 Issues = "https://github.com/rmusser01/backlog-md-py/issues"
+Changelog = "https://github.com/rmusser01/backlog-md-py/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/rmusser01/backlog-md-py/tree/main/docs"
 
 [project.optional-dependencies]
 dev = [
