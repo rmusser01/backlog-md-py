@@ -41,6 +41,26 @@
 - Preserve checklist item ids and checked state for Acceptance Criteria and Definition of Done display.
 - Use existing no-shell editor command behavior; never introduce shell execution for editor launch.
 
+## Existing tldw_chatbook Kanban Reference
+
+The closest existing Kanban code in `tldw_chatbook` is a service/domain module, not a Textual Kanban UI:
+
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/Kanban_Interop/local_kanban_db.py`: SQLite schema for local boards, lists, cards, labels, checklists, comments, activities, links, and optional FTS.
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/Kanban_Interop/local_kanban_service.py`: local async CRUD service with transactions, version checks, activity records, import/export, search degradation metadata, bulk operations, and policy action enforcement.
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/Kanban_Interop/server_kanban_service.py`: operation-spec table and active-server adapter.
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/Kanban_Interop/kanban_scope_service.py`: source-aware router that dispatches `mode="local"` or `mode="server"` and normalizes responses.
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/app.py:2221`: application wiring for local, server, and scope Kanban services.
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/Tests/Kanban/`: regression tests for schema setup, transaction rollback, operation coverage, local/server routing, policy blocking, CRUD, reorder, move, archive, labels, checklists, comments, search, links, import/export, and bulk operations.
+
+Use these as architectural references for separation and tests:
+
+- Keep source-specific code behind a small routing/data-source boundary.
+- Normalize local and remote/daemon payloads before UI code sees them.
+- Test read routing, mutation routing, failure modes, and operation coverage directly.
+- Keep transactional/write-safety behavior in the data layer, not widgets.
+
+Do not copy the local SQLite Kanban model into this first slice. `backlog-md-py` already has a Markdown task source of truth, repository write locks, and MCP/daemon tools. A durable Kanban database would be a separate persistence/sync project, not part of the optional TUI board.
+
 ### Task 1: Packaging And Lazy CLI Surface
 
 **Files:**
@@ -592,6 +612,17 @@ git commit -m "feat: add pure TUI board models"
 - Create: `src/backlog_py/tui/data.py`
 - Modify: `src/backlog_py/tui/models.py`
 - Create: `tests/test_tui_data.py`
+
+- [ ] **Step 0: Review the tldw_chatbook Kanban data-source reference**
+
+Before writing data-source tests, inspect the source-router shape in:
+
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/Kanban_Interop/kanban_scope_service.py`
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/tldw_chatbook/Kanban_Interop/local_kanban_service.py`
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/Tests/Kanban/test_kanban_scope_service.py`
+- `/Users/macbook-dev/Documents/GitHub/tldw_chatbook/Tests/Kanban/test_local_kanban_service.py`
+
+Carry forward the separation and test style, but keep `backlog-md-py`'s implementation bound to Markdown repository records and existing MCP tools. Do not introduce a TUI-specific SQLite Kanban database.
 
 - [ ] **Step 1: Add failing data-source tests**
 
