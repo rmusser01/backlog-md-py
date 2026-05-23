@@ -599,6 +599,39 @@ def board_command(
     _run_interactive_board_view(ctx)
 
 
+@main.command("tui")
+@click.pass_context
+def tui_command(ctx: click.Context) -> None:
+    """Launch the optional Textual board."""
+    runner = _load_tui_runner()
+    runner(_project(ctx))
+
+
+def _load_tui_runner() -> Callable[[BacklogProject], None]:
+    try:
+        from backlog_py.tui import app as tui_app
+    except ModuleNotFoundError as exc:
+        if exc.name == "textual":
+            raise click.ClickException("Install with backlog-md-py[tui] to use the Textual TUI.") from exc
+        raise
+    except RuntimeError as exc:
+        if exc.__class__.__name__ == "TuiDependencyError":
+            raise click.ClickException(str(exc)) from exc
+        raise
+
+    def runner(project: BacklogProject) -> None:
+        try:
+            tui_app.run_tui_app(project)
+        except tui_app.TuiDependencyError as exc:
+            raise click.ClickException(str(exc)) from exc
+        except RuntimeError as exc:
+            if str(exc) == "Textual TUI app is not implemented yet.":
+                raise click.ClickException(str(exc)) from exc
+            raise
+
+    return runner
+
+
 def _run_interactive_board_view(ctx: click.Context) -> None:
     interactive = _stdin_is_interactive()
     _echo_board(_repository(ctx).board(), show_actions=interactive)

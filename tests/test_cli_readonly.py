@@ -1,7 +1,10 @@
 import json
 import shutil
+import sys
+import types
 from pathlib import Path
 
+import click
 from click.testing import CliRunner
 
 from backlog_py import __version__
@@ -74,11 +77,54 @@ def test_top_level_help_includes_readonly_commands():
     assert "config" in result.output
 
 
+def test_top_level_help_includes_tui_command():
+    result = CliRunner().invoke(main, ["--help"])
+
+    assert result.exit_code == 0
+    assert "tui" in result.output
+
+
 def test_top_level_version_reports_package_version():
     result = CliRunner().invoke(main, ["--version"])
 
     assert result.exit_code == 0
     assert __version__ in result.output
+
+
+def test_tui_command_invokes_lazy_runner_with_discovered_project(monkeypatch):
+    from backlog_py.cli import main as cli_main
+
+    calls = []
+    monkeypatch.setattr(cli_main, "_load_tui_runner", lambda: lambda project: calls.append(project.root))
+
+    result = _invoke("tui")
+
+    assert result.exit_code == 0
+    assert calls == [FIXTURE_REPO]
+
+
+def test_tui_command_without_extra_shows_install_hint(monkeypatch):
+    from backlog_py.cli import main as cli_main
+
+    def missing_runner():
+        raise click.ClickException("Install with backlog-md-py[tui] to use the Textual TUI.")
+
+    monkeypatch.setattr(cli_main, "_load_tui_runner", missing_runner)
+
+    result = _invoke("tui")
+
+    assert result.exit_code != 0
+    assert "Install with backlog-md-py[tui]" in result.output
+
+
+def test_tui_command_wraps_placeholder_runtime_error_when_extra_is_installed(monkeypatch):
+    monkeypatch.setitem(sys.modules, "textual", types.ModuleType("textual"))
+
+    result = _invoke("tui")
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "Textual TUI app is not implemented yet." in result.output
 
 
 def test_task_list_plain_outputs_task_id():
