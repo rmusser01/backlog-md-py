@@ -12,6 +12,24 @@
   changelog, and release-readiness evidence.
 - Keep install guidance split between released PyPI packages and unreleased
   GitHub commits.
+- Add an optional Textual Kanban board through `backlog-py tui` behind the
+  `tui` extra.
+- Add Vim-style TUI navigation aliases and direct adjacent-status task moves.
+- Show TUI dependency status counts for done, open, and missing task
+  dependencies.
+- Add a TUI dependency shortcut to jump to the selected task's first visible
+  dependency.
+- Make repeated TUI dependency jumps cycle through additional visible
+  dependencies for the same source task.
+- Add a TUI dependent shortcut to jump to the first visible task that depends
+  on the selection.
+- Make repeated TUI dependent jumps cycle through additional visible dependents
+  for the same source task.
+- Add TUI dependency-navigation history with `backspace`.
+- Reset TUI dependency-cycle state after manual task selection.
+- Avoid duplicate TUI dependency-navigation history entries during repeated
+  cycles.
+- Clear the focused TUI filter with `escape` and return focus to the board.
 
 ### Validation
 

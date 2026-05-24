@@ -1,0 +1,116 @@
+BacklogTuiApp {
+    layout: vertical;
+}
+
+#board-screen {
+    layout: vertical;
+    height: 1fr;
+}
+
+#board-header {
+    height: 1;
+    layout: horizontal;
+}
+
+#filter-bar {
+    height: 3;
+    padding: 0 1;
+}
+
+#filter-text {
+    width: 1fr;
+}
+
+#board-title {
+    height: 1;
+    padding: 0 1;
+    width: 1fr;
+}
+
+#board-meta {
+    height: 1;
+    padding: 0 1;
+    width: auto;
+}
+
+#board-root {
+    layout: horizontal;
+    height: 1fr;
+}
+
+.board-columns {
+    width: 1fr;
+    height: 1fr;
+    overflow-x: auto;
+}
+
+#board-column-strip {
+    width: auto;
+    height: 1fr;
+}
+
+.board-column {
+    width: 28;
+    min-width: 24;
+    height: 1fr;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+.column-title {
+    text-style: bold;
+    height: 1;
+}
+
+.task-card {
+    height: auto;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+.task-card.blocked {
+    border-left: thick $warning;
+}
+
+.task-card.selected {
+    background: $accent;
+    color: $text;
+}
+
+.empty-column {
+    color: $text-muted;
+}
+
+#task-inspector {
+    width: 38;
+    min-width: 32;
+    height: 1fr;
+    border-left: solid $panel;
+    padding: 1;
+    overflow-y: auto;
+}
+
+.dialog {
+    width: 60;
+    max-height: 90%;
+    padding: 1 2;
+    border: thick $accent;
+    background: $surface;
+}
+
+.dialog-title {
+    text-style: bold;
+    height: 1;
+    margin-bottom: 1;
+}
+
+#create-ac,
+#create-dod,
+#create-description {
+    height: 4;
+}
+
+#create-error {
+    color: $error;
+    height: 1;
+}

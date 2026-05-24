@@ -55,6 +55,26 @@ def test_pyproject_exposes_sdk_free_mcp_script_without_mcp_extra():
     assert pyproject["project"]["scripts"]["backlog-py-mcp"] == "backlog_py.mcp.server:main"
 
 
+def test_pyproject_declares_textual_tui_as_optional_extra_only():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+
+    dependencies = pyproject["project"]["dependencies"]
+    optional = pyproject["project"]["optional-dependencies"]
+
+    assert not any("textual" in dependency.casefold() for dependency in dependencies)
+    assert "tui" in optional
+    assert any(dependency.startswith("textual>=") for dependency in optional["tui"])
+
+
+def test_pyproject_packages_tui_stylesheet():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+
+    package_data = pyproject["tool"]["setuptools"]["package-data"]["backlog_py"]
+
+    assert "py.typed" in package_data
+    assert "tui/styles.tcss" in package_data
+
+
 def test_ci_smokes_sdk_free_mcp_entry_point_without_mcp_extra():
     workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
     package_steps = workflow["jobs"]["package"]["steps"]

@@ -27,6 +27,12 @@ python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
 The `backlog-py-mcp` stdio entry point is installed by default and does not
 require the Python MCP SDK.
 
+The optional Textual terminal board is installed separately:
+
+```bash
+python -m pip install "backlog-md-py[tui]"
+```
+
 For local development against a checkout:
 
 ```bash
@@ -57,6 +63,7 @@ backlog-py --cwd /path/to/project search "query" --modified-file "src/api.py" --
 backlog-py --cwd /path/to/project board
 backlog-py --cwd /path/to/project board export Backlog.md --force --export-version v1.45.1
 backlog-py --cwd /path/to/project board export --readme --export-version v1.45.1
+backlog-py --cwd /path/to/project tui
 ```
 
 The compatibility report is read-only and does not need a project path:
@@ -86,6 +93,22 @@ python -m backlog_py --cwd /path/to/project task list --plain
 
 Do not alias this command to `backlog` for production use until the cutover gate
 for your target project is satisfied and the aliasing decision is explicit.
+
+### TUI vs Automation Interfaces
+
+`backlog-py tui` is a human-facing Textual interface for keyboard board work.
+Agents and scripts should keep using plain CLI output, MCP tools, or the daemon
+HTTP/MCP path because those surfaces are deterministic and easier to parse. The
+TUI supports arrows plus `h/j/k/l` for navigation, `shift+h` / `shift+l` for
+adjacent-status moves, and dependency status display for known, open, and
+missing dependencies. Press `d` to jump from the selected task to its first
+visible dependency; repeated `d` presses cycle through additional visible
+dependencies for the same source task. Press `shift+d` to jump to the first
+visible task that depends on the selection; repeated `shift+d` presses cycle
+through additional visible dependents for the same source task. It
+keeps a dependency-navigation history on `backspace`. It opportunistically uses
+an already-healthy singleton daemon, but it never starts one. When the filter
+input is focused, `escape` clears it and returns focus to the board.
 
 ## Python API Use
 
