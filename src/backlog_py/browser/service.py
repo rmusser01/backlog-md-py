@@ -230,6 +230,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path == "/favicon.ico":
+            self._send_empty(HTTPStatus.NO_CONTENT, content_type="image/x-icon")
+            return
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True, "projectName": self.server.project.config.project_name})
             return
@@ -501,6 +504,19 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def _send_html(self, status: HTTPStatus, html: str) -> None:
         self._send_text(status, html, content_type="text/html; charset=utf-8")
+
+    def _send_empty(self, status: HTTPStatus, *, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        _record_service_request(
+            self.server,
+            method=self.command,
+            raw_path=self.path,
+            status=status,
+            content_type=content_type,
+        )
 
     def _send_board_event(self) -> None:
         shutdown_state = _shutdown_state_payload(self.server)

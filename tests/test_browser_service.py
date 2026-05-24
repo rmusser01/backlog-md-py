@@ -40,6 +40,26 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "Example task" in html
 
 
+def test_browser_service_serves_favicon_without_not_found(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _get_response_bytes(f"{service.root_url}/favicon.ico")
+        request_log = _get_json(f"{service.root_url}/api/service/requests")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 204
+    assert response["contentType"] == "image/x-icon"
+    assert response["body"] == b""
+    assert request_log["requests"][-1]["path"] == "/favicon.ico"
+    assert request_log["requests"][-1]["status"] == 204
+
+
 def test_browser_service_status_endpoint_returns_runtime_metadata(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -2070,6 +2090,15 @@ def _get_response_text(url: str) -> dict[str, object]:
             "status": response.status,
             "contentType": response.headers.get("Content-Type"),
             "body": response.read().decode("utf-8"),
+        }
+
+
+def _get_response_bytes(url: str) -> dict[str, object]:
+    with urllib.request.urlopen(url, timeout=2) as response:
+        return {
+            "status": response.status,
+            "contentType": response.headers.get("Content-Type"),
+            "body": response.read(),
         }
 
 
