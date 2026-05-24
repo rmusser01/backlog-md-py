@@ -1411,7 +1411,12 @@ def milestone_archive_command(ctx: click.Context, name: str) -> None:
 
 
 def _project(ctx: click.Context) -> BacklogProject:
-    return discover_project(Path.cwd(), explicit_cwd=_explicit_cwd(ctx))
+    try:
+        return discover_project(Path.cwd(), explicit_cwd=_explicit_cwd(ctx))
+    except FileNotFoundError as exc:
+        raise click.ClickException(
+            f"{exc}. Run from a Backlog.md project or pass --cwd /path/to/project."
+        ) from exc
 
 
 def _cwd(ctx: click.Context) -> Path:
