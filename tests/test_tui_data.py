@@ -99,12 +99,54 @@ def test_daemon_data_source_loads_board_with_task_view_hydration():
         daemon.shutdown()
 
     assert snapshot.source == "daemon"
-    assert snapshot.statuses == ("In Progress",)
+    assert snapshot.statuses == ("To Do", "In Progress", "Done")
+    assert snapshot.columns["To Do"] == ()
+    assert snapshot.columns["Done"] == ()
     assert snapshot.columns["In Progress"][0].acceptance_criteria[0].checked is True
     assert [(request["tool"], request["arguments"].get("task_id")) for request in daemon.tool_calls] == [
         ("task_board", None),
         ("task_view", "TASK-1"),
     ]
+
+
+def test_daemon_data_source_orders_columns_by_configured_statuses():
+    project = discover_project(Path.cwd(), explicit_cwd=FIXTURE_REPO)
+    task = ReadOnlyRepository(project).get_task("TASK-1")
+    relative_path = task.path.relative_to(project.root).as_posix()
+    daemon = _FakeMcpDaemon(
+        {
+            "task_board": {
+                "Done": [],
+                "In Progress": [
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status,
+                        "description": task.description,
+                        "path": relative_path,
+                    }
+                ],
+                "To Do": [],
+            },
+            "task_view": {
+                "id": task.id,
+                "title": task.title,
+                "status": task.status,
+                "description": task.description,
+                "path": relative_path,
+                "raw_source": task.raw_source,
+            },
+        }
+    )
+    try:
+        source = DaemonBoardDataSource(project, endpoint=daemon.endpoint, token="secret")
+        snapshot = source.load_board()
+    finally:
+        daemon.shutdown()
+
+    assert snapshot.statuses == ("To Do", "In Progress", "Done")
+    assert tuple(snapshot.columns) == ("To Do", "In Progress", "Done")
+    assert snapshot.columns["In Progress"][0].id == "TASK-1"
 
 
 def test_daemon_mutations_call_expected_tools_and_return_task_views():
