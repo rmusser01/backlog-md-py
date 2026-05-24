@@ -143,11 +143,13 @@ class DaemonBoardDataSource:
             board = client.call_tool("task_board", {"project": str(self.project.root)})
             if not isinstance(board, Mapping):
                 raise TypeError("Daemon task_board returned a non-mapping payload")
+            board_by_status = {str(status): rows for status, rows in board.items()}
             columns: dict[str, tuple[TaskView, ...]] = {}
-            for status, rows in board.items():
+            for status in _ordered_board_statuses(self.project, board_by_status):
+                rows = board_by_status.get(status, [])
                 if not isinstance(rows, list):
                     raise TypeError(f"Daemon task_board column {status!r} is not a list")
-                columns[str(status)] = tuple(
+                columns[status] = tuple(
                     task_view_from_mcp_payload(
                         self.project,
                         client.call_tool(
@@ -160,7 +162,7 @@ class DaemonBoardDataSource:
             return BoardSnapshot(
                 project_name=self.project.config.project_name,
                 project_root=self.project.root,
-                statuses=tuple(str(status) for status in board.keys()),
+                statuses=tuple(columns),
                 columns=columns,
                 source="daemon",
                 revision=None,
@@ -258,6 +260,15 @@ def _task_id_from_row(row: object) -> str:
     if not isinstance(task_id, str) or not task_id.strip():
         raise TypeError("Daemon task_board row is missing task id")
     return task_id
+
+
+def _ordered_board_statuses(project: BacklogProject, board: Mapping[str, object]) -> tuple[str, ...]:
+    configured = project.config.statuses
+    if configured is None:
+        return tuple(board)
+    ordered = list(configured)
+    ordered.extend(status for status in board if status not in configured)
+    return tuple(ordered)
 
 
 def _validate_loopback_http_endpoint(endpoint: str) -> None:

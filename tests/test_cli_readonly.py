@@ -115,6 +115,18 @@ def test_tui_command_without_extra_shows_install_hint(monkeypatch):
     assert "Install with backlog-md-py[tui]" in result.output
 
 
+def test_tui_command_without_project_shows_cli_error(tmp_path, monkeypatch):
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_load_tui_runner", lambda: lambda project: None)
+
+    result = CliRunner().invoke(main, ["--cwd", str(tmp_path), "tui"])
+
+    assert result.exit_code != 0
+    assert "No Backlog.md config found" in result.output
+    assert not isinstance(result.exception, FileNotFoundError)
+
+
 def test_tui_command_invokes_implemented_tui_app(monkeypatch):
     from backlog_py.cli import main as cli_main
     from backlog_py.tui import app as tui_app
