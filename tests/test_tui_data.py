@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from backlog_py.core.repository import ReadOnlyRepository
+from backlog_py.core.decisions import DecisionService
+from backlog_py.core.documents import DocumentService
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.daemon.lifecycle import DaemonNotRunningError
 from backlog_py.storage.project import discover_project
 from backlog_py.tui.data import (
@@ -110,6 +112,30 @@ def test_local_source_task_path_returns_validated_absolute_project_path(tmp_path
     assert path.is_absolute()
     assert path.is_relative_to(repo)
     assert path.name == "task-1 - Example-task.md"
+
+
+def test_local_data_source_searches_tasks_documents_and_decisions(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    task = MutableRepository(project).create_task(title="Shared needle task", description="TUI search target")
+    document = DocumentService(project).create_document(
+        "guides/search.md",
+        title="Shared needle guide",
+        content="Document search target",
+    )
+    decision = DecisionService(project).create_decision("Shared needle decision", status="accepted")
+
+    results = LocalBoardDataSource(project).search("shared needle", limit=10)
+
+    assert [(result.kind, result.identifier, result.title) for result in results] == [
+        ("task", task.id, "Shared needle task"),
+        ("document", document.path_relative, "Shared needle guide"),
+        ("decision", decision.id, "Shared needle decision"),
+    ]
+    assert results[0].task_id == task.id
+    assert results[1].task_id is None
+    assert results[2].task_id is None
 
 
 def test_daemon_data_source_loads_board_with_task_view_hydration():

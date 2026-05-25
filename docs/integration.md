@@ -109,9 +109,10 @@ through additional visible dependents for the same source task. It keeps a
 dependency-navigation history on `backspace`, `p` opens a read-only Markdown
 preview for the selected task, `u` edits the selected task's title, status,
 description, and metadata, and `x` toggles selected-task Acceptance Criteria or
-Definition of Done checklist items. It opportunistically uses an already-healthy
-singleton daemon, but it never starts one. When the filter input is focused,
-`escape` clears it and returns focus to the board.
+Definition of Done checklist items. Press `s` to search tasks, documents, and
+decisions; task results can jump to visible board cards. It opportunistically
+uses an already-healthy singleton daemon, but it never starts one. When the
+filter input is focused, `escape` clears it and returns focus to the board.
 
 ## Python API Use
 

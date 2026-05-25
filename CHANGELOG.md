@@ -33,6 +33,7 @@
 - Add TUI selected-task metadata editing for title, status, description,
   priority, assignees, labels, milestone, and dependencies.
 - Add a TUI read-only Markdown preview for the selected task.
+- Add TUI global search across tasks, documents, and decisions.
 - Add TUI Acceptance Criteria and Definition of Done checklist toggles.
 
 ### Validation

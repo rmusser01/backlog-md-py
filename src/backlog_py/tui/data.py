@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 from urllib.parse import urlparse
 
+from backlog_py.core.decisions import DecisionService
+from backlog_py.core.documents import DocumentService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.daemon.lifecycle import DaemonNotRunningError, daemon_status
@@ -17,6 +19,7 @@ from backlog_py.tui.models import (
     BoardSourceName,
     CreateTaskInput,
     EditTaskInput,
+    SearchResultView,
     TaskView,
     board_snapshot_from_local,
     task_view_from_mcp_payload,
@@ -29,6 +32,9 @@ class BoardDataSource(Protocol):
 
     def load_board(self) -> BoardSnapshot:
         """Load the current board snapshot."""
+
+    def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
+        """Search project tasks, documents, and decisions for TUI display."""
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         """Create a task and return the normalized task view."""
@@ -57,6 +63,9 @@ class LocalBoardDataSource:
     def load_board(self) -> BoardSnapshot:
         repository = ReadOnlyRepository(self.project)
         return board_snapshot_from_local(self.project, repository.board(), source="local")
+
+    def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
+        return _search_project(self.project, query, limit=limit)
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         def mutate() -> TaskView:
@@ -192,6 +201,9 @@ class DaemonBoardDataSource:
         except Exception as exc:
             raise DaemonReadError(str(exc)) from exc
 
+    def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
+        return _search_project(self.project, query, limit=limit)
+
     def create_task(self, input: CreateTaskInput) -> TaskView:
         arguments: dict[str, Any] = {
             "project": str(self.project.root),
@@ -255,6 +267,58 @@ def create_board_data_source(project: BacklogProject) -> BoardDataSource:
     except DaemonNotRunningError:
         return LocalBoardDataSource(project)
     return DaemonBoardDataSource(project, endpoint=status.record.endpoint, token=status.record.token)
+
+
+def _search_project(project: BacklogProject, query: str, *, limit: int) -> tuple[SearchResultView, ...]:
+    text = query.strip()
+    if not text or limit <= 0:
+        return ()
+
+    results: list[SearchResultView] = []
+
+    repository = ReadOnlyRepository(
+        project,
+        refresh_remote_refs=False,
+        include_active_branch_snapshots=False,
+    )
+    for task in repository.search_tasks(text):
+        results.append(
+            SearchResultView(
+                kind="task",
+                identifier=task.id,
+                title=task.title,
+                subtitle=task.status,
+                task_id=task.id,
+            )
+        )
+        if len(results) >= limit:
+            return tuple(results)
+
+    for document in DocumentService(project).search_documents(text):
+        results.append(
+            SearchResultView(
+                kind="document",
+                identifier=document.path_relative,
+                title=document.title or document.path_relative,
+                subtitle=document.id or "",
+            )
+        )
+        if len(results) >= limit:
+            return tuple(results)
+
+    for decision in DecisionService(project).search_decisions(text):
+        results.append(
+            SearchResultView(
+                kind="decision",
+                identifier=decision.id,
+                title=decision.title or decision.id,
+                subtitle=decision.status,
+            )
+        )
+        if len(results) >= limit:
+            return tuple(results)
+
+    return tuple(results)
 
 
 def _extract_tool_result(response: object) -> Any:
