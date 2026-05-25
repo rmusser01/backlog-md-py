@@ -79,6 +79,20 @@ class CreateTaskInput:
 
 
 @dataclass(frozen=True)
+class EditTaskInput:
+    title: str
+    status: str
+    description: str = ""
+    priority: str | None = None
+    clear_priority: bool = False
+    assignees: tuple[str, ...] = ()
+    labels: tuple[str, ...] = ()
+    milestone: str | None = None
+    clear_milestone: bool = False
+    dependencies: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ChecklistToggleInput:
     checklist: ChecklistName
     index: int

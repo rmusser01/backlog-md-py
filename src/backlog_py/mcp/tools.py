@@ -165,6 +165,10 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
     """Edit supported task sections through the safe mutation repository."""
     def mutate() -> dict[str, Any]:
         repository = MutableRepository(project)
+        priority = _optional_string(_get_alias(kwargs, "priority"))
+        clear_priority = ("priority" in kwargs and kwargs.get("priority") is None) or (
+            _coerce_bool(_get_alias(kwargs, "clearPriority", "clear_priority")) or False
+        )
         task = repository.edit_task(
             task_id,
             title=_optional_string(kwargs.get("title")),
@@ -199,7 +203,8 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
             dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
             assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
             labels=_optional_string_list(_get_alias(kwargs, "labels")),
-            priority=_optional_string(_get_alias(kwargs, "priority")),
+            priority=priority,
+            clear_priority=clear_priority,
             milestone=_optional_string(_get_alias(kwargs, "milestone")) if "milestone" in kwargs else None,
             ordinal=_get_alias(kwargs, "ordinal"),
             clear_milestone=("milestone" in kwargs and kwargs.get("milestone") is None)

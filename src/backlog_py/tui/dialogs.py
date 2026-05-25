@@ -12,6 +12,7 @@ from backlog_py.tui.models import (
     ChecklistName,
     ChecklistToggleInput,
     CreateTaskInput,
+    EditTaskInput,
     TaskView,
 )
 
@@ -115,6 +116,68 @@ class CreateTaskDialog(ModalScreen[CreateTaskInput | None]):
                 acceptance_criteria=parse_multivalue(self.query_one("#create-ac", TextArea).text),
                 definition_of_done_add=parse_multivalue(self.query_one("#create-dod", TextArea).text),
                 description=self.query_one("#create-description", TextArea).text.strip(),
+            )
+        )
+
+
+class EditTaskDialog(ModalScreen[EditTaskInput | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, task: TaskView, statuses: tuple[str, ...]) -> None:
+        super().__init__()
+        self.task_view = task
+        self.statuses = statuses
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="edit-dialog", classes="dialog"):
+            yield Static(f"Edit task - {self.task_view.id}", classes="dialog-title", markup=False)
+            yield Input(value=self.task_view.title, placeholder="Title", id="edit-title")
+            yield Input(value=self.task_view.status, placeholder="Status", id="edit-status")
+            yield Input(value=self.task_view.priority or "", placeholder="Priority", id="edit-priority")
+            yield Input(value=", ".join(self.task_view.assignees), placeholder="Assignees", id="edit-assignees")
+            yield Input(value=", ".join(self.task_view.labels), placeholder="Labels", id="edit-labels")
+            yield Input(value=self.task_view.milestone or "", placeholder="Milestone", id="edit-milestone")
+            yield Input(value=", ".join(self.task_view.dependencies), placeholder="Dependencies", id="edit-dependencies")
+            yield TextArea(self.task_view.description, id="edit-description", compact=True)
+            yield Label("", id="edit-error")
+            yield Button("Update", id="edit-submit", variant="primary")
+
+    def on_mount(self) -> None:
+        self.set_focus(self.query_one("#edit-title", Input))
+
+    def key_enter(self) -> None:
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "edit-submit":
+            self._submit()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _submit(self) -> None:
+        title = self.query_one("#edit-title", Input).value.strip()
+        if not title:
+            self.query_one("#edit-error", Label).update("Title is required")
+            return
+        status = self.query_one("#edit-status", Input).value.strip()
+        if status not in self.statuses:
+            self.query_one("#edit-error", Label).update("Status must be one of the available board statuses")
+            return
+        priority = _optional_input(self.query_one("#edit-priority", Input).value)
+        milestone = _optional_input(self.query_one("#edit-milestone", Input).value)
+        self.dismiss(
+            EditTaskInput(
+                title=title,
+                status=status,
+                description=self.query_one("#edit-description", TextArea).text.strip(),
+                priority=priority,
+                clear_priority=priority is None,
+                assignees=parse_multivalue(self.query_one("#edit-assignees", Input).value),
+                labels=parse_multivalue(self.query_one("#edit-labels", Input).value),
+                milestone=milestone,
+                clear_milestone=milestone is None,
+                dependencies=parse_multivalue(self.query_one("#edit-dependencies", Input).value),
             )
         )
 

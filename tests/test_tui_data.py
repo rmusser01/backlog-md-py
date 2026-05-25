@@ -17,7 +17,7 @@ from backlog_py.tui.data import (
     LocalBoardDataSource,
     create_board_data_source,
 )
-from backlog_py.tui.models import CreateTaskInput
+from backlog_py.tui.models import CreateTaskInput, EditTaskInput
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
@@ -39,16 +39,39 @@ def test_local_data_source_loads_board_and_mutates_under_project_lock(tmp_path, 
     snapshot = source.load_board()
     created = source.create_task(CreateTaskInput(title="New card", status="To Do", labels=("tui",)))
     moved = source.move_task(created.id, "Done")
+    edited = source.edit_task(
+        created.id,
+        EditTaskInput(
+            title="Edited card",
+            status="In Progress",
+            description="Edited description",
+            priority=None,
+            clear_priority=True,
+            assignees=("codex",),
+            labels=("tui", "metadata"),
+            milestone=None,
+            clear_milestone=True,
+            dependencies=("TASK-1",),
+        ),
+    )
     archived = source.archive_task(created.id)
 
     assert snapshot.source == "local"
     assert snapshot.columns["In Progress"][0].id == "TASK-1"
     assert created.labels == ("tui",)
     assert moved.status == "Done"
+    assert edited.title == "Edited card"
+    assert edited.status == "In Progress"
+    assert edited.priority is None
+    assert edited.assignees == ("codex",)
+    assert edited.labels == ("tui", "metadata")
+    assert edited.milestone is None
+    assert edited.dependencies == ("TASK-1",)
     assert archived.id == created.id
     assert operations == [
         (repo, "tui_task_create"),
         (repo, "tui_task_move"),
+        (repo, "tui_task_edit"),
         (repo, "tui_task_archive"),
     ]
 
@@ -208,12 +231,28 @@ def test_daemon_mutations_call_expected_tools_and_return_task_views():
             )
         )
         moved = source.move_task("TASK-1", "Done")
+        edited = source.edit_task(
+            "TASK-1",
+            EditTaskInput(
+                title="Edited card",
+                status="In Progress",
+                description="Edited description",
+                priority=None,
+                clear_priority=True,
+                assignees=("codex",),
+                labels=("tui", "metadata"),
+                milestone=None,
+                clear_milestone=True,
+                dependencies=("TASK-2",),
+            ),
+        )
         archived = source.archive_task("TASK-1")
     finally:
         daemon.shutdown()
 
     assert created.id == "TASK-2"
     assert moved.status == "Done"
+    assert edited.id == "TASK-1"
     assert archived.id == "TASK-1"
     assert [(request["tool"], request["arguments"]) for request in daemon.tool_calls] == [
         (
@@ -233,6 +272,21 @@ def test_daemon_mutations_call_expected_tools_and_return_task_views():
             },
         ),
         ("task_edit", {"project": str(project.root), "task_id": "TASK-1", "status": "Done"}),
+        (
+            "task_edit",
+            {
+                "project": str(project.root),
+                "task_id": "TASK-1",
+                "title": "Edited card",
+                "status": "In Progress",
+                "description": "Edited description",
+                "clearPriority": True,
+                "assignees": ["codex"],
+                "labels": ["tui", "metadata"],
+                "milestone": None,
+                "dependencies": ["TASK-2"],
+            },
+        ),
         ("task_archive", {"project": str(project.root), "task_id": "TASK-1"}),
     ]
 

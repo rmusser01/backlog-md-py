@@ -106,7 +106,8 @@ visible dependency; repeated `d` presses cycle through additional visible
 dependencies for the same source task. Press `shift+d` to jump to the first
 visible task that depends on the selection; repeated `shift+d` presses cycle
 through additional visible dependents for the same source task. It keeps a
-dependency-navigation history on `backspace`, and `x` toggles selected-task
+dependency-navigation history on `backspace`, `u` edits the selected task's
+title, status, description, and metadata, and `x` toggles selected-task
 Acceptance Criteria or Definition of Done checklist items. It opportunistically
 uses an already-healthy singleton daemon, but it never starts one. When the
 filter input is focused, `escape` clears it and returns focus to the board.
