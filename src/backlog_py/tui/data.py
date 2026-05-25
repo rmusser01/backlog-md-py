@@ -38,6 +38,9 @@ class BoardDataSource(Protocol):
     def archive_task(self, task_id: str) -> TaskView:
         """Archive a task and return the normalized task view."""
 
+    def set_checklist_item(self, task_id: str, checklist: str, index: int, *, checked: bool) -> TaskView:
+        """Set a selected checklist item check state and return the normalized task view."""
+
     def task_path(self, task_id: str) -> Path:
         """Return a validated absolute local task path."""
 
@@ -82,6 +85,14 @@ class LocalBoardDataSource:
             return task_view_from_record(self.project, task)
 
         return with_project_write_lock(self.project, "tui_task_archive", mutate)
+
+    def set_checklist_item(self, task_id: str, checklist: str, index: int, *, checked: bool) -> TaskView:
+        def mutate() -> TaskView:
+            arguments = _checklist_edit_arguments(checklist, index, checked=checked)
+            task = MutableRepository(self.project).edit_task(task_id, **arguments)
+            return task_view_from_record(self.project, task)
+
+        return with_project_write_lock(self.project, "tui_task_checklist", mutate)
 
     def task_path(self, task_id: str) -> Path:
         task = ReadOnlyRepository(self.project).get_task(task_id)
@@ -192,6 +203,14 @@ class DaemonBoardDataSource:
     def archive_task(self, task_id: str) -> TaskView:
         return self._mutate("task_archive", {"project": str(self.project.root), "task_id": task_id})
 
+    def set_checklist_item(self, task_id: str, checklist: str, index: int, *, checked: bool) -> TaskView:
+        arguments = {
+            "project": str(self.project.root),
+            "task_id": task_id,
+            **_daemon_checklist_edit_arguments(checklist, index, checked=checked),
+        }
+        return self._mutate("task_edit", arguments)
+
     def task_path(self, task_id: str) -> Path:
         client = self._client()
         try:
@@ -276,3 +295,24 @@ def _validate_loopback_http_endpoint(endpoint: str) -> None:
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
     if parsed.scheme != "http" or parsed.hostname not in loopback_hosts:
         raise ValueError("Daemon TUI access requires a loopback HTTP endpoint")
+
+
+def _checklist_edit_arguments(checklist: str, index: int, *, checked: bool) -> dict[str, list[int]]:
+    _validate_checklist_target(checklist, index)
+    if checklist == "AC":
+        return {"check_ac" if checked else "uncheck_ac": [index]}
+    return {"check_dod" if checked else "uncheck_dod": [index]}
+
+
+def _daemon_checklist_edit_arguments(checklist: str, index: int, *, checked: bool) -> dict[str, list[int]]:
+    _validate_checklist_target(checklist, index)
+    if checklist == "AC":
+        return {"checkAc" if checked else "uncheckAc": [index]}
+    return {"checkDod" if checked else "uncheckDod": [index]}
+
+
+def _validate_checklist_target(checklist: str, index: int) -> None:
+    if checklist not in {"AC", "DOD"}:
+        raise ValueError("Checklist must be AC or DOD")
+    if index < 1:
+        raise ValueError("Checklist index must be greater than zero")

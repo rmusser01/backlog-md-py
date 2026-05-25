@@ -11,6 +11,7 @@ from backlog_py.security.paths import assert_path_within_base
 
 
 BoardSourceName = Literal["local", "daemon"]
+ChecklistName = Literal["AC", "DOD"]
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,13 @@ class CreateTaskInput:
     acceptance_criteria: tuple[str, ...] = ()
     definition_of_done_add: tuple[str, ...] = ()
     description: str = ""
+
+
+@dataclass(frozen=True)
+class ChecklistToggleInput:
+    checklist: ChecklistName
+    index: int
+    checked: bool
 
 
 @dataclass(frozen=True)

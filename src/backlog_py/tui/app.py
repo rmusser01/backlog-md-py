@@ -34,7 +34,13 @@ try:
     from textual.widgets import Footer, Header, Input
     from textual.worker import Worker, WorkerFailed
 
-    from backlog_py.tui.dialogs import ArchiveTaskDialog, CreateTaskDialog, EditorConfirmDialog, MoveTaskDialog
+    from backlog_py.tui.dialogs import (
+        ArchiveTaskDialog,
+        ChecklistToggleDialog,
+        CreateTaskDialog,
+        EditorConfirmDialog,
+        MoveTaskDialog,
+    )
     from backlog_py.tui.screens import BoardScreen
 except ModuleNotFoundError as exc:
     if exc.name == "textual":
@@ -66,6 +72,7 @@ class BacklogTuiApp(App[None]):
         Binding("n", "create_task", "New"),
         Binding("a", "archive_task", "Archive"),
         Binding("e", "edit_task", "Edit"),
+        Binding("x", "toggle_checklist", "Checklist"),
         Binding("d", "jump_to_dependency", "Dependency"),
         Binding("shift+d", "jump_to_dependent", "Dependent"),
         Binding("backspace", "jump_back", "Back"),
@@ -290,6 +297,18 @@ class BacklogTuiApp(App[None]):
             return
         self._push_modal(ArchiveTaskDialog(task.id, task.title), self._archive_task_result)
 
+    def action_toggle_checklist(self) -> None:
+        task = self._selected_task()
+        if task is None:
+            return
+        if not task.acceptance_criteria and not task.definition_of_done:
+            self.notify(f"{task.id} has no checklist items", severity="warning")
+            return
+        self._push_modal(
+            ChecklistToggleDialog(task),
+            lambda result: self._toggle_checklist_result(task.id, result),
+        )
+
     def action_edit_task(self) -> None:
         task = self._selected_task()
         if task is None:
@@ -374,6 +393,20 @@ class BacklogTuiApp(App[None]):
             return
         task_id = self.selection.task_id
         self._run_mutation(lambda: self.data_source.archive_task(task_id), name="mutation:archive")
+
+    def _toggle_checklist_result(self, task_id: str, result) -> None:
+        if result is None:
+            return
+        self._run_mutation(
+            lambda: self.data_source.set_checklist_item(
+                task_id,
+                result.checklist,
+                result.index,
+                checked=result.checked,
+            ),
+            reselect_task_id=task_id,
+            name="mutation:checklist",
+        )
 
     def _edit_task_result(self, confirmed: bool, task_id: str, path: Path) -> None:
         if not confirmed:

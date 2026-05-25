@@ -103,9 +103,11 @@ adjacent status. Press `d` to jump to the selected task's first visible
 dependency; repeat `d` to cycle through additional visible dependencies. Press
 `shift+d` to jump to the first visible task that depends on the selection;
 repeat `shift+d` to cycle through additional visible dependents. Press
-`backspace` to return through dependency navigation history. The plain CLI and
-MCP tools remain the recommended automation surfaces. When the filter is
-focused, `escape` clears it and returns focus to the board.
+`backspace` to return through dependency navigation history. Press `x` to
+toggle Acceptance Criteria or Definition of Done checklist items on the
+selected task. The plain CLI and MCP tools remain the recommended automation
+surfaces. When the filter is focused, `escape` clears it and returns focus to
+the board.
 
 ## MCP And Multi-Agent Use
 

@@ -53,6 +53,30 @@ def test_local_data_source_loads_board_and_mutates_under_project_lock(tmp_path, 
     ]
 
 
+def test_local_data_source_toggles_checklist_items_under_project_lock(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    operations = []
+
+    def fake_lock(project_arg, operation, fn):
+        operations.append((project_arg.root, operation))
+        return fn()
+
+    monkeypatch.setattr("backlog_py.tui.data.with_project_write_lock", fake_lock)
+    source = LocalBoardDataSource(project)
+
+    unchecked = source.set_checklist_item("TASK-1", "AC", 1, checked=False)
+    checked = source.set_checklist_item("TASK-1", "DOD", 1, checked=True)
+
+    assert unchecked.acceptance_criteria[0].checked is False
+    assert checked.definition_of_done[0].checked is True
+    assert operations == [
+        (repo, "tui_task_checklist"),
+        (repo, "tui_task_checklist"),
+    ]
+
+
 def test_local_source_task_path_returns_validated_absolute_project_path(tmp_path):
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
@@ -210,6 +234,33 @@ def test_daemon_mutations_call_expected_tools_and_return_task_views():
         ),
         ("task_edit", {"project": str(project.root), "task_id": "TASK-1", "status": "Done"}),
         ("task_archive", {"project": str(project.root), "task_id": "TASK-1"}),
+    ]
+
+
+def test_daemon_data_source_toggles_checklist_items_with_task_edit_arguments():
+    project = discover_project(Path.cwd(), explicit_cwd=FIXTURE_REPO)
+    task = ReadOnlyRepository(project).get_task("TASK-1")
+    detail = {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "description": task.description,
+        "path": task.path.relative_to(project.root).as_posix(),
+        "raw_source": task.raw_source,
+    }
+    daemon = _FakeMcpDaemon({"task_edit": detail})
+    try:
+        source = DaemonBoardDataSource(project, endpoint=daemon.endpoint, token="secret")
+        unchecked = source.set_checklist_item("TASK-1", "AC", 1, checked=False)
+        checked = source.set_checklist_item("TASK-1", "DOD", 1, checked=True)
+    finally:
+        daemon.shutdown()
+
+    assert unchecked.id == "TASK-1"
+    assert checked.id == "TASK-1"
+    assert [(request["tool"], request["arguments"]) for request in daemon.tool_calls] == [
+        ("task_edit", {"project": str(project.root), "task_id": "TASK-1", "uncheckAc": [1]}),
+        ("task_edit", {"project": str(project.root), "task_id": "TASK-1", "checkDod": [1]}),
     ]
 
 

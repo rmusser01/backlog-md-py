@@ -612,6 +612,9 @@ class _StaticSource:
     def archive_task(self, task_id):
         raise NotImplementedError
 
+    def set_checklist_item(self, task_id, checklist, index, *, checked):
+        raise NotImplementedError
+
     def task_path(self, task_id):
         raise NotImplementedError
 

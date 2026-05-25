@@ -7,7 +7,13 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static, TextArea
 
-from backlog_py.tui.models import CreateTaskInput
+from backlog_py.tui.models import (
+    ChecklistItemView,
+    ChecklistName,
+    ChecklistToggleInput,
+    CreateTaskInput,
+    TaskView,
+)
 
 
 class MoveTaskDialog(ModalScreen[str | None]):
@@ -137,6 +143,58 @@ class ArchiveTaskDialog(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ChecklistToggleDialog(ModalScreen[ChecklistToggleInput | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, task: TaskView) -> None:
+        super().__init__()
+        self.task_view = task
+        self.items = _checklist_dialog_items(task)
+        self.index = _first_unchecked_item_index(self.items)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="checklist-dialog", classes="dialog"):
+            yield Static(f"Toggle checklist - {self.task_view.id}", classes="dialog-title", markup=False)
+            yield Static(self._item_text(), id="checklist-item", markup=False)
+            yield Button("Toggle", id="checklist-submit", variant="primary")
+
+    def key_down(self) -> None:
+        if self.items:
+            self.index = min(self.index + 1, len(self.items) - 1)
+            self.query_one("#checklist-item", Static).update(self._item_text())
+
+    def key_up(self) -> None:
+        if self.items:
+            self.index = max(self.index - 1, 0)
+            self.query_one("#checklist-item", Static).update(self._item_text())
+
+    def key_enter(self) -> None:
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "checklist-submit":
+            self._submit()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _submit(self) -> None:
+        if not self.items:
+            self.dismiss(None)
+            return
+        checklist, index, item = self.items[self.index]
+        self.dismiss(ChecklistToggleInput(checklist=checklist, index=index, checked=not item.checked))
+
+    def _item_text(self) -> str:
+        if not self.items:
+            return "No checklist items"
+        checklist, index, item = self.items[self.index]
+        marker = "x" if item.checked else " "
+        label = "Acceptance Criteria" if checklist == "AC" else "Definition of Done"
+        item_id = f" #{item.item_id}" if item.item_id else ""
+        return f"{self.index + 1}/{len(self.items)} {label} {index}\n- [{marker}]{item_id} {item.text}"
+
+
 class EditorConfirmDialog(ModalScreen[bool]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -169,3 +227,19 @@ def parse_multivalue(value: str) -> tuple[str, ...]:
 def _optional_input(value: str) -> str | None:
     text = value.strip()
     return text or None
+
+
+def _checklist_dialog_items(
+    task: TaskView,
+) -> tuple[tuple[ChecklistName, int, ChecklistItemView], ...]:
+    items: list[tuple[ChecklistName, int, ChecklistItemView]] = []
+    items.extend(("AC", index, item) for index, item in enumerate(task.acceptance_criteria, start=1))
+    items.extend(("DOD", index, item) for index, item in enumerate(task.definition_of_done, start=1))
+    return tuple(items)
+
+
+def _first_unchecked_item_index(items: tuple[tuple[ChecklistName, int, ChecklistItemView], ...]) -> int:
+    for index, (_checklist, _item_index, item) in enumerate(items):
+        if not item.checked:
+            return index
+    return 0
