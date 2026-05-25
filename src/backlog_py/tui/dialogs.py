@@ -5,7 +5,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static, TextArea
+from textual.widgets import Button, Input, Label, Markdown, Static, TextArea
 
 from backlog_py.tui.models import (
     ChecklistItemView,
@@ -182,6 +182,35 @@ class EditTaskDialog(ModalScreen[EditTaskInput | None]):
         )
 
 
+class TaskMarkdownPreviewDialog(ModalScreen[None]):
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, task: TaskView) -> None:
+        super().__init__()
+        self.task_view = task
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="markdown-preview-dialog", classes="dialog"):
+            yield Static(
+                f"Markdown preview - {self.task_view.id}",
+                id="markdown-preview-title",
+                classes="dialog-title",
+                markup=False,
+            )
+            yield Markdown(_task_markdown_preview(self.task_view), id="markdown-preview-body")
+            yield Button("Close", id="markdown-preview-close")
+
+    def key_enter(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "markdown-preview-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class ArchiveTaskDialog(ModalScreen[bool]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -306,3 +335,40 @@ def _first_unchecked_item_index(items: tuple[tuple[ChecklistName, int, Checklist
         if not item.checked:
             return index
     return 0
+
+
+def _task_markdown_preview(task: TaskView) -> str:
+    lines = [
+        f"# {task.id} - {task.title}",
+        "",
+        f"- Status: {task.status}",
+        f"- Path: {task.path.as_posix()}",
+    ]
+    if task.priority:
+        lines.append(f"- Priority: {task.priority}")
+    if task.assignees:
+        lines.append(f"- Assignees: {', '.join(task.assignees)}")
+    if task.labels:
+        lines.append(f"- Labels: {', '.join(task.labels)}")
+    if task.milestone:
+        lines.append(f"- Milestone: {task.milestone}")
+    if task.dependencies:
+        lines.append(f"- Dependencies: {', '.join(task.dependencies)}")
+    if task.description:
+        lines.extend(["", "## Description", "", task.description])
+    if task.acceptance_criteria:
+        lines.extend(["", "## Acceptance Criteria", ""])
+        lines.extend(_preview_checklist_lines(task.acceptance_criteria))
+    if task.definition_of_done:
+        lines.extend(["", "## Definition of Done", ""])
+        lines.extend(_preview_checklist_lines(task.definition_of_done))
+    return "\n".join(lines)
+
+
+def _preview_checklist_lines(items: tuple[ChecklistItemView, ...]) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(items, start=1):
+        marker = "x" if item.checked else " "
+        item_id = f" #{item.item_id}" if item.item_id else f" #{index}"
+        lines.append(f"- [{marker}]{item_id} {item.text}")
+    return lines

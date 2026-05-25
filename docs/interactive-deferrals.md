@@ -10,7 +10,7 @@ reviewable file operations are the first compatibility target.
 | Capability | Classification | Agent cutover impact | Decision and reason |
 | --- | --- | --- | --- |
 | Prompt-style board controls | Interactive CLI | Implemented | Interactive terminals can view, edit, or move tasks from `board`; non-interactive output remains deterministic. |
-| Optional Textual Kanban board | Optional TUI extra | Implemented | `backlog-py tui` provides keyboard board navigation, task detail, create/edit/move/archive actions, checklist toggles, configured-editor launch, and board-local filters without making Textual a base dependency. |
+| Optional Textual Kanban board | Optional TUI extra | Implemented | `backlog-py tui` provides keyboard board navigation, task detail, Markdown preview, create/edit/move/archive actions, checklist toggles, configured-editor launch, and board-local filters without making Textual a base dependency. |
 | Overview TUI | Interactive TUI | Implemented | Interactive terminals render a project statistics dashboard from `overview`; non-interactive output remains deterministic. |
 | Interactive task view/editor | Interactive TUI | Implemented | Non-plain `task <id>` renders a human task detail view and interactive terminals can press `E` to launch the configured editor under the project write lock. |
 | Interactive search filters | Interactive TUI | Implemented | Non-plain `search` renders a human filter panel; interactive terminals can refine by status, priority, result type, or modified file while preserving `--plain`. |
@@ -47,9 +47,9 @@ The Python clone keeps these features out of the first cutover path:
 - The optional Textual board is available through `backlog-py tui` after
   installing `backlog-md-py[tui]`. It is a human-facing workflow, not the
   automation contract for agents. It can edit selected-task title, status,
-  description, and metadata, and can toggle selected-task Acceptance Criteria
-  and Definition of Done checklist items through the same safe mutation paths
-  as CLI and MCP.
+  description, and metadata, can render a read-only Markdown preview for the
+  selected task, and can toggle selected-task Acceptance Criteria and Definition
+  of Done checklist items through the same safe mutation paths as CLI and MCP.
 - Interactive overview dashboard output is implemented for human operators
   without changing non-interactive `overview` output.
 - `backlog config` now provides the guided config wizard for human operators.
@@ -71,6 +71,5 @@ The Python clone keeps these features out of the first cutover path:
   `remoteOperations: false` keeps repository reads offline and limited to local
   branch refs.
 - hook bypass is implemented only for explicit local auto-commit opt-in.
-- Remaining rich interactive TUI behavior, such as rich Markdown preview,
-  global search, and settings, is later human-operator convenience, not an
-  agent blocker.
+- Remaining rich interactive TUI behavior, such as global search and settings,
+  is later human-operator convenience, not an agent blocker.

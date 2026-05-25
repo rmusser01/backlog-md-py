@@ -116,3 +116,12 @@ BacklogTuiApp {
     color: $error;
     height: 1;
 }
+
+#markdown-preview-dialog {
+    width: 80;
+}
+
+#markdown-preview-body {
+    height: 20;
+    overflow-y: auto;
+}
