@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Input, TextArea
+from textual.widgets import Input, Markdown, Static, TextArea
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.tui.app import BacklogTuiApp, default_editor_runner
@@ -185,6 +185,27 @@ async def test_checklist_toggle_dialog_toggles_selected_task_item():
 
     assert source.checklist_toggles == [("TASK-1", "AC", 1, True)]
     assert app.snapshot.columns["To Do"][0].acceptance_criteria[0].checked is True
+
+
+@pytest.mark.asyncio
+async def test_markdown_preview_dialog_renders_selected_task_content():
+    source = _MutableSource(_snapshot_for_markdown_preview())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("p")
+        await pilot.pause()
+
+        dialog = pilot.app.screen
+        assert dialog.query_one("#markdown-preview-title", Static).visual.plain == "Markdown preview - TASK-1"
+        preview = dialog.query_one("#markdown-preview-body", Markdown)
+        content = preview.source
+        assert "# TASK-1 - Preview task" in content
+        assert "## Details" in content
+        assert "**Bold** item" in content
+        assert "- [x] #1 Completed criterion" in content
+        assert "- [ ] #1 Rendered preview checked" in content
 
 
 @pytest.mark.asyncio
@@ -453,6 +474,29 @@ def _snapshot_for_metadata_edit() -> BoardSnapshot:
         project_root=_project().root,
         statuses=("To Do", "In Progress", "Done"),
         columns={"To Do": (first,), "In Progress": (), "Done": (second,)},
+        source="local",
+        revision=None,
+    )
+
+
+def _snapshot_for_markdown_preview() -> BoardSnapshot:
+    task = _task_view(
+        "TASK-1",
+        "Preview task",
+        "To Do",
+        description="## Details\n\n**Bold** item",
+        acceptance_criteria=(
+            ChecklistItemView(item_id="1", text="Completed criterion", checked=True),
+        ),
+        definition_of_done=(
+            ChecklistItemView(item_id="1", text="Rendered preview checked", checked=False),
+        ),
+    )
+    return BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (task,), "In Progress": (), "Done": ()},
         source="local",
         revision=None,
     )

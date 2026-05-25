@@ -41,6 +41,7 @@ try:
         EditTaskDialog,
         EditorConfirmDialog,
         MoveTaskDialog,
+        TaskMarkdownPreviewDialog,
     )
     from backlog_py.tui.screens import BoardScreen
 except ModuleNotFoundError as exc:
@@ -72,6 +73,7 @@ class BacklogTuiApp(App[None]):
         Binding("m", "move_task", "Move"),
         Binding("n", "create_task", "New"),
         Binding("u", "update_task", "Update"),
+        Binding("p", "preview_task", "Preview"),
         Binding("a", "archive_task", "Archive"),
         Binding("e", "edit_task", "Edit"),
         Binding("x", "toggle_checklist", "Checklist"),
@@ -302,6 +304,12 @@ class BacklogTuiApp(App[None]):
             EditTaskDialog(task, statuses),
             lambda result: self._update_task_result(task.id, result),
         )
+
+    def action_preview_task(self) -> None:
+        task = self._selected_task()
+        if task is None:
+            return
+        self._push_modal(TaskMarkdownPreviewDialog(task), lambda _result: None)
 
     def action_archive_task(self) -> None:
         task = self._selected_task()
