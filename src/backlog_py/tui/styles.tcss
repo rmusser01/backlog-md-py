@@ -125,3 +125,12 @@ BacklogTuiApp {
     height: 20;
     overflow-y: auto;
 }
+
+#global-search-dialog {
+    width: 80;
+}
+
+#global-search-results {
+    height: 12;
+    overflow-y: auto;
+}

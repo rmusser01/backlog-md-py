@@ -8,7 +8,14 @@ from textual.widgets import Input, Markdown, Static, TextArea
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.tui.app import BacklogTuiApp, default_editor_runner
-from backlog_py.tui.models import BoardSnapshot, ChecklistItemView, CreateTaskInput, EditTaskInput, TaskView
+from backlog_py.tui.models import (
+    BoardSnapshot,
+    ChecklistItemView,
+    CreateTaskInput,
+    EditTaskInput,
+    SearchResultView,
+    TaskView,
+)
 
 
 @pytest.mark.asyncio
@@ -206,6 +213,34 @@ async def test_markdown_preview_dialog_renders_selected_task_content():
         assert "**Bold** item" in content
         assert "- [x] #1 Completed criterion" in content
         assert "- [ ] #1 Rendered preview checked" in content
+
+
+@pytest.mark.asyncio
+async def test_global_search_dialog_lists_results_and_jumps_to_task_result():
+    source = _MutableSource(_snapshot_with_two_tasks())
+    source.search_results = (
+        SearchResultView(kind="task", identifier="TASK-2", title="Second", subtitle="In Progress", task_id="TASK-2"),
+        SearchResultView(kind="document", identifier="guides/search.md", title="Search guide"),
+        SearchResultView(kind="decision", identifier="decision-1", title="Use SQLite", subtitle="accepted"),
+    )
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("s")
+        await _type_text(pilot, "needle")
+        await pilot.pause()
+
+        body = pilot.app.screen.query_one("#global-search-results", Static).visual.plain
+        assert "TASK-2" in body
+        assert "guides/search.md" in body
+        assert "decision-1" in body
+        assert source.search_queries[-1] == ("needle", 20)
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.selected_task_id == "TASK-2"
 
 
 @pytest.mark.asyncio
@@ -544,12 +579,18 @@ class _MutableSource:
         self.moves = []
         self.archives = []
         self.checklist_toggles = []
+        self.search_results = ()
+        self.search_queries = []
 
     def replace_snapshot(self, snapshot: BoardSnapshot) -> None:
         self._snapshot = snapshot
 
     def load_board(self) -> BoardSnapshot:
         return self._snapshot
+
+    def search(self, query: str, limit: int = 20):
+        self.search_queries.append((query, limit))
+        return self.search_results if query.strip() else ()
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         self.creates.append(input)

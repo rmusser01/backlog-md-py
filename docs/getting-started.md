@@ -96,8 +96,9 @@ backlog-py --cwd /path/to/project tui
 ```
 
 Use it for human board work when you want keyboard navigation, task detail,
-Markdown preview, dependency visibility, filters, create/edit/move/archive
-actions, and configured-editor launch. Arrow keys move the selection, `h/j/k/l`
+global search, Markdown preview, dependency visibility, filters,
+create/edit/move/archive actions, and configured-editor launch. Arrow keys move
+the selection, `h/j/k/l`
 provide Vim-style aliases, and `shift+h` / `shift+l` move the selected task to
 the adjacent status. Press `d` to jump to the selected task's first visible
 dependency; repeat `d` to cycle through additional visible dependencies. Press
@@ -107,6 +108,9 @@ repeat `shift+d` to cycle through additional visible dependents. Press
 a read-only Markdown preview for the selected task. Press `u` to edit the
 selected task's title, status, description, and metadata. Press `x` to toggle
 Acceptance Criteria or Definition of Done checklist items on the selected task.
+Press `s` to search tasks, documents, and decisions; task results can jump to
+visible board cards.
+
 The plain CLI and MCP tools remain the recommended automation surfaces. When
 the filter is focused, `escape` clears it and returns focus to the board.
 

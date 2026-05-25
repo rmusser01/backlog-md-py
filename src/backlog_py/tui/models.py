@@ -12,6 +12,7 @@ from backlog_py.security.paths import assert_path_within_base
 
 BoardSourceName = Literal["local", "daemon"]
 ChecklistName = Literal["AC", "DOD"]
+SearchResultKind = Literal["task", "document", "decision"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,15 @@ class TaskView:
     acceptance_criteria: tuple[ChecklistItemView, ...] = ()
     definition_of_done: tuple[ChecklistItemView, ...] = ()
     raw_source: str | None = None
+
+
+@dataclass(frozen=True)
+class SearchResultView:
+    kind: SearchResultKind
+    identifier: str
+    title: str
+    subtitle: str = ""
+    task_id: str | None = None
 
 
 @dataclass(frozen=True)

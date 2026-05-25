@@ -40,6 +40,7 @@ try:
         CreateTaskDialog,
         EditTaskDialog,
         EditorConfirmDialog,
+        GlobalSearchDialog,
         MoveTaskDialog,
         TaskMarkdownPreviewDialog,
     )
@@ -70,6 +71,7 @@ class BacklogTuiApp(App[None]):
         Binding("shift+l", "move_task_right", "Move Right"),
         Binding("r", "refresh", "Refresh"),
         Binding("/", "focus_filter", "Filter"),
+        Binding("s", "global_search", "Search"),
         Binding("m", "move_task", "Move"),
         Binding("n", "create_task", "New"),
         Binding("u", "update_task", "Update"),
@@ -311,6 +313,12 @@ class BacklogTuiApp(App[None]):
             return
         self._push_modal(TaskMarkdownPreviewDialog(task), lambda _result: None)
 
+    def action_global_search(self) -> None:
+        self._push_modal(
+            GlobalSearchDialog(lambda query, limit: self.data_source.search(query, limit=limit)),
+            self._global_search_result,
+        )
+
     def action_archive_task(self) -> None:
         task = self._selected_task()
         if task is None:
@@ -443,6 +451,16 @@ class BacklogTuiApp(App[None]):
         safe_path = assert_path_within_base(self.project.root.resolve(), path)
         self.reselect_task_id = task_id
         self.call_later(self._run_editor_flow, safe_path)
+
+    def _global_search_result(self, task_id: str | None) -> None:
+        if task_id is None:
+            return
+        visible_task_id = self._visible_task_id(task_id)
+        if visible_task_id is None:
+            self.notify(f"{task_id} is not visible on this board", severity="warning")
+            return
+        self._clear_jump_cycle_sources()
+        self._select_task(visible_task_id)
 
     async def _run_editor_flow(self, path: Path) -> None:
         try:

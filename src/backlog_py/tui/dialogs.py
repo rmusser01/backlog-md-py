@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, Sequence
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -13,8 +14,12 @@ from backlog_py.tui.models import (
     ChecklistToggleInput,
     CreateTaskInput,
     EditTaskInput,
+    SearchResultView,
     TaskView,
 )
+
+
+Searcher = Callable[[str, int], Sequence[SearchResultView]]
 
 
 class MoveTaskDialog(ModalScreen[str | None]):
@@ -211,6 +216,76 @@ class TaskMarkdownPreviewDialog(ModalScreen[None]):
         self.dismiss(None)
 
 
+class GlobalSearchDialog(ModalScreen[str | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, searcher: Searcher, *, limit: int = 20) -> None:
+        super().__init__()
+        self.searcher = searcher
+        self.limit = limit
+        self.results: tuple[SearchResultView, ...] = ()
+        self.index = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="global-search-dialog", classes="dialog"):
+            yield Static("Global search", classes="dialog-title", markup=False)
+            yield Input(placeholder="Search tasks, documents, and decisions", id="global-search-query")
+            yield Static("Type to search tasks, documents, and decisions", id="global-search-results", markup=False)
+            yield Button("Jump", id="global-search-submit", variant="primary")
+
+    def on_mount(self) -> None:
+        self.set_focus(self.query_one("#global-search-query", Input))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "global-search-query":
+            self._refresh_results(event.value)
+
+    def key_down(self) -> None:
+        self._move_selection(1)
+
+    def key_up(self) -> None:
+        self._move_selection(-1)
+
+    def key_enter(self) -> None:
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "global-search-submit":
+            self._submit()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _refresh_results(self, query: str) -> None:
+        text = query.strip()
+        if not text:
+            self.results = ()
+            self.index = 0
+            self.query_one("#global-search-results", Static).update("Type to search tasks, documents, and decisions")
+            return
+        try:
+            self.results = tuple(self.searcher(text, self.limit))
+        except Exception as exc:
+            self.results = ()
+            self.index = 0
+            self.query_one("#global-search-results", Static).update(f"Search failed: {exc}")
+            return
+        self.index = min(self.index, max(len(self.results) - 1, 0))
+        self.query_one("#global-search-results", Static).update(_search_result_text(self.results, self.index))
+
+    def _move_selection(self, delta: int) -> None:
+        if not self.results:
+            return
+        self.index = min(max(self.index + delta, 0), len(self.results) - 1)
+        self.query_one("#global-search-results", Static).update(_search_result_text(self.results, self.index))
+
+    def _submit(self) -> None:
+        if not self.results:
+            self.dismiss(None)
+            return
+        self.dismiss(self.results[self.index].task_id)
+
+
 class ArchiveTaskDialog(ModalScreen[bool]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -372,3 +447,14 @@ def _preview_checklist_lines(items: tuple[ChecklistItemView, ...]) -> list[str]:
         item_id = f" #{item.item_id}" if item.item_id else f" #{index}"
         lines.append(f"- [{marker}]{item_id} {item.text}")
     return lines
+
+
+def _search_result_text(results: tuple[SearchResultView, ...], selected_index: int) -> str:
+    if not results:
+        return "No matching tasks, documents, or decisions"
+    lines: list[str] = []
+    for index, result in enumerate(results):
+        marker = ">" if index == selected_index else " "
+        subtitle = f" [{result.subtitle}]" if result.subtitle else ""
+        lines.append(f"{marker} {result.kind} {result.identifier}{subtitle} - {result.title}")
+    return "\n".join(lines)
