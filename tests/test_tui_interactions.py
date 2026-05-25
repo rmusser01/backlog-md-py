@@ -6,7 +6,7 @@ pytest.importorskip("textual")
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.tui.app import BacklogTuiApp, default_editor_runner
-from backlog_py.tui.models import BoardSnapshot, CreateTaskInput, TaskView
+from backlog_py.tui.models import BoardSnapshot, ChecklistItemView, CreateTaskInput, TaskView
 
 
 @pytest.mark.asyncio
@@ -118,6 +118,21 @@ async def test_archive_confirmation_archives_selected_task():
         await pilot.pause()
 
     assert source.archives == ["TASK-1"]
+
+
+@pytest.mark.asyncio
+async def test_checklist_toggle_dialog_toggles_selected_task_item():
+    source = _MutableSource(_snapshot_with_checklists())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("x")
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert source.checklist_toggles == [("TASK-1", "AC", 1, True)]
+    assert app.snapshot.columns["To Do"][0].acceptance_criteria[0].checked is True
 
 
 @pytest.mark.asyncio
@@ -346,6 +361,29 @@ def _snapshot_with_two_tasks(*, raw_secret: str | None = None) -> BoardSnapshot:
     )
 
 
+def _snapshot_with_checklists() -> BoardSnapshot:
+    task = _task_view(
+        "TASK-1",
+        "With checklist",
+        "To Do",
+        acceptance_criteria=(
+            ChecklistItemView(item_id="1", text="First acceptance criterion", checked=False),
+            ChecklistItemView(item_id="2", text="Second acceptance criterion", checked=True),
+        ),
+        definition_of_done=(
+            ChecklistItemView(item_id="1", text="Verification passes", checked=False),
+        ),
+    )
+    return BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (task,), "In Progress": (), "Done": ()},
+        source="local",
+        revision=None,
+    )
+
+
 def _task_view(
     task_id: str,
     title: str,
@@ -354,6 +392,8 @@ def _task_view(
     priority: str | None = None,
     assignees: tuple[str, ...] = (),
     dependencies: tuple[str, ...] = (),
+    acceptance_criteria: tuple[ChecklistItemView, ...] = (),
+    definition_of_done: tuple[ChecklistItemView, ...] = (),
     raw_source: str | None = None,
 ) -> TaskView:
     return TaskView(
@@ -365,6 +405,8 @@ def _task_view(
         priority=priority,
         assignees=assignees,
         dependencies=dependencies,
+        acceptance_criteria=acceptance_criteria,
+        definition_of_done=definition_of_done,
         raw_source=raw_source,
     )
 
@@ -377,6 +419,7 @@ class _MutableSource:
         self.creates = []
         self.moves = []
         self.archives = []
+        self.checklist_toggles = []
 
     def replace_snapshot(self, snapshot: BoardSnapshot) -> None:
         self._snapshot = snapshot
@@ -440,6 +483,44 @@ class _MutableSource:
         )
         return task
 
+    def set_checklist_item(self, task_id: str, checklist: str, index: int, *, checked: bool) -> TaskView:
+        self.checklist_toggles.append((task_id, checklist, index, checked))
+        task = self._find(task_id)
+        if checklist == "AC":
+            acceptance_criteria = _toggle_item(task.acceptance_criteria, index, checked=checked)
+            definition_of_done = task.definition_of_done
+        else:
+            acceptance_criteria = task.acceptance_criteria
+            definition_of_done = _toggle_item(task.definition_of_done, index, checked=checked)
+        updated = TaskView(
+            id=task.id,
+            title=task.title,
+            status=task.status,
+            description=task.description,
+            path=task.path,
+            priority=task.priority,
+            assignees=task.assignees,
+            labels=task.labels,
+            milestone=task.milestone,
+            dependencies=task.dependencies,
+            acceptance_criteria=acceptance_criteria,
+            definition_of_done=definition_of_done,
+            raw_source=task.raw_source,
+        )
+        columns = {
+            status: tuple(updated if item.id == task_id else item for item in tasks)
+            for status, tasks in self._snapshot.columns.items()
+        }
+        self._snapshot = BoardSnapshot(
+            self._snapshot.project_name,
+            self._snapshot.project_root,
+            self._snapshot.statuses,
+            columns,
+            self._snapshot.source,
+            self._snapshot.revision,
+        )
+        return updated
+
     def task_path(self, task_id: str) -> Path:
         return self._snapshot.project_root / self._find(task_id).path
 
@@ -461,4 +542,15 @@ def _snapshot_with_added_task(snapshot: BoardSnapshot, task: TaskView) -> BoardS
         columns,
         snapshot.source,
         snapshot.revision,
+    )
+
+
+def _toggle_item(items: tuple[ChecklistItemView, ...], index: int, *, checked: bool) -> tuple[ChecklistItemView, ...]:
+    return tuple(
+        ChecklistItemView(
+            item_id=item.item_id,
+            text=item.text,
+            checked=checked if offset == index else item.checked,
+        )
+        for offset, item in enumerate(items, start=1)
     )
