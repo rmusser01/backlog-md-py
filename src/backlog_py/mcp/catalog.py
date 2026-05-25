@@ -102,6 +102,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 ),
                 "acceptanceCriteriaAdd": _string_array_schema("Acceptance criteria to append."),
                 "acceptanceCriteriaSet": _string_array_schema("Acceptance criteria to replace the section with."),
+                "clearPriority": {"type": "boolean", "description": "Clear priority frontmatter."},
             },
             required=("project", "task_id"),
         ),

@@ -4,9 +4,11 @@ import pytest
 
 pytest.importorskip("textual")
 
+from textual.widgets import Input, TextArea
+
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.tui.app import BacklogTuiApp, default_editor_runner
-from backlog_py.tui.models import BoardSnapshot, ChecklistItemView, CreateTaskInput, TaskView
+from backlog_py.tui.models import BoardSnapshot, ChecklistItemView, CreateTaskInput, EditTaskInput, TaskView
 
 
 @pytest.mark.asyncio
@@ -104,6 +106,56 @@ async def test_create_dialog_creates_task_with_first_slice_fields():
             description="Description body",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_update_dialog_edits_selected_task_metadata():
+    source = _MutableSource(_snapshot_for_metadata_edit())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("u")
+        await pilot.pause()
+
+        dialog = pilot.app.screen
+        dialog.query_one("#edit-title", Input).value = "Updated card"
+        dialog.query_one("#edit-status", Input).value = "In Progress"
+        dialog.query_one("#edit-priority", Input).value = ""
+        dialog.query_one("#edit-assignees", Input).value = "codex, reviewer"
+        dialog.query_one("#edit-labels", Input).value = "tui, metadata"
+        dialog.query_one("#edit-milestone", Input).value = ""
+        dialog.query_one("#edit-dependencies", Input).value = "TASK-2"
+        dialog.query_one("#edit-description", TextArea).text = "Updated description"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert source.edits == [
+        (
+            "TASK-1",
+            EditTaskInput(
+                title="Updated card",
+                status="In Progress",
+                description="Updated description",
+                priority=None,
+                clear_priority=True,
+                assignees=("codex", "reviewer"),
+                labels=("tui", "metadata"),
+                milestone=None,
+                clear_milestone=True,
+                dependencies=("TASK-2",),
+            ),
+        )
+    ]
+    edited = app.snapshot.columns["In Progress"][0]
+    assert edited.title == "Updated card"
+    assert edited.priority is None
+    assert edited.assignees == ("codex", "reviewer")
+    assert edited.labels == ("tui", "metadata")
+    assert edited.milestone is None
+    assert edited.dependencies == ("TASK-2",)
+    assert edited.description == "Updated description"
+    assert app.selected_task_id == "TASK-1"
 
 
 @pytest.mark.asyncio
@@ -384,13 +436,38 @@ def _snapshot_with_checklists() -> BoardSnapshot:
     )
 
 
+def _snapshot_for_metadata_edit() -> BoardSnapshot:
+    first = _task_view(
+        "TASK-1",
+        "Editable",
+        "To Do",
+        description="Current description",
+        priority="high",
+        assignees=("alice",),
+        labels=("old",),
+        milestone="Release 1",
+    )
+    second = _task_view("TASK-2", "Dependency", "Done")
+    return BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={"To Do": (first,), "In Progress": (), "Done": (second,)},
+        source="local",
+        revision=None,
+    )
+
+
 def _task_view(
     task_id: str,
     title: str,
     status: str,
     *,
+    description: str = "",
     priority: str | None = None,
     assignees: tuple[str, ...] = (),
+    labels: tuple[str, ...] = (),
+    milestone: str | None = None,
     dependencies: tuple[str, ...] = (),
     acceptance_criteria: tuple[ChecklistItemView, ...] = (),
     definition_of_done: tuple[ChecklistItemView, ...] = (),
@@ -400,10 +477,12 @@ def _task_view(
         id=task_id,
         title=title,
         status=status,
-        description="",
+        description=description,
         path=Path(f"backlog/tasks/{task_id.lower()}.md"),
         priority=priority,
         assignees=assignees,
+        labels=labels,
+        milestone=milestone,
         dependencies=dependencies,
         acceptance_criteria=acceptance_criteria,
         definition_of_done=definition_of_done,
@@ -417,6 +496,7 @@ class _MutableSource:
     def __init__(self, snapshot: BoardSnapshot):
         self._snapshot = snapshot
         self.creates = []
+        self.edits = []
         self.moves = []
         self.archives = []
         self.checklist_toggles = []
@@ -432,6 +512,39 @@ class _MutableSource:
         task = _task_view("TASK-NEW", input.title, input.status or "To Do", priority=input.priority)
         self._snapshot = _snapshot_with_added_task(self._snapshot, task)
         return task
+
+    def edit_task(self, task_id: str, input: EditTaskInput) -> TaskView:
+        self.edits.append((task_id, input))
+        task = self._find(task_id)
+        updated = TaskView(
+            id=task.id,
+            title=input.title,
+            status=input.status,
+            description=input.description,
+            path=task.path,
+            priority=None if input.clear_priority else input.priority,
+            assignees=input.assignees,
+            labels=input.labels,
+            milestone=None if input.clear_milestone else input.milestone,
+            dependencies=input.dependencies,
+            acceptance_criteria=task.acceptance_criteria,
+            definition_of_done=task.definition_of_done,
+            raw_source=task.raw_source,
+        )
+        columns = {
+            status: tuple(item for item in tasks if item.id != task_id)
+            for status, tasks in self._snapshot.columns.items()
+        }
+        columns[updated.status] = (*columns.get(updated.status, ()), updated)
+        self._snapshot = BoardSnapshot(
+            self._snapshot.project_name,
+            self._snapshot.project_root,
+            self._snapshot.statuses,
+            columns,
+            self._snapshot.source,
+            self._snapshot.revision,
+        )
+        return updated
 
     def move_task(self, task_id: str, status: str) -> TaskView:
         self.moves.append((task_id, status))

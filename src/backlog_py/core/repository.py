@@ -381,6 +381,7 @@ class MutableRepository(ReadOnlyRepository):
         assignees: Sequence[str] | None = None,
         labels: Sequence[str] | None = None,
         priority: str | None = None,
+        clear_priority: bool = False,
         milestone: str | None = None,
         ordinal: int | float | str | None = None,
         clear_milestone: bool = False,
@@ -394,6 +395,8 @@ class MutableRepository(ReadOnlyRepository):
         status: str | None = None,
         on_status_change: str | bool | None = None,
     ) -> TaskRecord:
+        if priority is not None and clear_priority:
+            raise TaskMutationError("Cannot set and clear priority in one edit")
         if milestone is not None and clear_milestone:
             raise TaskMutationError("Cannot set and clear milestone in one edit")
         task = self.get_task(task_id)
@@ -501,6 +504,7 @@ class MutableRepository(ReadOnlyRepository):
             or normalized_assignees is not None
             or normalized_labels is not None
             or normalized_priority is not None
+            or clear_priority
             or normalized_milestone is not None
             or normalized_ordinal is not None
             or clear_milestone
@@ -523,6 +527,8 @@ class MutableRepository(ReadOnlyRepository):
                 updates["labels"] = normalized_labels
             if normalized_priority is not None:
                 updates["priority"] = normalized_priority
+            if clear_priority:
+                updates["priority"] = None
             if normalized_milestone is not None:
                 updates["milestone"] = normalized_milestone
             if normalized_ordinal is not None:

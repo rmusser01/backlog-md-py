@@ -16,6 +16,7 @@ from backlog_py.tui.models import (
     BoardSnapshot,
     BoardSourceName,
     CreateTaskInput,
+    EditTaskInput,
     TaskView,
     board_snapshot_from_local,
     task_view_from_mcp_payload,
@@ -34,6 +35,9 @@ class BoardDataSource(Protocol):
 
     def move_task(self, task_id: str, status: str) -> TaskView:
         """Move a task to a new status and return the normalized task view."""
+
+    def edit_task(self, task_id: str, input: EditTaskInput) -> TaskView:
+        """Edit selected task metadata and return the normalized task view."""
 
     def archive_task(self, task_id: str) -> TaskView:
         """Archive a task and return the normalized task view."""
@@ -78,6 +82,13 @@ class LocalBoardDataSource:
             return task_view_from_record(self.project, task)
 
         return with_project_write_lock(self.project, "tui_task_move", mutate)
+
+    def edit_task(self, task_id: str, input: EditTaskInput) -> TaskView:
+        def mutate() -> TaskView:
+            task = MutableRepository(self.project).edit_task(task_id, **_local_edit_arguments(input))
+            return task_view_from_record(self.project, task)
+
+        return with_project_write_lock(self.project, "tui_task_edit", mutate)
 
     def archive_task(self, task_id: str) -> TaskView:
         def mutate() -> TaskView:
@@ -200,6 +211,14 @@ class DaemonBoardDataSource:
     def move_task(self, task_id: str, status: str) -> TaskView:
         return self._mutate("task_edit", {"project": str(self.project.root), "task_id": task_id, "status": status})
 
+    def edit_task(self, task_id: str, input: EditTaskInput) -> TaskView:
+        arguments = {
+            "project": str(self.project.root),
+            "task_id": task_id,
+            **_daemon_edit_arguments(input),
+        }
+        return self._mutate("task_edit", arguments)
+
     def archive_task(self, task_id: str) -> TaskView:
         return self._mutate("task_archive", {"project": str(self.project.root), "task_id": task_id})
 
@@ -309,6 +328,46 @@ def _daemon_checklist_edit_arguments(checklist: str, index: int, *, checked: boo
     if checklist == "AC":
         return {"checkAc" if checked else "uncheckAc": [index]}
     return {"checkDod" if checked else "uncheckDod": [index]}
+
+
+def _local_edit_arguments(input: EditTaskInput) -> dict[str, object]:
+    arguments: dict[str, object] = {
+        "title": input.title,
+        "status": input.status,
+        "description": input.description,
+        "assignees": input.assignees,
+        "labels": input.labels,
+        "dependencies": input.dependencies,
+    }
+    if input.clear_priority:
+        arguments["clear_priority"] = True
+    elif input.priority is not None:
+        arguments["priority"] = input.priority
+    if input.clear_milestone:
+        arguments["clear_milestone"] = True
+    elif input.milestone is not None:
+        arguments["milestone"] = input.milestone
+    return arguments
+
+
+def _daemon_edit_arguments(input: EditTaskInput) -> dict[str, object]:
+    arguments: dict[str, object] = {
+        "title": input.title,
+        "status": input.status,
+        "description": input.description,
+        "assignees": list(input.assignees),
+        "labels": list(input.labels),
+        "dependencies": list(input.dependencies),
+    }
+    if input.clear_priority:
+        arguments["clearPriority"] = True
+    elif input.priority is not None:
+        arguments["priority"] = input.priority
+    if input.clear_milestone:
+        arguments["milestone"] = None
+    elif input.milestone is not None:
+        arguments["milestone"] = input.milestone
+    return arguments
 
 
 def _validate_checklist_target(checklist: str, index: int) -> None:

@@ -106,11 +106,13 @@ BacklogTuiApp {
 
 #create-ac,
 #create-dod,
-#create-description {
+#create-description,
+#edit-description {
     height: 4;
 }
 
-#create-error {
+#create-error,
+#edit-error {
     color: $error;
     height: 1;
 }

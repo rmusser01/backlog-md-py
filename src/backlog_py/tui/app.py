@@ -38,6 +38,7 @@ try:
         ArchiveTaskDialog,
         ChecklistToggleDialog,
         CreateTaskDialog,
+        EditTaskDialog,
         EditorConfirmDialog,
         MoveTaskDialog,
     )
@@ -70,6 +71,7 @@ class BacklogTuiApp(App[None]):
         Binding("/", "focus_filter", "Filter"),
         Binding("m", "move_task", "Move"),
         Binding("n", "create_task", "New"),
+        Binding("u", "update_task", "Update"),
         Binding("a", "archive_task", "Archive"),
         Binding("e", "edit_task", "Edit"),
         Binding("x", "toggle_checklist", "Checklist"),
@@ -291,6 +293,16 @@ class BacklogTuiApp(App[None]):
             self._create_task_result,
         )
 
+    def action_update_task(self) -> None:
+        task = self._selected_task()
+        if task is None or self.snapshot is None:
+            return
+        statuses = move_status_choices(self.project, self.snapshot.statuses)
+        self._push_modal(
+            EditTaskDialog(task, statuses),
+            lambda result: self._update_task_result(task.id, result),
+        )
+
     def action_archive_task(self) -> None:
         task = self._selected_task()
         if task is None:
@@ -387,6 +399,15 @@ class BacklogTuiApp(App[None]):
         if input is None:
             return
         self._run_mutation(lambda: self.data_source.create_task(input), name="mutation:create")
+
+    def _update_task_result(self, task_id: str, input) -> None:
+        if input is None:
+            return
+        self._run_mutation(
+            lambda: self.data_source.edit_task(task_id, input),
+            reselect_task_id=task_id,
+            name="mutation:update",
+        )
 
     def _archive_task_result(self, confirmed: bool) -> None:
         if not confirmed or self.selection.task_id is None:

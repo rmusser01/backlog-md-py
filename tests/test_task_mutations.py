@@ -270,6 +270,28 @@ def test_edit_task_can_clear_milestone_frontmatter(tmp_path):
     assert "milestone:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
 
 
+def test_edit_task_can_clear_priority_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    repository.create_task(title="Prioritized task", task_id="TASK-2", priority="high")
+
+    edited = repository.edit_task("TASK-2", clear_priority=True)
+
+    assert "priority" not in edited.parsed.frontmatter
+    assert "priority:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
+
+
+def test_edit_task_rejects_set_and_clear_priority_before_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="Cannot set and clear priority"):
+        repository.edit_task("TASK-1", priority="high", clear_priority=True)
+
+    assert _snapshot_tasks(repo) == before
+
+
 def test_task_ordinal_rejects_invalid_values_before_write(tmp_path):
     repo = _copy_fixture(tmp_path)
     repository = _repository(repo)
@@ -1204,6 +1226,13 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     cleared_milestone = task_edit(project, task_id="TASK-2", milestone=None)
     assert "milestone" not in cleared_milestone
     assert "milestone:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
+
+    cleared_priority = task_edit(project, task_id="TASK-2", clearPriority=True)
+    assert "priority" not in cleared_priority
+    assert "priority:" not in _task_file(repo, "task-2").read_text(encoding="utf-8")
+
+    with pytest.raises(TaskMutationError, match="Cannot set and clear priority"):
+        task_edit(project, task_id="TASK-2", priority="low", clearPriority=True)
 
     task_edit(project, task_id="TASK-2", planClear=True)
     plan_cleared = _task_file(repo, "task-2").read_text(encoding="utf-8")

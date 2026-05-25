@@ -30,6 +30,8 @@
 - Avoid duplicate TUI dependency-navigation history entries during repeated
   cycles.
 - Clear the focused TUI filter with `escape` and return focus to the board.
+- Add TUI selected-task metadata editing for title, status, description,
+  priority, assignees, labels, milestone, and dependencies.
 - Add TUI Acceptance Criteria and Definition of Done checklist toggles.
 
 ### Validation
