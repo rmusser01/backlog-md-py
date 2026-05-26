@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from backlog_py import __version__
@@ -128,6 +129,8 @@ def test_tui_command_without_project_shows_cli_error(tmp_path, monkeypatch):
 
 
 def test_tui_command_invokes_implemented_tui_app(monkeypatch):
+    pytest.importorskip("textual")
+
     from backlog_py.cli import main as cli_main
     from backlog_py.tui import app as tui_app
 
