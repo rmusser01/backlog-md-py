@@ -112,7 +112,9 @@ description, and metadata, and `x` toggles selected-task Acceptance Criteria or
 Definition of Done checklist items. Press `s` to search tasks, documents, and
 decisions; task results can jump to visible board cards. Press `c` to edit safe
 non-shell project settings such as statuses, default status, browser port,
-remote read behavior, and local auto-commit. It opportunistically uses an
+remote read behavior, and local auto-commit. Press `o` to edit project-level
+Definition of Done defaults, one item per line, and `ctrl+s` to save that
+multiline dialog. It opportunistically uses an
 already-healthy singleton daemon, but it never starts one. When the filter input
 is focused, `escape` clears it and returns focus to the board.
 

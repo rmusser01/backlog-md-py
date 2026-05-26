@@ -36,6 +36,7 @@
 - Add TUI global search across tasks, documents, and decisions.
 - Add TUI safe project settings editing for the browser-compatible non-shell
   settings allowlist.
+- Add TUI Definition of Done defaults editing.
 - Add TUI Acceptance Criteria and Definition of Done checklist toggles.
 
 ### Validation

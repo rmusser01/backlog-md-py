@@ -47,8 +47,8 @@ backlog-py compat status
 - Optional terminal Kanban board: `python -m pip install "backlog-md-py[tui]"`
   and run `backlog-py --cwd /path/to/project tui` for keyboard navigation,
   task detail, global search, Markdown preview, dependency visibility, filters,
-  safe project settings, checklist toggles, and create/edit/move/archive
-  workflows.
+  safe project settings, Definition of Done defaults, checklist toggles, and
+  create/edit/move/archive workflows.
 
 The browser board is optional; see the
 [browser release validation guide](docs/browser-release-validation.md) for the
