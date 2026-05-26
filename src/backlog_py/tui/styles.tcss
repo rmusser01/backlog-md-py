@@ -134,3 +134,16 @@ BacklogTuiApp {
     height: 12;
     overflow-y: auto;
 }
+
+#settings-dialog {
+    width: 76;
+}
+
+#settings-statuses {
+    height: 4;
+}
+
+#settings-error {
+    color: $error;
+    height: 1;
+}

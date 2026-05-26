@@ -34,6 +34,8 @@
   priority, assignees, labels, milestone, and dependencies.
 - Add a TUI read-only Markdown preview for the selected task.
 - Add TUI global search across tasks, documents, and decisions.
+- Add TUI safe project settings editing for the browser-compatible non-shell
+  settings allowlist.
 - Add TUI Acceptance Criteria and Definition of Done checklist toggles.
 
 ### Validation

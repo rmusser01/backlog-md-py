@@ -19,6 +19,7 @@ from backlog_py.tui.data import (
     LocalBoardDataSource,
     create_board_data_source,
 )
+from backlog_py.tui import models as tui_models
 from backlog_py.tui.models import CreateTaskInput, EditTaskInput
 
 
@@ -136,6 +137,83 @@ def test_local_data_source_searches_tasks_documents_and_decisions(tmp_path):
     assert results[0].task_id == task.id
     assert results[1].task_id is None
     assert results[2].task_id is None
+
+
+def test_local_data_source_updates_safe_settings_under_project_lock(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    operations = []
+
+    def fake_lock(project_arg, operation, fn):
+        operations.append((project_arg.root, operation))
+        return fn()
+
+    monkeypatch.setattr("backlog_py.tui.data.with_project_write_lock", fake_lock)
+    source = LocalBoardDataSource(project)
+    settings_input = tui_models.SettingsInput(
+        project_name="TUI project",
+        default_assignee="codex",
+        default_status="Ready",
+        date_format="dd/mm/yyyy",
+        include_datetime_in_dates=False,
+        default_port=6543,
+        auto_open_browser=False,
+        zero_padded_ids=4,
+        auto_commit=True,
+        remote_operations=True,
+        check_active_branches=True,
+        active_branch_days=14,
+        statuses=("Ready", "In Progress", "Done"),
+    )
+
+    updated = source.update_settings(settings_input)
+
+    assert updated.project_name == "TUI project"
+    assert updated.default_assignee == "codex"
+    assert updated.default_status == "Ready"
+    assert updated.date_format == "dd/mm/yyyy"
+    assert updated.include_datetime_in_dates is False
+    assert updated.default_port == 6543
+    assert updated.auto_open_browser is False
+    assert updated.zero_padded_ids == 4
+    assert updated.auto_commit is True
+    assert updated.remote_operations is True
+    assert updated.check_active_branches is True
+    assert updated.active_branch_days == 14
+    assert updated.statuses == ("Ready", "In Progress", "Done")
+    assert source.project.config.project_name == "TUI project"
+    assert source.load_board().statuses == ("Ready", "In Progress", "Done")
+    assert operations == [(repo, "tui_config_settings_update")]
+
+
+def test_local_data_source_rejects_invalid_settings_without_partial_mutation(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    source = LocalBoardDataSource(project)
+    before = project.config_path.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Project name is required"):
+        source.update_settings(
+            tui_models.SettingsInput(
+                project_name="",
+                default_assignee=None,
+                default_status="Ready",
+                date_format="dd/mm/yyyy",
+                include_datetime_in_dates=False,
+                default_port=6543,
+                auto_open_browser=False,
+                zero_padded_ids=4,
+                auto_commit=True,
+                remote_operations=True,
+                check_active_branches=True,
+                active_branch_days=14,
+                statuses=(),
+            )
+        )
+
+    assert project.config_path.read_text(encoding="utf-8") == before
 
 
 def test_daemon_data_source_loads_board_with_task_view_hydration():

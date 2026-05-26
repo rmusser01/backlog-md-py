@@ -9,17 +9,20 @@ from urllib.parse import urlparse
 
 from backlog_py.core.decisions import DecisionService
 from backlog_py.core.documents import DocumentService
-from backlog_py.core.models import BacklogProject
+from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.daemon.lifecycle import DaemonNotRunningError, daemon_status
 from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.security.paths import assert_path_within_base
+from backlog_py.storage.config import load_config, set_config_value
 from backlog_py.tui.models import (
     BoardSnapshot,
     BoardSourceName,
     CreateTaskInput,
     EditTaskInput,
     SearchResultView,
+    SettingsInput,
+    SettingsView,
     TaskView,
     board_snapshot_from_local,
     task_view_from_mcp_payload,
@@ -28,6 +31,7 @@ from backlog_py.tui.models import (
 
 
 class BoardDataSource(Protocol):
+    project: BacklogProject
     source_name: BoardSourceName
 
     def load_board(self) -> BoardSnapshot:
@@ -35,6 +39,12 @@ class BoardDataSource(Protocol):
 
     def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
         """Search project tasks, documents, and decisions for TUI display."""
+
+    def load_settings(self) -> SettingsView:
+        """Load editable safe project settings for TUI display."""
+
+    def update_settings(self, input: SettingsInput) -> SettingsView:
+        """Persist editable safe project settings and return refreshed values."""
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         """Create a task and return the normalized task view."""
@@ -55,7 +65,7 @@ class BoardDataSource(Protocol):
         """Return a validated absolute local task path."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class LocalBoardDataSource:
     project: BacklogProject
     source_name: BoardSourceName = "local"
@@ -66,6 +76,17 @@ class LocalBoardDataSource:
 
     def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
         return _search_project(self.project, query, limit=limit)
+
+    def load_settings(self) -> SettingsView:
+        return settings_view_from_config(load_config(self.project.config_path))
+
+    def update_settings(self, input: SettingsInput) -> SettingsView:
+        def mutate() -> SettingsView:
+            settings = _update_project_settings(self.project, input)
+            self.project = _refresh_project_config(self.project)
+            return settings
+
+        return with_project_write_lock(self.project, "tui_config_settings_update", mutate)
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         def mutate() -> TaskView:
@@ -158,7 +179,7 @@ class DaemonMcpClient:
         return _extract_tool_result(result)
 
 
-@dataclass(frozen=True)
+@dataclass
 class DaemonBoardDataSource:
     project: BacklogProject
     endpoint: str
@@ -203,6 +224,17 @@ class DaemonBoardDataSource:
 
     def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
         return _search_project(self.project, query, limit=limit)
+
+    def load_settings(self) -> SettingsView:
+        return settings_view_from_config(load_config(self.project.config_path))
+
+    def update_settings(self, input: SettingsInput) -> SettingsView:
+        def mutate() -> SettingsView:
+            settings = _update_project_settings(self.project, input)
+            self.project = _refresh_project_config(self.project)
+            return settings
+
+        return with_project_write_lock(self.project, "tui_config_settings_update", mutate)
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         arguments: dict[str, Any] = {
@@ -319,6 +351,106 @@ def _search_project(project: BacklogProject, query: str, *, limit: int) -> tuple
             return tuple(results)
 
     return tuple(results)
+
+
+def settings_view_from_config(config: BacklogConfig) -> SettingsView:
+    return SettingsView(
+        project_name=config.project_name,
+        default_assignee=config.default_assignee,
+        default_status=config.default_status,
+        date_format=config.date_format,
+        include_datetime_in_dates=config.include_datetime_in_dates,
+        default_port=config.default_port,
+        auto_open_browser=config.auto_open_browser,
+        zero_padded_ids=config.zero_padded_ids,
+        auto_commit=config.auto_commit,
+        remote_operations=config.remote_operations,
+        check_active_branches=config.check_active_branches,
+        active_branch_days=config.active_branch_days,
+        statuses=tuple(config.statuses or ()),
+    )
+
+
+def _update_project_settings(project: BacklogProject, input: SettingsInput) -> SettingsView:
+    _validate_settings_input(input)
+    for key, value in _settings_update_values(input):
+        set_config_value(project, key, value)
+    return settings_view_from_config(load_config(project.config_path))
+
+
+def _settings_update_values(input: SettingsInput) -> tuple[tuple[str, str], ...]:
+    return (
+        ("projectName", input.project_name.strip()),
+        ("defaultAssignee", "" if input.default_assignee is None else input.default_assignee.strip()),
+        ("defaultStatus", input.default_status.strip()),
+        ("dateFormat", input.date_format.strip()),
+        ("includeDatetimeInDates", _bool_text(input.include_datetime_in_dates)),
+        ("defaultPort", str(input.default_port)),
+        ("autoOpenBrowser", _bool_text(input.auto_open_browser)),
+        ("zeroPaddedIds", str(input.zero_padded_ids or 0)),
+        ("autoCommit", _bool_text(input.auto_commit)),
+        ("remoteOperations", _bool_text(input.remote_operations)),
+        ("checkActiveBranches", _bool_text(input.check_active_branches)),
+        ("activeBranchDays", str(input.active_branch_days)),
+        ("statuses", json.dumps([status.strip() for status in input.statuses])),
+    )
+
+
+def _validate_settings_input(input: SettingsInput) -> None:
+    _require_non_empty_string(input.project_name, "Project name")
+    _require_optional_string(input.default_assignee, "Default assignee")
+    _require_non_empty_string(input.default_status, "Default status")
+    _require_non_empty_string(input.date_format, "Date format")
+    _require_bool(input.include_datetime_in_dates, "Include datetime in dates")
+    _require_int(input.default_port, "Default browser port", minimum=1, maximum=65535)
+    _require_bool(input.auto_open_browser, "Auto-open browser")
+    if input.zero_padded_ids is not None:
+        _require_int(input.zero_padded_ids, "Zero-padded ID width", minimum=0)
+    _require_bool(input.auto_commit, "Auto-commit")
+    _require_bool(input.remote_operations, "Remote operations")
+    _require_bool(input.check_active_branches, "Check active branches")
+    _require_int(input.active_branch_days, "Active branch days", minimum=1)
+    if not input.statuses:
+        raise ValueError("Statuses must include at least one status")
+    for status in input.statuses:
+        _require_non_empty_string(status, "Statuses")
+
+
+def _require_non_empty_string(value: object, label: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} is required")
+
+
+def _require_optional_string(value: object, label: str) -> None:
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+
+
+def _require_bool(value: object, label: str) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be true or false")
+
+
+def _require_int(value: object, label: str, *, minimum: int | None = None, maximum: int | None = None) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{label} must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{label} must be at most {maximum}")
+
+
+def _refresh_project_config(project: BacklogProject) -> BacklogProject:
+    return BacklogProject(
+        root=project.root,
+        backlog_dir=project.backlog_dir,
+        config_path=project.config_path,
+        config=load_config(project.config_path),
+    )
+
+
+def _bool_text(value: bool) -> str:
+    return "true" if value else "false"
 
 
 def _extract_tool_result(response: object) -> Any:

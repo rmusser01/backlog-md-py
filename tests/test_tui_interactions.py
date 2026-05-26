@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -241,6 +242,65 @@ async def test_global_search_dialog_lists_results_and_jumps_to_task_result():
         await pilot.pause()
 
         assert app.selected_task_id == "TASK-2"
+
+
+@pytest.mark.asyncio
+async def test_settings_dialog_updates_safe_project_settings():
+    source = _MutableSource(_snapshot_with_two_tasks())
+    source.settings = SimpleNamespace(
+        project_name="Demo",
+        default_assignee=None,
+        default_status="To Do",
+        date_format="yyyy-mm-dd",
+        include_datetime_in_dates=True,
+        default_port=6420,
+        auto_open_browser=True,
+        zero_padded_ids=None,
+        auto_commit=False,
+        remote_operations=False,
+        check_active_branches=False,
+        active_branch_days=30,
+        statuses=("To Do", "In Progress", "Done"),
+    )
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("c")
+        await pilot.pause()
+
+        dialog = pilot.app.screen
+        dialog.query_one("#settings-project-name", Input).value = "TUI project"
+        dialog.query_one("#settings-default-assignee", Input).value = "codex"
+        dialog.query_one("#settings-default-status", Input).value = "Ready"
+        dialog.query_one("#settings-date-format", Input).value = "dd/mm/yyyy"
+        dialog.query_one("#settings-include-datetime", Input).value = "false"
+        dialog.query_one("#settings-default-port", Input).value = "6543"
+        dialog.query_one("#settings-auto-open-browser", Input).value = "false"
+        dialog.query_one("#settings-zero-padded-ids", Input).value = "4"
+        dialog.query_one("#settings-auto-commit", Input).value = "true"
+        dialog.query_one("#settings-remote-operations", Input).value = "true"
+        dialog.query_one("#settings-check-active-branches", Input).value = "true"
+        dialog.query_one("#settings-active-branch-days", Input).value = "14"
+        dialog.query_one("#settings-statuses", TextArea).text = "Ready\nIn Progress\nDone"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert len(source.settings_updates) == 1
+    updated = source.settings_updates[0]
+    assert updated.project_name == "TUI project"
+    assert updated.default_assignee == "codex"
+    assert updated.default_status == "Ready"
+    assert updated.date_format == "dd/mm/yyyy"
+    assert updated.include_datetime_in_dates is False
+    assert updated.default_port == 6543
+    assert updated.auto_open_browser is False
+    assert updated.zero_padded_ids == 4
+    assert updated.auto_commit is True
+    assert updated.remote_operations is True
+    assert updated.check_active_branches is True
+    assert updated.active_branch_days == 14
+    assert updated.statuses == ("Ready", "In Progress", "Done")
 
 
 @pytest.mark.asyncio
@@ -581,6 +641,8 @@ class _MutableSource:
         self.checklist_toggles = []
         self.search_results = ()
         self.search_queries = []
+        self.settings = None
+        self.settings_updates = []
 
     def replace_snapshot(self, snapshot: BoardSnapshot) -> None:
         self._snapshot = snapshot
@@ -591,6 +653,14 @@ class _MutableSource:
     def search(self, query: str, limit: int = 20):
         self.search_queries.append((query, limit))
         return self.search_results if query.strip() else ()
+
+    def load_settings(self):
+        return self.settings
+
+    def update_settings(self, input):
+        self.settings_updates.append(input)
+        self.settings = input
+        return input
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         self.creates.append(input)
