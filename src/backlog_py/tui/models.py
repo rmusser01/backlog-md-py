@@ -49,6 +49,40 @@ class SearchResultView:
 
 
 @dataclass(frozen=True)
+class SettingsView:
+    project_name: str
+    default_assignee: str | None
+    default_status: str
+    date_format: str
+    include_datetime_in_dates: bool
+    default_port: int
+    auto_open_browser: bool
+    zero_padded_ids: int | None
+    auto_commit: bool
+    remote_operations: bool
+    check_active_branches: bool
+    active_branch_days: int
+    statuses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SettingsInput:
+    project_name: str
+    default_assignee: str | None
+    default_status: str
+    date_format: str
+    include_datetime_in_dates: bool
+    default_port: int
+    auto_open_browser: bool
+    zero_padded_ids: int | None
+    auto_commit: bool
+    remote_operations: bool
+    check_active_branches: bool
+    active_branch_days: int
+    statuses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class BoardSnapshot:
     project_name: str
     project_root: Path

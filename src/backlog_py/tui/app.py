@@ -12,6 +12,8 @@ from backlog_py.tui.models import (
     CreateTaskInput,
     FilterState,
     SelectionState,
+    SettingsInput,
+    SettingsView,
     TaskView,
     create_status_choices,
     filter_snapshot,
@@ -42,6 +44,7 @@ try:
         EditorConfirmDialog,
         GlobalSearchDialog,
         MoveTaskDialog,
+        SettingsDialog,
         TaskMarkdownPreviewDialog,
     )
     from backlog_py.tui.screens import BoardScreen
@@ -72,6 +75,7 @@ class BacklogTuiApp(App[None]):
         Binding("r", "refresh", "Refresh"),
         Binding("/", "focus_filter", "Filter"),
         Binding("s", "global_search", "Search"),
+        Binding("c", "settings", "Config"),
         Binding("m", "move_task", "Move"),
         Binding("n", "create_task", "New"),
         Binding("u", "update_task", "Update"),
@@ -150,6 +154,11 @@ class BacklogTuiApp(App[None]):
         if event.state.name != "SUCCESS":
             return
         if event.worker.name.startswith("mutation:"):
+            if isinstance(event.worker.result, SettingsView):
+                self.project = getattr(self.data_source, "project", self.project)
+                self.query_one(BoardScreen).project = self.project
+                self.refresh_board()
+                return
             self.reselect_task_id = (
                 event.worker.result.id
                 if isinstance(event.worker.result, TaskView)
@@ -319,6 +328,14 @@ class BacklogTuiApp(App[None]):
             self._global_search_result,
         )
 
+    def action_settings(self) -> None:
+        try:
+            settings = self.data_source.load_settings()
+        except Exception as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self._push_modal(SettingsDialog(settings), self._settings_result)
+
     def action_archive_task(self) -> None:
         task = self._selected_task()
         if task is None:
@@ -461,6 +478,11 @@ class BacklogTuiApp(App[None]):
             return
         self._clear_jump_cycle_sources()
         self._select_task(visible_task_id)
+
+    def _settings_result(self, input: SettingsInput | None) -> None:
+        if input is None:
+            return
+        self._run_mutation(lambda: self.data_source.update_settings(input), name="mutation:settings")
 
     async def _run_editor_flow(self, path: Path) -> None:
         try:

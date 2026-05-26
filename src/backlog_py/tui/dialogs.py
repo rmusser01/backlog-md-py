@@ -15,6 +15,8 @@ from backlog_py.tui.models import (
     CreateTaskInput,
     EditTaskInput,
     SearchResultView,
+    SettingsInput,
+    SettingsView,
     TaskView,
 )
 
@@ -286,6 +288,116 @@ class GlobalSearchDialog(ModalScreen[str | None]):
         self.dismiss(self.results[self.index].task_id)
 
 
+class SettingsDialog(ModalScreen[SettingsInput | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, settings: SettingsView) -> None:
+        super().__init__()
+        self.settings = settings
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="settings-dialog", classes="dialog"):
+            yield Static("Project settings", classes="dialog-title", markup=False)
+            yield Input(value=self.settings.project_name, placeholder="Project name", id="settings-project-name")
+            yield Input(value=self.settings.default_assignee or "", placeholder="Default assignee", id="settings-default-assignee")
+            yield Input(value=self.settings.default_status, placeholder="Default status", id="settings-default-status")
+            yield Input(value=self.settings.date_format, placeholder="Date format", id="settings-date-format")
+            yield Input(
+                value=_bool_text(self.settings.include_datetime_in_dates),
+                placeholder="Include datetime in dates",
+                id="settings-include-datetime",
+            )
+            yield Input(value=str(self.settings.default_port), placeholder="Default browser port", id="settings-default-port")
+            yield Input(
+                value=_bool_text(self.settings.auto_open_browser),
+                placeholder="Auto-open browser",
+                id="settings-auto-open-browser",
+            )
+            yield Input(
+                value="" if self.settings.zero_padded_ids is None else str(self.settings.zero_padded_ids),
+                placeholder="Zero-padded ID width",
+                id="settings-zero-padded-ids",
+            )
+            yield Input(value=_bool_text(self.settings.auto_commit), placeholder="Auto-commit", id="settings-auto-commit")
+            yield Input(
+                value=_bool_text(self.settings.remote_operations),
+                placeholder="Remote operations",
+                id="settings-remote-operations",
+            )
+            yield Input(
+                value=_bool_text(self.settings.check_active_branches),
+                placeholder="Check active branches",
+                id="settings-check-active-branches",
+            )
+            yield Input(
+                value=str(self.settings.active_branch_days),
+                placeholder="Active branch days",
+                id="settings-active-branch-days",
+            )
+            yield TextArea("\n".join(self.settings.statuses), id="settings-statuses", compact=True)
+            yield Label("", id="settings-error")
+            yield Button("Save", id="settings-submit", variant="primary")
+
+    def on_mount(self) -> None:
+        self.set_focus(self.query_one("#settings-project-name", Input))
+
+    def key_enter(self) -> None:
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "settings-submit":
+            self._submit()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _submit(self) -> None:
+        try:
+            self.dismiss(
+                SettingsInput(
+                    project_name=_required_input(self.query_one("#settings-project-name", Input).value, "Project name"),
+                    default_assignee=_optional_input(self.query_one("#settings-default-assignee", Input).value),
+                    default_status=_required_input(self.query_one("#settings-default-status", Input).value, "Default status"),
+                    date_format=_required_input(self.query_one("#settings-date-format", Input).value, "Date format"),
+                    include_datetime_in_dates=_parse_bool_input(
+                        self.query_one("#settings-include-datetime", Input).value,
+                        "Include datetime in dates",
+                    ),
+                    default_port=_parse_int_input(
+                        self.query_one("#settings-default-port", Input).value,
+                        "Default browser port",
+                        minimum=1,
+                        maximum=65535,
+                    ),
+                    auto_open_browser=_parse_bool_input(
+                        self.query_one("#settings-auto-open-browser", Input).value,
+                        "Auto-open browser",
+                    ),
+                    zero_padded_ids=_parse_optional_nonnegative_int(
+                        self.query_one("#settings-zero-padded-ids", Input).value,
+                        "Zero-padded ID width",
+                    ),
+                    auto_commit=_parse_bool_input(self.query_one("#settings-auto-commit", Input).value, "Auto-commit"),
+                    remote_operations=_parse_bool_input(
+                        self.query_one("#settings-remote-operations", Input).value,
+                        "Remote operations",
+                    ),
+                    check_active_branches=_parse_bool_input(
+                        self.query_one("#settings-check-active-branches", Input).value,
+                        "Check active branches",
+                    ),
+                    active_branch_days=_parse_int_input(
+                        self.query_one("#settings-active-branch-days", Input).value,
+                        "Active branch days",
+                        minimum=1,
+                    ),
+                    statuses=parse_multivalue(self.query_one("#settings-statuses", TextArea).text),
+                )
+            )
+        except ValueError as exc:
+            self.query_one("#settings-error", Label).update(str(exc))
+
+
 class ArchiveTaskDialog(ModalScreen[bool]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -394,6 +506,46 @@ def parse_multivalue(value: str) -> tuple[str, ...]:
 def _optional_input(value: str) -> str | None:
     text = value.strip()
     return text or None
+
+
+def _required_input(value: str, label: str) -> str:
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{label} is required")
+    return text
+
+
+def _parse_bool_input(value: str, label: str) -> bool:
+    normalized = value.strip().casefold()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise ValueError(f"{label} must be true or false")
+
+
+def _parse_int_input(value: str, label: str, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        parsed = int(value.strip(), 10)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an integer") from exc
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{label} must be at least {minimum}")
+    if maximum is not None and parsed > maximum:
+        raise ValueError(f"{label} must be at most {maximum}")
+    return parsed
+
+
+def _parse_optional_nonnegative_int(value: str, label: str) -> int | None:
+    text = value.strip()
+    if not text:
+        return None
+    parsed = _parse_int_input(text, label, minimum=0)
+    return parsed or None
+
+
+def _bool_text(value: bool) -> str:
+    return "true" if value else "false"
 
 
 def _checklist_dialog_items(
