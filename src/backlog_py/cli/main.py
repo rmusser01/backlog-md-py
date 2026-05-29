@@ -66,6 +66,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @main.command("init")
 @click.argument("project_name", required=False)
 @click.option("--defaults", is_flag=True, help="Use non-interactive default settings.")
+@click.option("--no-git", is_flag=True, help="Initialize a filesystem-only project with git-dependent settings disabled.")
 @click.option("--backlog-dir", default="backlog", help="Project-relative backlog directory.")
 @click.option("--task-prefix", default="task", help="Task ID prefix to set during first initialization.")
 @click.option(
@@ -80,12 +81,17 @@ def init_command(
     ctx: click.Context,
     project_name: str | None,
     defaults: bool,
+    no_git: bool,
     backlog_dir: str,
     task_prefix: str,
     config_location: str,
     agent_instructions: bool,
 ) -> None:
     """Initialize a Backlog.md project with non-interactive defaults."""
+    if not defaults:
+        raise click.ClickException(
+            "Interactive init is not available in backlog-py yet. Pass --defaults to use non-interactive defaults."
+        )
     try:
         result, instruction_updates = _locked_init(
             ctx,
@@ -96,6 +102,7 @@ def init_command(
                 backlog_dir=backlog_dir,
                 task_prefix=task_prefix,
                 config_location=config_location,
+                no_git=no_git,
                 agent_instructions=agent_instructions,
             ),
         )
@@ -1466,6 +1473,7 @@ def _initialize_project(
     backlog_dir: str,
     task_prefix: str,
     config_location: str,
+    no_git: bool,
     agent_instructions: bool,
 ) -> tuple[InitProjectResult, list[AgentInstructionUpdate]]:
     result = init_project(
@@ -1474,6 +1482,7 @@ def _initialize_project(
         backlog_dir=backlog_dir,
         task_prefix=task_prefix,
         config_location=config_location,
+        no_git=no_git,
     )
     instruction_updates = update_agent_instruction_files(result.project) if agent_instructions else []
     return result, instruction_updates

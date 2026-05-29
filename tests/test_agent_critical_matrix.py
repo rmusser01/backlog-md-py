@@ -455,7 +455,7 @@ def test_agent_critical_inventory_tracks_init_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
 
-    assert by_name["cli:init"].expected == "backlog init [project-name] --defaults"
+    assert by_name["cli:init"].expected == "backlog init [project-name] --defaults [--no-git]"
 
 
 def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():
