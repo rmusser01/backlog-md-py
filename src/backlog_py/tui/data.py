@@ -17,6 +17,7 @@ from backlog_py.security.paths import assert_path_within_base
 from backlog_py.storage.config import (
     get_definition_of_done_defaults,
     load_config,
+    normalize_definition_of_done_defaults,
     replace_definition_of_done_defaults,
     set_config_value,
 )
@@ -426,20 +427,9 @@ def _update_definition_of_done_defaults(
     project: BacklogProject,
     input: DefinitionOfDoneDefaultsInput,
 ) -> DefinitionOfDoneDefaultsView:
-    items = _normalized_definition_of_done_defaults(input)
+    items = normalize_definition_of_done_defaults(list(input.items))
     config = replace_definition_of_done_defaults(project, list(items))
     return DefinitionOfDoneDefaultsView(items=tuple(config.definition_of_done or ()))
-
-
-def _normalized_definition_of_done_defaults(input: DefinitionOfDoneDefaultsInput) -> tuple[str, ...]:
-    normalized: list[str] = []
-    for item in input.items:
-        if not isinstance(item, str):
-            raise ValueError("Definition of Done defaults must be strings")
-        text = item.strip()
-        if text:
-            normalized.append(text)
-    return tuple(normalized)
 
 
 def _settings_update_values(input: SettingsInput) -> tuple[tuple[str, str], ...]:

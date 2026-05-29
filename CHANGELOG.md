@@ -13,6 +13,8 @@
   decision search surfaces while preserving stable result ordering.
 - Add a portable `backlog-py compat evidence-template` command and CI release
   evidence artifacts for browser readiness validation.
+- Add shared Definition of Done defaults normalization for config, MCP, and TUI
+  writes.
 
 ### Changed
 
@@ -21,6 +23,8 @@
 - Require browser release-evidence manifests to include schema version,
   generation date, upstream audit baseline, command provenance, freshness
   policy, and portable relative artifact paths.
+- Reject non-string Definition of Done defaults without partially mutating
+  project configuration.
 
 ## 0.2.0 - 2026-05-23 (Beta)
 

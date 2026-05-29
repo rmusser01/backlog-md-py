@@ -81,7 +81,7 @@ def load_config(path: Path) -> BacklogConfig:
         task_prefix=_task_prefix_value(raw),
         check_active_branches=_bool_value(raw, "check_active_branches", True),
         active_branch_days=_int_value(raw, "active_branch_days", 30),
-        definition_of_done=_optional_string_list(_get(raw, "definition_of_done", None)),
+        definition_of_done=_optional_definition_of_done_defaults(_get(raw, "definition_of_done", None)),
     )
 
 
@@ -90,15 +90,29 @@ def get_definition_of_done_defaults(project: BacklogProject) -> list[str]:
     return list(load_config(project.config_path).definition_of_done or [])
 
 
-def replace_definition_of_done_defaults(project: BacklogProject, items: list[str]) -> BacklogConfig:
+def replace_definition_of_done_defaults(project: BacklogProject, items: object) -> BacklogConfig:
     """Persist Definition of Done defaults and return the refreshed config."""
-    normalized = [str(item) for item in items]
+    normalized = normalize_definition_of_done_defaults(items)
     raw = _load_raw_config(project.config_path)
     key = "definition_of_done" if "definition_of_done" in raw else "definitionOfDone"
     raw[key] = normalized
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n")
     return load_config(project.config_path)
+
+
+def normalize_definition_of_done_defaults(items: object) -> list[str]:
+    """Normalize Definition of Done defaults from any supported interface."""
+    if not isinstance(items, (list, tuple)):
+        raise ValueError("Definition of Done defaults must be a list of strings")
+    normalized: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise ValueError("Definition of Done defaults must be strings")
+        text = item.strip()
+        if text:
+            normalized.append(text)
+    return normalized
 
 
 def get_config_value(project: BacklogProject, key: str) -> Any:
@@ -197,6 +211,12 @@ def _optional_string_list(value: Any) -> list[str] | None:
     if not isinstance(value, list):
         raise ValueError("Backlog config list values must be lists")
     return [str(item) for item in value]
+
+
+def _optional_definition_of_done_defaults(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    return normalize_definition_of_done_defaults(value)
 
 
 def _string_value(raw: dict[Any, Any], normalized_key: str, default: str) -> str:
@@ -310,6 +330,8 @@ def _parse_config_value(normalized_key: str | None, value: str) -> Any:
         return _parse_zero_padded_ids_value(normalized_key, value)
     if normalized_key in _INTEGER_CONFIG_KEYS:
         return _parse_int_config_value(normalized_key, value)
+    if normalized_key == "definition_of_done":
+        return _parse_definition_of_done_config_value(value)
     if normalized_key in _LIST_CONFIG_KEYS:
         return _parse_list_config_value(value)
     if normalized_key == "on_status_change":
@@ -379,6 +401,17 @@ def _parse_list_config_value(value: str) -> list[str]:
     if isinstance(parsed, str):
         return [item.strip() for item in parsed.split(",") if item.strip()]
     raise ValueError("Backlog config list values must be lists")
+
+
+def _parse_definition_of_done_config_value(value: str) -> list[str]:
+    parsed = yaml.safe_load(value)
+    if parsed is None:
+        return []
+    if isinstance(parsed, list):
+        return normalize_definition_of_done_defaults(parsed)
+    if isinstance(parsed, str):
+        return normalize_definition_of_done_defaults(parsed.split(","))
+    raise ValueError("Definition of Done defaults must be a list of strings")
 
 
 def _default_project_name(path: Path) -> str:

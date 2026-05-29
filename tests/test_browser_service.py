@@ -1621,13 +1621,17 @@ def test_browser_dod_defaults_update_rejects_invalid_payload_without_mutation(tm
 
     service = start_browser_service(project, host="127.0.0.1", port=0)
     try:
-        with pytest.raises(urllib.error.HTTPError) as exc:
-            _post_json(f"{service.root_url}/api/settings/dod-defaults", {"items": "Tests pass"})
+        invalid_payloads = (
+            {"items": "Tests pass"},
+            {"items": ["Docs updated", 7]},
+        )
+        for payload in invalid_payloads:
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                _post_json(f"{service.root_url}/api/settings/dod-defaults", payload)
+            assert exc.value.code == 400
+            assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
     finally:
         service.shutdown()
-
-    assert exc.value.code == 400
-    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
 
 
 def test_browser_dod_defaults_update_rejects_cross_origin_without_mutation(tmp_path):
