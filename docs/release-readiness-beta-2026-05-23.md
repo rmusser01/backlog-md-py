@@ -29,7 +29,13 @@ uv run --extra dev python -m bandit -r src
 git diff --check
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
-backlog-py compat status --release-evidence <manifest.json>
+backlog-py compat evidence-template \
+  --output release-evidence/browser-release-evidence.json \
+  --rich-edit-artifact artifacts/browser-rich-edit-e2e.txt \
+  --desktop-artifact artifacts/browser-desktop.png \
+  --mobile-artifact artifacts/browser-mobile.png \
+  --command "manual browser release validation"
+backlog-py compat status --release-evidence release-evidence/browser-release-evidence.json
 printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | backlog-py-mcp
 backlog-py daemon ensure
 backlog-py daemon status --json
@@ -61,10 +67,13 @@ Validated in the `codex/beta-exit` release-prep branch on 2026-05-23:
 - `uv run --extra dev python -m pytest tests -v`: 490 passed.
 - `uv run --extra dev python -m bandit -r src`: no issues identified.
 - `git diff --check`: passed.
-- `uv run --extra dev backlog-py compat status --release-evidence
-  /private/tmp/backlog-browser-release-evidence/browser-release-evidence.json`:
-  `agentCutoverReady: true`, `fullBrowserReleaseReady: true`, 100 implemented,
-  0 deferred.
+- `uv run --extra dev backlog-py compat status --release-evidence <historical
+  local evidence manifest>`: `agentCutoverReady: true`,
+  `fullBrowserReleaseReady: true`, 100 implemented, 0 deferred. This was a
+  workstation-local 2026-05-23 manifest before the portable evidence metadata
+  contract; current release validation should regenerate the manifest with
+  `backlog-py compat evidence-template` and publish repo-relative artifact
+  paths.
 - `uv run --extra dev python -m build --outdir
   /private/tmp/backlog-md-py-beta-exit-dist`: built
   `backlog_md_py-0.2.0.tar.gz` and `backlog_md_py-0.2.0-py3-none-any.whl`.

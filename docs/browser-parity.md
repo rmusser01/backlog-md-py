@@ -41,11 +41,12 @@ coverage. The browser feature inventory can be implemented while
 have evidence. The machine-readable evidence format is documented in
 `docs/browser-release-validation.md`.
 
-The current browser release-readiness milestone is complete when
+The current browser release-readiness milestone is complete when a fresh
 `backlog-py compat status --release-evidence <manifest.json>` reports
-`fullBrowserReleaseReady: true`. The 2026-05-22 validation run recorded in
-`docs/browser-release-validation.md` satisfies the required rich-edit E2E and
-desktop/mobile screenshot gates for the current browser release scope.
+`fullBrowserReleaseReady: true`. Historical validation runs are recorded in
+`docs/browser-release-validation.md`, but current release candidates should
+regenerate the portable evidence manifest and attach repo-relative browser
+artifacts.
 
 Future browser milestones should not be marked complete until they have:
 

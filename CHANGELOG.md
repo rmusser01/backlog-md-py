@@ -11,11 +11,16 @@
   projects while keeping the default init path Git-aware.
 - Add deterministic fuzzy search matching for CLI, MCP, TUI, document, and
   decision search surfaces while preserving stable result ordering.
+- Add a portable `backlog-py compat evidence-template` command and CI release
+  evidence artifacts for browser readiness validation.
 
 ### Changed
 
 - Record the post-TUI beta validation refresh and document isolated daemon
   state for MCP cutover smoke checks.
+- Require browser release-evidence manifests to include schema version,
+  generation date, upstream audit baseline, command provenance, freshness
+  policy, and portable relative artifact paths.
 
 ## 0.2.0 - 2026-05-23 (Beta)
 

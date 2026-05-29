@@ -1,5 +1,6 @@
 import json
 import shutil
+from datetime import date
 from pathlib import Path
 
 import click
@@ -28,6 +29,38 @@ def _invoke_color(*args: str, input: str | None = None):
 
 def _invoke_repo(repo: Path, *args: str, input: str | None = None):
     return CliRunner().invoke(main, ["--cwd", str(repo), *args], input=input)
+
+
+def _release_evidence_manifest() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "generated_at": date.today().isoformat(),
+        "upstream_baseline": {
+            "package": "backlog.md",
+            "version": "1.45.1",
+            "audit_date": "2026-05-16",
+        },
+        "command": {
+            "argv": ["backlog-py", "compat", "evidence-template"],
+            "cwd": ".",
+        },
+        "freshness": {
+            "max_age_days": 14,
+        },
+        "release_gates": {
+            "browser:rich-edit-e2e-release-check": {
+                "status": "passed",
+                "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
+            },
+            "browser:desktop-mobile-screenshot-release-check": {
+                "status": "passed",
+                "artifacts": [
+                    "artifacts/browser-desktop.png",
+                    "artifacts/browser-mobile.png",
+                ],
+            },
+        },
+    }
 
 
 def _metadata_filter_repo(tmp_path: Path) -> Path:
@@ -764,23 +797,7 @@ def test_compat_status_json_outputs_deferred_items():
 def test_compat_status_accepts_release_evidence_manifest(tmp_path):
     evidence_path = tmp_path / "browser-release-evidence.json"
     evidence_path.write_text(
-        json.dumps(
-            {
-                "release_gates": {
-                    "browser:rich-edit-e2e-release-check": {
-                        "status": "passed",
-                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
-                    },
-                    "browser:desktop-mobile-screenshot-release-check": {
-                        "status": "passed",
-                        "artifacts": [
-                            "artifacts/browser-desktop.png",
-                            "artifacts/browser-mobile.png",
-                        ],
-                    },
-                }
-            }
-        ),
+        json.dumps(_release_evidence_manifest()),
         encoding="utf-8",
     )
 
@@ -795,23 +812,7 @@ def test_compat_status_accepts_release_evidence_manifest(tmp_path):
 def test_compat_status_json_includes_release_evidence_artifacts(tmp_path):
     evidence_path = tmp_path / "browser-release-evidence.json"
     evidence_path.write_text(
-        json.dumps(
-            {
-                "release_gates": {
-                    "browser:rich-edit-e2e-release-check": {
-                        "status": "passed",
-                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
-                    },
-                    "browser:desktop-mobile-screenshot-release-check": {
-                        "status": "passed",
-                        "artifacts": [
-                            "artifacts/browser-desktop.png",
-                            "artifacts/browser-mobile.png",
-                        ],
-                    },
-                }
-            }
-        ),
+        json.dumps(_release_evidence_manifest()),
         encoding="utf-8",
     )
 
@@ -822,6 +823,63 @@ def test_compat_status_json_includes_release_evidence_artifacts(tmp_path):
     assert '"artifacts": [' in result.output
     assert '"artifacts/browser-desktop.png"' in result.output
     assert '"artifacts/browser-mobile.png"' in result.output
+
+
+def test_compat_evidence_template_writes_portable_manifest(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+
+    result = _invoke(
+        "compat",
+        "evidence-template",
+        "--output",
+        str(evidence_path),
+        "--rich-edit-artifact",
+        "artifacts/browser-rich-edit-e2e.txt",
+        "--desktop-artifact",
+        "artifacts/browser-desktop.png",
+        "--mobile-artifact",
+        "artifacts/browser-mobile.png",
+        "--command",
+        "manual browser validation",
+    )
+
+    assert result.exit_code == 0
+    manifest = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["upstream_baseline"] == {
+        "package": "backlog.md",
+        "version": "1.45.1",
+        "audit_date": "2026-05-16",
+    }
+    assert manifest["freshness"]["max_age_days"] == 14
+    assert manifest["command"]["argv"] == ["manual browser validation"]
+    assert manifest["release_gates"]["browser:rich-edit-e2e-release-check"]["artifacts"] == [
+        "artifacts/browser-rich-edit-e2e.txt"
+    ]
+    assert manifest["release_gates"]["browser:desktop-mobile-screenshot-release-check"]["artifacts"] == [
+        "artifacts/browser-desktop.png",
+        "artifacts/browser-mobile.png",
+    ]
+
+    status = _invoke("compat", "status", "--release-evidence", str(evidence_path))
+
+    assert status.exit_code == 0
+    assert "releaseEvidence: fresh" in status.output
+    assert "fullBrowserReleaseReady: true" in status.output
+
+
+def test_compat_evidence_template_rejects_absolute_artifact_paths(tmp_path):
+    result = _invoke(
+        "compat",
+        "evidence-template",
+        "--output",
+        str(tmp_path / "browser-release-evidence.json"),
+        "--rich-edit-artifact",
+        "/private/tmp/browser-rich-edit-e2e.txt",
+    )
+
+    assert result.exit_code != 0
+    assert "relative artifact paths" in result.output
 
 
 def test_task_list_plain_filters_by_metadata(tmp_path):

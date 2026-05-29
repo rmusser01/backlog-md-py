@@ -1,7 +1,47 @@
 import json
+from datetime import date
 
 from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report
+
+
+def _release_evidence(
+    *,
+    generated_at: str = "2026-05-29",
+    max_age_days: int = 14,
+    rich_artifacts: list[str] | None = None,
+    screenshot_artifacts: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "upstream_baseline": {
+            "package": "backlog.md",
+            "version": "1.45.1",
+            "audit_date": "2026-05-16",
+        },
+        "command": {
+            "argv": ["backlog-py", "compat", "evidence-template"],
+            "cwd": ".",
+        },
+        "freshness": {
+            "max_age_days": max_age_days,
+        },
+        "release_gates": {
+            "browser:rich-edit-e2e-release-check": {
+                "status": "passed",
+                "artifacts": rich_artifacts or ["artifacts/browser-rich-edit-e2e.txt"],
+            },
+            "browser:desktop-mobile-screenshot-release-check": {
+                "status": "passed",
+                "artifacts": screenshot_artifacts
+                or [
+                    "artifacts/browser-desktop.png",
+                    "artifacts/browser-mobile.png",
+                ],
+            },
+        },
+    }
 
 
 def test_compatibility_report_summarizes_inventory_statuses():
@@ -9,6 +49,16 @@ def test_compatibility_report_summarizes_inventory_statuses():
 
     assert report["agent_cutover_ready"] is True
     assert report["full_browser_release_ready"] is False
+    assert report["release_evidence"] == {
+        "status": "missing",
+        "path": None,
+        "generated_at": None,
+        "age_days": None,
+        "max_age_days": None,
+        "upstream_baseline": None,
+        "command": None,
+        "error": None,
+    }
     assert report["summary"] == {
         "implemented": 100,
         "deferred": 0,
@@ -148,34 +198,30 @@ def test_compatibility_report_separates_release_validation_from_feature_counts()
 
 def test_compatibility_report_marks_browser_release_ready_with_evidence_manifest(tmp_path):
     evidence_path = tmp_path / "browser-release-evidence.json"
-    evidence_path.write_text(
-        json.dumps(
-            {
-                "release_gates": {
-                    "browser:rich-edit-e2e-release-check": {
-                        "status": "passed",
-                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
-                    },
-                    "browser:desktop-mobile-screenshot-release-check": {
-                        "status": "passed",
-                        "artifacts": [
-                            "artifacts/browser-desktop.png",
-                            "artifacts/browser-mobile.png",
-                        ],
-                    },
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+    evidence_path.write_text(json.dumps(_release_evidence()), encoding="utf-8")
 
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
+        today=date(2026, 5, 29),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
     assert report["full_browser_release_ready"] is True
+    assert report["release_evidence"]["status"] == "fresh"
+    assert report["release_evidence"]["generated_at"] == "2026-05-29"
+    assert report["release_evidence"]["age_days"] == 0
+    assert report["release_evidence"]["max_age_days"] == 14
+    assert report["release_evidence"]["upstream_baseline"] == {
+        "package": "backlog.md",
+        "version": "1.45.1",
+        "audit_date": "2026-05-16",
+    }
+    assert report["release_evidence"]["command"]["argv"] == [
+        "backlog-py",
+        "compat",
+        "evidence-template",
+    ]
     assert report["release_gates"]["summary"] == {
         "passed": 4,
         "required": 0,
@@ -193,29 +239,119 @@ def test_compatibility_report_marks_browser_release_ready_with_evidence_manifest
     ]
 
 
-def test_compatibility_report_keeps_screenshot_gate_required_without_desktop_and_mobile(tmp_path):
+def test_compatibility_report_keeps_release_gates_required_with_stale_evidence(tmp_path):
     evidence_path = tmp_path / "browser-release-evidence.json"
     evidence_path.write_text(
-        json.dumps(
-            {
-                "release_gates": {
-                    "browser:rich-edit-e2e-release-check": {
-                        "status": "passed",
-                        "artifacts": ["artifacts/browser-rich-edit-e2e.txt"],
-                    },
-                    "browser:desktop-mobile-screenshot-release-check": {
-                        "status": "passed",
-                        "artifacts": ["artifacts/browser-desktop.png"],
-                    },
-                }
-            }
-        ),
+        json.dumps(_release_evidence(generated_at="2026-05-01", max_age_days=7)),
         encoding="utf-8",
     )
 
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
+        today=date(2026, 5, 29),
+    )
+    gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
+
+    assert report["full_browser_release_ready"] is False
+    assert report["release_evidence"]["status"] == "stale"
+    assert report["release_evidence"]["age_days"] == 28
+    assert "stale" in report["release_evidence"]["error"]
+    assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
+    assert "stale" in gates_by_name["browser:rich-edit-e2e-release-check"]["evidence_error"]
+    assert gates_by_name["browser:desktop-mobile-screenshot-release-check"]["status"] == "required"
+
+
+def test_compatibility_report_requires_release_evidence_metadata(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence_path.write_text(
+        json.dumps({"release_gates": _release_evidence()["release_gates"]}),
+        encoding="utf-8",
+    )
+
+    try:
+        build_compatibility_report(load_builtin_inventory(), release_evidence_path=evidence_path)
+    except ValueError as exc:
+        assert "generated_at" in str(exc)
+    else:
+        raise AssertionError("Expected missing release evidence metadata to fail validation")
+
+
+def test_compatibility_report_requires_release_evidence_schema_version(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence = _release_evidence()
+    evidence["schema_version"] = 2
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    try:
+        build_compatibility_report(load_builtin_inventory(), release_evidence_path=evidence_path)
+    except ValueError as exc:
+        assert "schema_version" in str(exc)
+    else:
+        raise AssertionError("Expected incompatible release evidence schema to fail validation")
+
+
+def test_compatibility_report_keeps_release_gates_required_with_mismatched_upstream_baseline(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence = _release_evidence()
+    baseline = evidence["upstream_baseline"]
+    assert isinstance(baseline, dict)
+    baseline["version"] = "1.44.0"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    report = build_compatibility_report(
+        load_builtin_inventory(),
+        release_evidence_path=evidence_path,
+        today=date(2026, 5, 29),
+    )
+    gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
+
+    assert report["full_browser_release_ready"] is False
+    assert report["release_evidence"]["status"] == "stale"
+    assert "upstream_baseline" in report["release_evidence"]["error"]
+    assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
+
+
+def test_compatibility_report_rejects_absolute_artifact_paths(tmp_path):
+    for index, artifact_path in enumerate(
+        [
+            "/private/tmp/browser-rich-edit-e2e.txt",
+            "C:\\tmp\\browser-rich-edit-e2e.txt",
+        ]
+    ):
+        evidence_path = tmp_path / f"browser-release-evidence-{index}.json"
+        evidence_path.write_text(
+            json.dumps(
+                _release_evidence(
+                    rich_artifacts=[artifact_path],
+                )
+            ),
+            encoding="utf-8",
+        )
+
+        report = build_compatibility_report(
+            load_builtin_inventory(),
+            release_evidence_path=evidence_path,
+            today=date(2026, 5, 29),
+        )
+        gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
+
+        assert report["full_browser_release_ready"] is False
+        assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
+        assert "relative artifact paths" in gates_by_name["browser:rich-edit-e2e-release-check"]["evidence_error"]
+
+
+def test_compatibility_report_keeps_screenshot_gate_required_without_desktop_and_mobile(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence_path.write_text(
+        json.dumps(_release_evidence(screenshot_artifacts=["artifacts/browser-desktop.png"])),
+        encoding="utf-8",
+    )
+
+    report = build_compatibility_report(
+        load_builtin_inventory(),
+        release_evidence_path=evidence_path,
+        today=date(2026, 5, 29),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
