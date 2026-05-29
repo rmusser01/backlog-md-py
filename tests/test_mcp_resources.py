@@ -34,6 +34,7 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
     assert "project_status(project, recentLimit=5)" in content
     assert "task_create(project, ordinal=None" in content
     assert "task_edit(project, task_id, ordinal=None" in content
+    assert "backlog://init-required" in content
 
 
 def test_task_list_returns_fixture_backed_readonly_dicts():
@@ -183,11 +184,30 @@ def test_task_board_returns_status_grouped_fixture_rows():
     ]
 
 
-def test_task_workflow_resource_alias_matches_overview():
-    overview = read_resource("backlog://workflow/overview")
-    alias = read_resource("backlog://docs/task-workflow")
+def test_task_workflow_resource_contains_lifecycle_guidance():
+    content = read_resource("backlog://docs/task-workflow")
 
-    assert alias == overview
+    assert "# Backlog.md Task Workflow" in content
+    assert "Search before creating" in content
+    assert "Task creation" in content
+    assert "Task execution" in content
+    assert "Task finalization" in content
+
+
+def test_init_required_resource_explains_setup_path():
+    content = read_resource("backlog://init-required")
+
+    assert "# Backlog.md Project Initialization Required" in content
+    assert "No Backlog.md config" in content
+    assert "backlog-py --cwd" in content
+    assert "init" in content
+
+
+def test_task_workflow_resource_is_distinct_from_overview():
+    overview = read_resource("backlog://workflow/overview")
+    workflow = read_resource("backlog://docs/task-workflow")
+
+    assert workflow != overview
 
 
 def test_unknown_resource_uri_raises_clear_error():

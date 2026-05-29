@@ -10,6 +10,7 @@ CLI.
 Supported resources:
 - backlog://workflow/overview
 - backlog://docs/task-workflow
+- backlog://init-required
 
 Supported tools:
 - project_status(project, recentLimit=5)
@@ -35,15 +36,66 @@ Supported tools:
 
 All write-capable helpers must use the safe core services, path-containment
 checks, and atomic file writes. Do not use this registry for shell execution.
+
+If this MCP server is launched from a directory that is not inside a Backlog.md
+project, read backlog://init-required before attempting mutations.
+"""
+
+TASK_WORKFLOW_RESOURCE = """# Backlog.md Task Workflow
+
+Use this workflow before mutating repository files through Backlog.md helpers.
+
+## Search before creating
+
+Use task_search, task_list, or project_status to find existing related work.
+Create a new task only when no existing task covers the same reviewable unit of
+work.
+
+## Task creation
+
+Use task_create with a focused title, status, description, acceptance criteria,
+implementation plan, references, documentation, and modified files when they are
+known. Keep one task scoped to one reviewable unit.
+
+## Task execution
+
+Keep status and implementation notes current while work is active. Prefer MCP
+tools or the backlog-py CLI over manual task-file edits. Record blockers,
+verification commands, and notable design decisions as they happen.
+
+## Task finalization
+
+Before marking work complete, ensure acceptance criteria are checked, tests or
+verification are recorded, documentation changes are linked, security checks are
+recorded when code changed, and finalSummary explains what changed and why.
+"""
+
+INIT_REQUIRED_RESOURCE = """# Backlog.md Project Initialization Required
+
+No Backlog.md config was found from the current MCP server directory.
+
+Run a project initialization command from the target repository, for example:
+
+```bash
+backlog-py --cwd /path/to/project init "Project Name" --defaults
+```
+
+For filesystem-only projects that should not inspect Git branches or remotes,
+use the documented no-git initialization mode when available. After
+initialization, restart or reconfigure the MCP client so it launches from inside
+the project, sets BACKLOG_CWD, or passes the explicit project argument.
 """
 
 _RESOURCE_ALIASES = {
     "backlog://workflow/overview": "backlog://workflow/overview",
-    "backlog://docs/task-workflow": "backlog://workflow/overview",
+    "backlog://docs/task-workflow": "backlog://docs/task-workflow",
+    "backlog://init-required": "backlog://init-required",
 }
 
 _RESOURCES = {
     "backlog://workflow/overview": WORKFLOW_OVERVIEW_RESOURCE,
+    "backlog://docs/task-workflow": TASK_WORKFLOW_RESOURCE,
+    "backlog://init-required": INIT_REQUIRED_RESOURCE,
 }
 
 

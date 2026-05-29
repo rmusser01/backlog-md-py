@@ -39,7 +39,12 @@ RESOURCE_DEFINITIONS: tuple[ResourceDefinition, ...] = (
     ResourceDefinition(
         uri="backlog://docs/task-workflow",
         name="Backlog.md task workflow",
-        description="Alias for task workflow guidance used by Backlog.md agents.",
+        description="Task lifecycle guidance used by Backlog.md agents.",
+    ),
+    ResourceDefinition(
+        uri="backlog://init-required",
+        name="Backlog.md initialization required",
+        description="Setup guidance for MCP sessions launched outside a Backlog.md project.",
     ),
 )
 
@@ -47,15 +52,20 @@ RESOURCE_DEFINITIONS: tuple[ResourceDefinition, ...] = (
 def _project_schema(
     properties: dict[str, Any] | None = None,
     *,
-    required: tuple[str, ...] = ("project",),
+    required: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    schema_properties = {"project": {"type": "string", "description": "Backlog.md project root."}}
+    schema_properties = {
+        "project": {
+            "type": "string",
+            "description": "Backlog.md project root. Optional when the MCP server can discover the project.",
+        }
+    }
     if properties:
         schema_properties.update(properties)
     return {
         "type": "object",
         "properties": schema_properties,
-        "required": list(required),
+        "required": [field for field in required if field != "project"],
         "additionalProperties": True,
     }
 

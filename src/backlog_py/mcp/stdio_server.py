@@ -5,11 +5,13 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TextIO
 from urllib.parse import urlparse
 
 from backlog_py.daemon.lifecycle import DaemonNotRunningError, daemon_status
 from backlog_py.mcp.protocol import INTERNAL_ERROR, McpRequestContext, error_response, handle_jsonrpc_text
+from backlog_py.storage.project import discover_project
 
 
 @dataclass(frozen=True)
@@ -40,12 +42,13 @@ def run_stdio(
     input_stream = stdin if stdin is not None else sys.stdin
     output_stream = stdout if stdout is not None else sys.stdout
     forward_target = _resolve_forward_target(daemon_endpoint=daemon_endpoint, token=token)
+    local_context = _context_with_project_hint(context)
     session_id: str | None = None
     for line in input_stream:
         if not line.strip():
             continue
         if forward_target is None:
-            response = handle_jsonrpc_text(line, context=context)
+            response = handle_jsonrpc_text(line, context=local_context)
         else:
             response, session_id = _forward_jsonrpc_text(line, forward_target, session_id=session_id)
         if response is None:
@@ -57,6 +60,26 @@ def run_stdio(
 def main() -> None:
     """Run the SDK-free MCP stdio server."""
     run_stdio()
+
+
+def _context_with_project_hint(context: McpRequestContext | None) -> McpRequestContext:
+    if context is not None and context.project_hint is not None:
+        return context
+    project_hint = _discover_project_hint()
+    if context is None:
+        return McpRequestContext(project_hint=project_hint)
+    return McpRequestContext(
+        project_hint=project_hint,
+        client_id=context.client_id,
+        session_id=context.session_id,
+    )
+
+
+def _discover_project_hint() -> str | None:
+    try:
+        return str(discover_project(Path.cwd()).root)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
