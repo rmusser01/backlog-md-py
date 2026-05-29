@@ -65,17 +65,18 @@ For agent integrations, verify the SDK-free stdio server can handle MCP
 initialization from the same environment that will run the server:
 
 ```bash
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | backlog-py-mcp
+state_dir="$(mktemp -d)"
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | BACKLOG_PY_STATE_DIR="$state_dir" backlog-py-mcp
 ```
 
 For multi-agent Codex use, verify the singleton daemon path as well:
 
 ```bash
-backlog-py daemon ensure
-backlog-py daemon status --json
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | backlog-py-mcp
+BACKLOG_PY_STATE_DIR="$state_dir" backlog-py daemon start --port 18768 --json
+BACKLOG_PY_STATE_DIR="$state_dir" backlog-py daemon status --json
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' | BACKLOG_PY_STATE_DIR="$state_dir" backlog-py-mcp
 ps -ef | rg "backlog|backlog-py|backlog.md-darwin-arm64"
-backlog-py daemon stop
+BACKLOG_PY_STATE_DIR="$state_dir" backlog-py daemon stop
 ```
 
 During that smoke there should be exactly one Python `backlog_py daemon run`
@@ -83,6 +84,11 @@ process and no `backlog.md-darwin-arm64/backlog mcp start` child process from
 the new path. The official Node/native Backlog.md binary does not participate
 in `backlog-md-py` filesystem locks, so do not run both mutation paths against
 the same live project during cutover.
+
+Use a fresh `BACKLOG_PY_STATE_DIR` when a user-level daemon may already be
+running. Otherwise the MCP stdio shim can legitimately forward to that existing
+daemon and report the existing daemon's version instead of the candidate build
+under validation.
 
 For pure Python embedding, call the helper functions against the copied project:
 
