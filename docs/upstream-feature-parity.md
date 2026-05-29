@@ -153,9 +153,10 @@ larger task commands:
 validation separately. A `100/100` implemented inventory means the audited
 upstream feature items in this clone are covered. A release that advertises
 browser parity must also provide browser release evidence. Use
-`backlog-py compat status --release-evidence <manifest.json>` with the manifest
-format in `docs/browser-release-validation.md` to promote externally generated
-release evidence into machine-readable readiness.
+`backlog-py compat evidence-template` to create the manifest scaffold, then run
+`backlog-py compat status --release-evidence <manifest.json>` with the completed
+fresh manifest format in `docs/browser-release-validation.md` to promote
+externally generated release evidence into machine-readable readiness.
 
 The current browser release gates are:
 
@@ -174,9 +175,10 @@ The current browser release gates are:
 
 1. Keep the oracle manifest and compatibility inventory pinned to the audited
    upstream release before adding new runtime behavior.
-2. For release packaging, attach a fresh browser release-evidence manifest and
-   run `backlog-py compat status --release-evidence <manifest.json>` before
-   claiming full browser readiness.
+2. For release packaging, attach a fresh browser release-evidence manifest with
+   repo-relative artifact paths and run
+   `backlog-py compat status --release-evidence <manifest.json>` before claiming
+   full browser readiness.
 3. Keep any future shell-hook or browser-exposed automation behind separate
    security review; the CLI-only hook-bypass milestone is complete for
    explicit local auto-commit opt-in.

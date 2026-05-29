@@ -71,7 +71,8 @@ The compatibility report is read-only and does not need a project path:
 ```bash
 backlog-py compat status
 backlog-py compat status --json
-backlog-py compat status --release-evidence browser-release-evidence.json
+backlog-py compat evidence-template --output release-evidence/browser-release-evidence.json
+backlog-py compat status --release-evidence release-evidence/browser-release-evidence.json
 ```
 
 The report distinguishes feature coverage from release evidence. A fully

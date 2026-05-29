@@ -83,6 +83,26 @@ jobs:
           /tmp/backlog-md-py-wheel-smoke/bin/python -m backlog_py --version
           /tmp/backlog-md-py-wheel-smoke/bin/python -c 'from importlib.resources import files; assert files("backlog_py").joinpath("py.typed").is_file()'
 
+      - name: Generate compatibility release evidence artifacts
+        run: |
+          mkdir -p release-evidence
+          /tmp/backlog-md-py-wheel-smoke/bin/backlog-py compat evidence-template \
+            --output release-evidence/browser-release-evidence-template.json \
+            --command "GitHub Actions CI release evidence template"
+          /tmp/backlog-md-py-wheel-smoke/bin/backlog-py compat status --json \
+            > release-evidence/compat-status.json
+          /tmp/backlog-md-py-wheel-smoke/bin/backlog-py compat status --json \
+            --release-evidence release-evidence/browser-release-evidence-template.json \
+            > release-evidence/compat-status-with-release-evidence-template.json
+
+      - name: Upload compatibility release evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-release-evidence
+          path: release-evidence/*
+          if-no-files-found: warn
+
       - name: Smoke test SDK-free MCP entry point
         env:
           BACKLOG_PY_STATE_DIR: ${{ runner.temp }}/backlog-md-py-mcp-smoke-state-${{ github.run_id }}-${{ github.run_attempt }}

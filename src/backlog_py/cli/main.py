@@ -15,7 +15,7 @@ from backlog_py import __version__
 from backlog_py.browser.service import run_browser_service_foreground
 from backlog_py.cli.completion import CompletionInstallError, install_completion
 from backlog_py.compat.inventory import load_builtin_inventory
-from backlog_py.compat.report import build_compatibility_report
+from backlog_py.compat.report import build_compatibility_report, build_release_evidence_manifest
 from backlog_py.core.agents import AgentInstructionError, AgentInstructionUpdate, update_agent_instruction_files
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.decisions import DecisionRecord, DecisionService
@@ -962,6 +962,21 @@ def compat_status_command(as_json: bool, release_evidence: Path | None) -> None:
     summary = report["summary"]
     click.echo(f"agentCutoverReady: {_bool_text(report['agent_cutover_ready'])}")
     click.echo(f"fullBrowserReleaseReady: {_bool_text(report['full_browser_release_ready'])}")
+    evidence = report["release_evidence"]
+    click.echo(f"releaseEvidence: {evidence['status']}")
+    if evidence["generated_at"] is not None:
+        click.echo(
+            "releaseEvidenceGeneratedAt: "
+            f"{evidence['generated_at']} ({evidence['age_days']} days old, max {evidence['max_age_days']})"
+        )
+    if evidence["upstream_baseline"] is not None:
+        baseline = evidence["upstream_baseline"]
+        click.echo(
+            "releaseEvidenceUpstream: "
+            f"{baseline['package']} {baseline['version']} audited {baseline['audit_date']}"
+        )
+    if evidence["error"] is not None:
+        click.echo(f"releaseEvidenceError: {evidence['error']}")
     click.echo(f"implemented: {summary['implemented']}")
     click.echo(f"deferred: {summary['deferred']}")
     click.echo(f"total: {summary['total']}")
@@ -978,6 +993,65 @@ def compat_status_command(as_json: bool, release_evidence: Path | None) -> None:
     click.echo("releaseGates:")
     for gate in report["release_gates"]["gates"]:
         click.echo(f"  - {gate['name']}: {gate['status']} ({gate['scope']})")
+
+
+@compat_group.command("evidence-template")
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path, dir_okay=False),
+    required=True,
+    help="Path to write the release evidence manifest template.",
+)
+@click.option(
+    "--rich-edit-artifact",
+    multiple=True,
+    help="Repo-relative artifact path proving the rich-edit browser release check.",
+)
+@click.option(
+    "--desktop-artifact",
+    multiple=True,
+    help="Repo-relative desktop screenshot artifact path.",
+)
+@click.option(
+    "--mobile-artifact",
+    multiple=True,
+    help="Repo-relative mobile screenshot artifact path.",
+)
+@click.option(
+    "--command",
+    "command_text",
+    default=None,
+    help="Command provenance to store in the manifest.",
+)
+@click.option(
+    "--max-age-days",
+    type=click.IntRange(min=1),
+    default=14,
+    show_default=True,
+    help="Maximum acceptable evidence age for release gates.",
+)
+def compat_evidence_template_command(
+    output: Path,
+    rich_edit_artifact: tuple[str, ...],
+    desktop_artifact: tuple[str, ...],
+    mobile_artifact: tuple[str, ...],
+    command_text: str | None,
+    max_age_days: int,
+) -> None:
+    """Write a portable browser release-evidence manifest template."""
+    try:
+        manifest = build_release_evidence_manifest(
+            rich_edit_artifacts=rich_edit_artifact,
+            desktop_artifacts=desktop_artifact,
+            mobile_artifacts=mobile_artifact,
+            command_argv=(command_text,) if command_text else (),
+            max_age_days=max_age_days,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    click.echo(f"Wrote release evidence template to {output}")
 
 
 @main.group("config", invoke_without_command=True, no_args_is_help=False)

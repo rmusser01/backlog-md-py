@@ -32,10 +32,13 @@ release-evidence gate with the documented manifest format.
 - `uv run --extra dev python -m twine check
   /private/tmp/backlog-md-py-post-tui-release-validation-dist-85cbbb6/*`:
   sdist and wheel passed.
-- `uv run --extra dev backlog-py compat status --release-evidence
-  /private/tmp/backlog-md-py-post-tui-release-validation-2026-05-29/browser-release-evidence.json`:
-  `agentCutoverReady: true`, `fullBrowserReleaseReady: true`, 100 implemented,
-  0 deferred.
+- `uv run --extra dev backlog-py compat status --release-evidence <historical
+  local evidence manifest>`: `agentCutoverReady: true`,
+  `fullBrowserReleaseReady: true`, 100 implemented, 0 deferred. This was a
+  workstation-local 2026-05-29 manifest before the portable evidence metadata
+  contract; current release validation should regenerate the manifest with
+  `backlog-py compat evidence-template` and publish repo-relative artifact
+  paths.
 - Direct `backlog-py-mcp` stdio initialize with isolated runtime state returned
   server version `0.2.0`.
 - Singleton daemon smoke with isolated runtime state on loopback port `18768`:
