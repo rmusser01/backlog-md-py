@@ -11,7 +11,7 @@ from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
-from backlog_py.search.simple import contains_query
+from backlog_py.search.simple import ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 
 
@@ -80,11 +80,7 @@ class DocumentService:
         return sorted(documents, key=lambda document: document.path_relative)
 
     def search_documents(self, query: str) -> list[DocumentRecord]:
-        return [
-            document
-            for document in self.list_documents()
-            if contains_query(_document_search_text(document), query)
-        ]
+        return ranked_matches(self.list_documents(), query, _document_search_text)
 
     def view_document(self, path_or_id: str) -> DocumentRecord:
         path_match = self._try_view_by_path(path_or_id)

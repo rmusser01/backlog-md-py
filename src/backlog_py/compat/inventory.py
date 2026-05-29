@@ -35,7 +35,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:search-plain",
             "CLI-INSTRUCTIONS.md",
-            "backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered search returns tasks, documents, and decisions",
+            "backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered fuzzy-ranked search returns tasks, documents, and decisions",
         ),
         _golden("cli:board", "CLI-INSTRUCTIONS.md", "backlog board"),
         _golden("cli:overview", "CLI-INSTRUCTIONS.md", "backlog overview"),

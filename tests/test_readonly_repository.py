@@ -51,6 +51,30 @@ def test_repository_searches_title_and_body():
     assert [task.id for task in body_matches] == ["TASK-1"]
 
 
+def test_repository_search_uses_deterministic_fuzzy_ranking(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    mutable_repository.create_task(title="Authentication rollout", task_id="TASK-2", status="To Do")
+    mutable_repository.create_task(title="Auth", task_id="TASK-3", status="To Do")
+    repository = ReadOnlyRepository.from_path(repo)
+
+    matches = repository.search_tasks("auth", status="to do")
+
+    assert [task.id for task in matches] == ["TASK-3", "TASK-2"]
+
+
+def test_repository_search_matches_short_fuzzy_query_to_longer_word(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    mutable_repository.create_task(title="Authentication rollout", task_id="TASK-2", status="To Do")
+    mutable_repository.create_task(title="Documentation task", task_id="TASK-3", status="To Do")
+    repository = ReadOnlyRepository.from_path(repo)
+
+    matches = repository.search_tasks("authn", status="to do")
+
+    assert [task.id for task in matches] == ["TASK-2"]
+
+
 def test_repository_groups_board_by_status():
     repository = ReadOnlyRepository.from_path(FIXTURE_REPO)
 

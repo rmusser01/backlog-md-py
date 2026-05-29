@@ -452,6 +452,20 @@ def test_search_plain_filters_by_modified_file_and_limit(tmp_path):
     assert "TASK-2" not in limited.output
 
 
+def test_search_plain_limit_applies_after_fuzzy_ranking(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    repository = MutableRepository.from_path(repo)
+    repository.create_task(title="Authentication rollout", task_id="TASK-2", status="To Do")
+    repository.create_task(title="Auth", task_id="TASK-3", status="To Do")
+
+    result = _invoke_repo(repo, "search", "auth", "--status", "To Do", "--limit", "1", "--plain")
+
+    assert result.exit_code == 0
+    assert "TASK-3 [To Do] Auth" in result.output
+    assert "TASK-2 [To Do] Authentication rollout" not in result.output
+
+
 def test_board_outputs_status_grouping():
     result = _invoke("board")
 

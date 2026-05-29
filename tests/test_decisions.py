@@ -65,6 +65,14 @@ def test_create_list_search_and_view_decision(tmp_path):
     assert "## Consequences" in written
 
 
+def test_search_decisions_matches_acronym_style_fuzzy_query(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    _service(repo).create_decision("Use PostgreSQL for primary database", status="accepted")
+
+    assert [decision.id for decision in _service(repo).search_decisions("psql")] == ["decision-1"]
+
+
 def test_decision_create_rejects_invalid_status_before_write(tmp_path):
     repo = _copy_fixture(tmp_path)
 

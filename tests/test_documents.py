@@ -75,6 +75,20 @@ def test_create_list_search_and_view_nested_document_by_path_and_id(tmp_path):
     assert _service(repo).view_document("DOC-SETUP").path_relative == "guides/setup.md"
 
 
+def test_search_documents_matches_short_fuzzy_query_to_longer_word(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.create_document(
+        "guides/authentication.md",
+        title="Authentication Guide",
+        content="Credential verification workflow.",
+    )
+
+    assert [document.path_relative for document in service.search_documents("authn")] == [
+        "guides/authentication.md"
+    ]
+
+
 def test_create_document_allocates_ids_globally_under_docs(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
