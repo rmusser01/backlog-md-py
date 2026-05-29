@@ -216,6 +216,44 @@ def test_local_data_source_rejects_invalid_settings_without_partial_mutation(tmp
     assert project.config_path.read_text(encoding="utf-8") == before
 
 
+def test_local_data_source_updates_dod_defaults_under_project_lock(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    operations = []
+
+    def fake_lock(project_arg, operation, fn):
+        operations.append((project_arg.root, operation))
+        return fn()
+
+    monkeypatch.setattr("backlog_py.tui.data.with_project_write_lock", fake_lock)
+    source = LocalBoardDataSource(project)
+
+    updated = source.update_definition_of_done_defaults(
+        tui_models.DefinitionOfDoneDefaultsInput(items=("Tests pass", "Docs updated"))
+    )
+
+    assert updated.items == ("Tests pass", "Docs updated")
+    assert source.project.config.definition_of_done == ["Tests pass", "Docs updated"]
+    assert source.load_definition_of_done_defaults().items == ("Tests pass", "Docs updated")
+    assert operations == [(repo, "tui_dod_defaults_update")]
+
+
+def test_local_data_source_rejects_invalid_dod_defaults_without_partial_mutation(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    source = LocalBoardDataSource(project)
+    before = project.config_path.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Definition of Done defaults must be strings"):
+        source.update_definition_of_done_defaults(
+            tui_models.DefinitionOfDoneDefaultsInput(items=("Tests pass", object()))  # type: ignore[arg-type]
+        )
+
+    assert project.config_path.read_text(encoding="utf-8") == before
+
+
 def test_daemon_data_source_loads_board_with_task_view_hydration():
     project = discover_project(Path.cwd(), explicit_cwd=FIXTURE_REPO)
     task = ReadOnlyRepository(project).get_task("TASK-1")

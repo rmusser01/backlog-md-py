@@ -13,6 +13,8 @@ from backlog_py.tui.models import (
     ChecklistName,
     ChecklistToggleInput,
     CreateTaskInput,
+    DefinitionOfDoneDefaultsInput,
+    DefinitionOfDoneDefaultsView,
     EditTaskInput,
     SearchResultView,
     SettingsInput,
@@ -396,6 +398,47 @@ class SettingsDialog(ModalScreen[SettingsInput | None]):
             )
         except ValueError as exc:
             self.query_one("#settings-error", Label).update(str(exc))
+
+
+class DefinitionOfDoneDefaultsDialog(ModalScreen[DefinitionOfDoneDefaultsInput | None]):
+    BINDINGS = [("escape", "cancel", "Cancel"), ("ctrl+s", "submit", "Save")]
+
+    def __init__(self, defaults: DefinitionOfDoneDefaultsView) -> None:
+        super().__init__()
+        self.defaults = defaults
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dod-defaults-dialog", classes="dialog"):
+            yield Static("Definition of Done defaults", classes="dialog-title", markup=False)
+            yield TextArea("\n".join(self.defaults.items), id="dod-defaults-items", compact=True)
+            yield Label("", id="dod-defaults-error")
+            yield Button("Save", id="dod-defaults-submit", variant="primary")
+
+    def on_mount(self) -> None:
+        self.set_focus(self.query_one("#dod-defaults-items", TextArea))
+
+    def key_enter(self) -> None:
+        self._submit()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "dod-defaults-submit":
+            self._submit()
+
+    def action_submit(self) -> None:
+        self._submit()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _submit(self) -> None:
+        try:
+            self.dismiss(
+                DefinitionOfDoneDefaultsInput(
+                    items=parse_multivalue(self.query_one("#dod-defaults-items", TextArea).text)
+                )
+            )
+        except ValueError as exc:
+            self.query_one("#dod-defaults-error", Label).update(str(exc))
 
 
 class ArchiveTaskDialog(ModalScreen[bool]):

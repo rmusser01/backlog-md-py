@@ -83,6 +83,16 @@ class SettingsInput:
 
 
 @dataclass(frozen=True)
+class DefinitionOfDoneDefaultsView:
+    items: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DefinitionOfDoneDefaultsInput:
+    items: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class BoardSnapshot:
     project_name: str
     project_root: Path

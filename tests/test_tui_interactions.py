@@ -304,6 +304,27 @@ async def test_settings_dialog_updates_safe_project_settings():
 
 
 @pytest.mark.asyncio
+async def test_dod_defaults_dialog_updates_project_defaults():
+    source = _MutableSource(_snapshot_with_two_tasks())
+    source.dod_defaults = SimpleNamespace(items=("Tests pass",))
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+
+        dialog = pilot.app.screen
+        dialog.query_one("#dod-defaults-items", TextArea).text = "Tests pass\nDocs updated"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    assert len(source.dod_defaults_updates) == 1
+    updated = source.dod_defaults_updates[0]
+    assert updated.items == ("Tests pass", "Docs updated")
+
+
+@pytest.mark.asyncio
 async def test_editor_confirmation_suspends_runs_editor_refreshes_and_reselects_task():
     source = _MutableSource(_snapshot())
     editor_calls = []
@@ -643,6 +664,8 @@ class _MutableSource:
         self.search_queries = []
         self.settings = None
         self.settings_updates = []
+        self.dod_defaults = None
+        self.dod_defaults_updates = []
 
     def replace_snapshot(self, snapshot: BoardSnapshot) -> None:
         self._snapshot = snapshot
@@ -660,6 +683,14 @@ class _MutableSource:
     def update_settings(self, input):
         self.settings_updates.append(input)
         self.settings = input
+        return input
+
+    def load_definition_of_done_defaults(self):
+        return self.dod_defaults
+
+    def update_definition_of_done_defaults(self, input):
+        self.dod_defaults_updates.append(input)
+        self.dod_defaults = input
         return input
 
     def create_task(self, input: CreateTaskInput) -> TaskView:

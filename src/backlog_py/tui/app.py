@@ -10,6 +10,8 @@ from backlog_py.tui.data import BoardDataSource, DaemonReadError, LocalBoardData
 from backlog_py.tui.models import (
     BoardSnapshot,
     CreateTaskInput,
+    DefinitionOfDoneDefaultsInput,
+    DefinitionOfDoneDefaultsView,
     FilterState,
     SelectionState,
     SettingsInput,
@@ -40,6 +42,7 @@ try:
         ArchiveTaskDialog,
         ChecklistToggleDialog,
         CreateTaskDialog,
+        DefinitionOfDoneDefaultsDialog,
         EditTaskDialog,
         EditorConfirmDialog,
         GlobalSearchDialog,
@@ -76,6 +79,7 @@ class BacklogTuiApp(App[None]):
         Binding("/", "focus_filter", "Filter"),
         Binding("s", "global_search", "Search"),
         Binding("c", "settings", "Config"),
+        Binding("o", "definition_of_done_defaults", "DoD"),
         Binding("m", "move_task", "Move"),
         Binding("n", "create_task", "New"),
         Binding("u", "update_task", "Update"),
@@ -154,7 +158,7 @@ class BacklogTuiApp(App[None]):
         if event.state.name != "SUCCESS":
             return
         if event.worker.name.startswith("mutation:"):
-            if isinstance(event.worker.result, SettingsView):
+            if isinstance(event.worker.result, (SettingsView, DefinitionOfDoneDefaultsView)):
                 self.project = getattr(self.data_source, "project", self.project)
                 self.query_one(BoardScreen).project = self.project
                 self.refresh_board()
@@ -336,6 +340,14 @@ class BacklogTuiApp(App[None]):
             return
         self._push_modal(SettingsDialog(settings), self._settings_result)
 
+    def action_definition_of_done_defaults(self) -> None:
+        try:
+            defaults = self.data_source.load_definition_of_done_defaults()
+        except Exception as exc:
+            self.notify(str(exc), severity="error")
+            return
+        self._push_modal(DefinitionOfDoneDefaultsDialog(defaults), self._definition_of_done_defaults_result)
+
     def action_archive_task(self) -> None:
         task = self._selected_task()
         if task is None:
@@ -484,6 +496,14 @@ class BacklogTuiApp(App[None]):
             return
         self._run_mutation(lambda: self.data_source.update_settings(input), name="mutation:settings")
 
+    def _definition_of_done_defaults_result(self, input: DefinitionOfDoneDefaultsInput | None) -> None:
+        if input is None:
+            return
+        self._run_mutation(
+            lambda: self.data_source.update_definition_of_done_defaults(input),
+            name="mutation:dod-defaults",
+        )
+
     async def _run_editor_flow(self, path: Path) -> None:
         try:
             with self.suspend():
@@ -506,7 +526,7 @@ class BacklogTuiApp(App[None]):
 
     def _run_mutation(
         self,
-        operation: Callable[[], TaskView],
+        operation: Callable[[], TaskView | SettingsView | DefinitionOfDoneDefaultsView],
         *,
         name: str,
         reselect_task_id: str | None = None,

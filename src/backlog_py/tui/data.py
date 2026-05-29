@@ -14,11 +14,18 @@ from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.daemon.lifecycle import DaemonNotRunningError, daemon_status
 from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.security.paths import assert_path_within_base
-from backlog_py.storage.config import load_config, set_config_value
+from backlog_py.storage.config import (
+    get_definition_of_done_defaults,
+    load_config,
+    replace_definition_of_done_defaults,
+    set_config_value,
+)
 from backlog_py.tui.models import (
     BoardSnapshot,
     BoardSourceName,
     CreateTaskInput,
+    DefinitionOfDoneDefaultsInput,
+    DefinitionOfDoneDefaultsView,
     EditTaskInput,
     SearchResultView,
     SettingsInput,
@@ -45,6 +52,15 @@ class BoardDataSource(Protocol):
 
     def update_settings(self, input: SettingsInput) -> SettingsView:
         """Persist editable safe project settings and return refreshed values."""
+
+    def load_definition_of_done_defaults(self) -> DefinitionOfDoneDefaultsView:
+        """Load project-level Definition of Done defaults for TUI display."""
+
+    def update_definition_of_done_defaults(
+        self,
+        input: DefinitionOfDoneDefaultsInput,
+    ) -> DefinitionOfDoneDefaultsView:
+        """Persist project-level Definition of Done defaults and return refreshed values."""
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         """Create a task and return the normalized task view."""
@@ -87,6 +103,20 @@ class LocalBoardDataSource:
             return settings
 
         return with_project_write_lock(self.project, "tui_config_settings_update", mutate)
+
+    def load_definition_of_done_defaults(self) -> DefinitionOfDoneDefaultsView:
+        return DefinitionOfDoneDefaultsView(items=tuple(get_definition_of_done_defaults(self.project)))
+
+    def update_definition_of_done_defaults(
+        self,
+        input: DefinitionOfDoneDefaultsInput,
+    ) -> DefinitionOfDoneDefaultsView:
+        def mutate() -> DefinitionOfDoneDefaultsView:
+            defaults = _update_definition_of_done_defaults(self.project, input)
+            self.project = _refresh_project_config(self.project)
+            return defaults
+
+        return with_project_write_lock(self.project, "tui_dod_defaults_update", mutate)
 
     def create_task(self, input: CreateTaskInput) -> TaskView:
         def mutate() -> TaskView:
@@ -236,6 +266,20 @@ class DaemonBoardDataSource:
 
         return with_project_write_lock(self.project, "tui_config_settings_update", mutate)
 
+    def load_definition_of_done_defaults(self) -> DefinitionOfDoneDefaultsView:
+        return DefinitionOfDoneDefaultsView(items=tuple(get_definition_of_done_defaults(self.project)))
+
+    def update_definition_of_done_defaults(
+        self,
+        input: DefinitionOfDoneDefaultsInput,
+    ) -> DefinitionOfDoneDefaultsView:
+        def mutate() -> DefinitionOfDoneDefaultsView:
+            defaults = _update_definition_of_done_defaults(self.project, input)
+            self.project = _refresh_project_config(self.project)
+            return defaults
+
+        return with_project_write_lock(self.project, "tui_dod_defaults_update", mutate)
+
     def create_task(self, input: CreateTaskInput) -> TaskView:
         arguments: dict[str, Any] = {
             "project": str(self.project.root),
@@ -376,6 +420,26 @@ def _update_project_settings(project: BacklogProject, input: SettingsInput) -> S
     for key, value in _settings_update_values(input):
         set_config_value(project, key, value)
     return settings_view_from_config(load_config(project.config_path))
+
+
+def _update_definition_of_done_defaults(
+    project: BacklogProject,
+    input: DefinitionOfDoneDefaultsInput,
+) -> DefinitionOfDoneDefaultsView:
+    items = _normalized_definition_of_done_defaults(input)
+    config = replace_definition_of_done_defaults(project, list(items))
+    return DefinitionOfDoneDefaultsView(items=tuple(config.definition_of_done or ()))
+
+
+def _normalized_definition_of_done_defaults(input: DefinitionOfDoneDefaultsInput) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for item in input.items:
+        if not isinstance(item, str):
+            raise ValueError("Definition of Done defaults must be strings")
+        text = item.strip()
+        if text:
+            normalized.append(text)
+    return tuple(normalized)
 
 
 def _settings_update_values(input: SettingsInput) -> tuple[tuple[str, str], ...]:

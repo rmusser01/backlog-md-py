@@ -147,3 +147,16 @@ BacklogTuiApp {
     color: $error;
     height: 1;
 }
+
+#dod-defaults-dialog {
+    width: 72;
+}
+
+#dod-defaults-items {
+    height: 8;
+}
+
+#dod-defaults-error {
+    color: $error;
+    height: 1;
+}
