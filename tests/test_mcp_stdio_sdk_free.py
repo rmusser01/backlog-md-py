@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import shutil
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -8,6 +9,8 @@ import pytest
 
 from backlog_py.mcp import server as mcp_server
 from backlog_py.mcp.stdio_server import run_stdio
+
+FIXTURE_REPO = "tests/fixtures/repos/basic"
 
 
 def test_create_server_no_longer_requires_mcp_sdk(monkeypatch):
@@ -32,6 +35,54 @@ def test_stdio_server_handles_initialize_line():
     response = json.loads(stdout.getvalue())
     assert response["id"] == 1
     assert response["result"]["serverInfo"]["name"] == "backlog-md-py"
+
+
+def test_stdio_server_uses_backlog_cwd_as_project_hint(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    monkeypatch.setenv("BACKLOG_CWD", str(repo))
+    stdin = io.StringIO(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task_view", "arguments": {"task_id": "TASK-1"}},
+            }
+        )
+        + "\n"
+    )
+    stdout = io.StringIO()
+
+    run_stdio(stdin=stdin, stdout=stdout)
+
+    response = json.loads(stdout.getvalue())
+    content = response["result"]["content"]
+    assert json.loads(content[0]["text"])["id"] == "TASK-1"
+
+
+def test_stdio_server_uses_process_cwd_as_project_hint(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    monkeypatch.chdir(repo)
+    stdin = io.StringIO(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task_view", "arguments": {"task_id": "TASK-1"}},
+            }
+        )
+        + "\n"
+    )
+    stdout = io.StringIO()
+
+    run_stdio(stdin=stdin, stdout=stdout)
+
+    response = json.loads(stdout.getvalue())
+    content = response["result"]["content"]
+    assert json.loads(content[0]["text"])["title"] == "Example task"
 
 
 def test_stdio_server_omits_notification_output():

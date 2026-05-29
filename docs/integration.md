@@ -172,9 +172,14 @@ For agent integrations, use one of these patterns:
 - Call the pure helper functions from Python.
 - Wrap `backlog-py --cwd <project> ...` as a subprocess tool.
 
-Every MCP tool takes a `project` argument containing the path to the Backlog.md
-project or a directory inside it. This keeps the server stateless and avoids a
-global mutable working directory.
+Every MCP tool accepts a `project` argument containing the path to the Backlog.md
+project or a directory inside it. Explicit `project` arguments are preferred for
+stateless integrations and override any discovered project hint.
+
+When the argument is omitted, direct stdio mode tries to discover a project from
+`BACKLOG_CWD` and then from the process working directory. If no Backlog.md
+config is discoverable, read `backlog://init-required` for setup guidance. Agents
+should read `backlog://docs/task-workflow` before task mutations.
 
 If existing long-lived agent sessions cannot be restarted and still launch
 `backlog mcp start`, use the explicit legacy shim installer:
