@@ -14,7 +14,7 @@ do not block the first local-file agent cutover candidate.
 | cli:init | implemented | backlog init [project-name] --defaults [--no-git] | cli:init |
 | cli:task-list-plain | implemented | backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> --parent <taskId> --plain | cli:task-list-plain |
 | cli:task-view-plain | implemented | backlog task <id> --plain | cli:task-view-plain |
-| cli:search-plain | implemented | backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered search returns tasks, documents, and decisions | cli:search-plain |
+| cli:search-plain | implemented | backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered fuzzy-ranked search returns tasks, documents, and decisions | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
 | cli:overview | implemented | backlog overview | cli:overview |
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |

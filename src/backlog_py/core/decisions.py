@@ -12,7 +12,7 @@ from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
-from backlog_py.search.simple import contains_query
+from backlog_py.search.simple import ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 
 
@@ -70,11 +70,7 @@ class DecisionService:
         return sorted(decisions, key=_decision_sort_key)
 
     def search_decisions(self, query: str) -> list[DecisionRecord]:
-        return [
-            decision
-            for decision in self.list_decisions()
-            if contains_query(_decision_search_text(decision), query)
-        ]
+        return ranked_matches(self.list_decisions(), query, _decision_search_text)
 
     def view_decision(self, decision_id: str) -> DecisionRecord:
         normalized = _normalize_decision_id(decision_id)

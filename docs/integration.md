@@ -81,9 +81,12 @@ screenshot checks still need recorded evidence. See
 `docs/browser-release-validation.md` for the JSON manifest format.
 
 Unfiltered `search` output includes matching tasks, documents, and decisions.
-Use `--type task`, `--type document`, or `--type decision` to narrow result
-classes. Task-specific filters such as `--status`, `--priority`, and
-`--modified-file` keep default search restricted to tasks.
+Search uses deterministic fuzzy ranking: exact token and substring matches rank
+ahead of ordered-subsequence matches such as `authn` to `authentication`, and
+equal scores preserve the existing stable task, document, or decision order. Use
+`--type task`, `--type document`, or `--type decision` to narrow result classes.
+Task-specific filters such as `--status`, `--priority`, and `--modified-file`
+keep default search restricted to tasks.
 
 The module entry point is equivalent:
 

@@ -58,6 +58,9 @@ larger task commands:
   `--plain` detail output.
 - Non-plain `backlog search` interactive filter panel with status, priority,
   result-type, and modified-file refinement while preserving `--plain`.
+- Deterministic fuzzy search ranking across tasks, documents, and decisions,
+  including exact, substring, and ordered-subsequence matches while preserving
+  stable tie ordering.
 - Interactive `backlog board` view/edit/move controls while preserving
   deterministic non-interactive board output.
 - Interactive `backlog overview` project statistics dashboard while preserving

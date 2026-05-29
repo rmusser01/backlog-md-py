@@ -21,7 +21,7 @@ from backlog_py.runtime.git import (
     list_active_branch_task_snapshots,
     maybe_fetch_remote_refs,
 )
-from backlog_py.search.simple import contains_query
+from backlog_py.search.simple import ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 from backlog_py.storage.config import load_config
 from backlog_py.storage.project import discover_project
@@ -132,7 +132,7 @@ class ReadOnlyRepository:
         modified_files: str | Sequence[str] | None = None,
     ) -> list[TaskRecord]:
         tasks = [*self.list_tasks(), *self.list_completed_tasks()]
-        return [
+        filtered = [
             task
             for task in tasks
             if _task_matches_filters(
@@ -145,9 +145,9 @@ class ReadOnlyRepository:
                 milestone=milestone,
                 parent_task_id=parent_task_id,
             )
-            if contains_query(_search_text(task), query)
-            and _matches_modified_file_filters(task, modified_files)
+            if _matches_modified_file_filters(task, modified_files)
         ]
+        return ranked_matches(filtered, query, _search_text)
 
     def board(self) -> "OrderedDict[str, list[TaskRecord]]":
         statuses = self.project.config.statuses or _statuses_from_tasks(self.list_tasks())
