@@ -230,7 +230,7 @@ def test_local_data_source_updates_dod_defaults_under_project_lock(tmp_path, mon
     source = LocalBoardDataSource(project)
 
     updated = source.update_definition_of_done_defaults(
-        tui_models.DefinitionOfDoneDefaultsInput(items=("Tests pass", "Docs updated"))
+        tui_models.DefinitionOfDoneDefaultsInput(items=(" Tests pass ", "", "Docs updated"))
     )
 
     assert updated.items == ("Tests pass", "Docs updated")

@@ -22,6 +22,7 @@ from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.storage.config import (
     get_definition_of_done_defaults,
     load_config,
+    normalize_definition_of_done_defaults,
     replace_definition_of_done_defaults,
     set_config_value,
 )
@@ -2968,7 +2969,9 @@ def _task_checklist_kwargs_from_payload(payload: object) -> dict[str, object]:
 def _dod_defaults_items_from_payload(payload: object) -> list[str]:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
-    return _required_string_list_field(payload, "items")
+    if "items" not in payload:
+        raise ValueError("Request body field items must be a list of strings")
+    return normalize_definition_of_done_defaults(payload["items"])
 
 
 def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:

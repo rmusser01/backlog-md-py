@@ -45,13 +45,45 @@ def test_config_definition_of_done_defaults_can_be_read_and_replaced(tmp_path):
 
     assert get_definition_of_done_defaults(project) == []
 
-    updated = replace_definition_of_done_defaults(project, ["Tests pass", "Docs updated"])
+    updated = replace_definition_of_done_defaults(project, [" Tests pass ", "", "Docs updated"])
 
     assert updated.definition_of_done == ["Tests pass", "Docs updated"]
     assert get_definition_of_done_defaults(_project(repo)) == ["Tests pass", "Docs updated"]
     config_source = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
     assert "definitionOfDone:" in config_source
     assert "- Tests pass" in config_source
+
+
+def test_config_definition_of_done_defaults_reject_non_string_items_without_mutation(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    replace_definition_of_done_defaults(project, ["Tests pass"])
+    before = project.config_path.read_text(encoding="utf-8")
+
+    try:
+        replace_definition_of_done_defaults(project, ["Docs updated", 7])  # type: ignore[list-item]
+    except ValueError as exc:
+        assert "Definition of Done defaults must be strings" in str(exc)
+    else:
+        raise AssertionError("Expected non-string Definition of Done defaults to be rejected")
+
+    assert project.config_path.read_text(encoding="utf-8") == before
+    assert get_definition_of_done_defaults(_project(repo)) == ["Tests pass"]
+
+
+def test_config_definition_of_done_defaults_reject_non_string_items_from_disk(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw_config["definitionOfDone"] = ["Tests pass", 7]
+    config_path.write_text(yaml.safe_dump(raw_config, sort_keys=False), encoding="utf-8")
+
+    try:
+        load_config(config_path)
+    except ValueError as exc:
+        assert "Definition of Done defaults must be strings" in str(exc)
+    else:
+        raise AssertionError("Expected non-string Definition of Done defaults from disk to be rejected")
 
 
 def test_task_creation_inherits_project_defaults_unless_disabled(tmp_path):
@@ -135,6 +167,30 @@ def test_cli_definition_of_done_default_commands_use_config_writer(tmp_path):
     assert clear.exit_code == 0
     assert clear.output == ""
     assert get_definition_of_done_defaults(_project(repo)) == []
+
+
+def test_cli_config_set_definition_of_done_normalizes_and_rejects_invalid_items(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    updated = runner.invoke(
+        main,
+        ["--cwd", str(repo), "config", "set", "definitionOfDone", " Tests pass , , Docs updated "],
+    )
+
+    assert updated.exit_code == 0
+    assert get_definition_of_done_defaults(_project(repo)) == ["Tests pass", "Docs updated"]
+
+    before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+    invalid = runner.invoke(
+        main,
+        ["--cwd", str(repo), "config", "set", "definitionOfDone", "[Docs updated, 7]"],
+    )
+
+    assert invalid.exit_code != 0
+    assert "Definition of Done defaults must be strings" in invalid.output
+    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
+    assert get_definition_of_done_defaults(_project(repo)) == ["Tests pass", "Docs updated"]
 
 
 def test_cli_config_get_outputs_effective_values(tmp_path):
@@ -449,11 +505,28 @@ def test_mcp_definition_of_done_defaults_and_task_create_use_safe_core(tmp_path)
     project = _project(repo)
 
     assert definition_of_done_defaults_get(project) == {"items": []}
-    assert definition_of_done_defaults_upsert(project, ["Tests pass"]) == {"items": ["Tests pass"]}
+    assert definition_of_done_defaults_upsert(project, [" Tests pass ", ""]) == {"items": ["Tests pass"]}
 
     created = task_create(project, title="MCP DoD", definitionOfDoneAdd=["MCP specific"])
 
     source = _task_file(repo, created["id"]).read_text(encoding="utf-8")
     assert "- [ ] #1 Tests pass" in source
     assert "- [ ] #2 MCP specific" in source
+    assert definition_of_done_defaults_get(_project(repo)) == {"items": ["Tests pass"]}
+
+
+def test_mcp_definition_of_done_defaults_reject_non_string_items_without_mutation(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    definition_of_done_defaults_upsert(project, ["Tests pass"])
+    before = project.config_path.read_text(encoding="utf-8")
+
+    try:
+        definition_of_done_defaults_upsert(project, ["Docs updated", object()])  # type: ignore[list-item]
+    except ValueError as exc:
+        assert "Definition of Done defaults must be strings" in str(exc)
+    else:
+        raise AssertionError("Expected MCP Definition of Done defaults to reject non-string items")
+
+    assert project.config_path.read_text(encoding="utf-8") == before
     assert definition_of_done_defaults_get(_project(repo)) == {"items": ["Tests pass"]}
