@@ -31,8 +31,9 @@ larger task commands:
   `autoOpenBrowser`, `onStatusChange`, and `zeroPaddedIds`.
 - `zeroPaddedIds` generation for top-level task, child task, draft, document,
   and decision IDs.
-- Init-time `--task-prefix`, read-only `taskPrefix` config listing, and
-  generated task/subtask IDs that respect `prefixes.task`.
+- Init-time `--task-prefix`, read-only `taskPrefix` config listing,
+  generated task/subtask IDs that respect `prefixes.task`, and `--no-git`
+  filesystem-only setup while default init writes Git-aware read settings.
 - ANSI-rich terminal rendering for non-plain task list, search, board,
   document, decision, and milestone summary output while preserving unstyled
   `--plain` output.

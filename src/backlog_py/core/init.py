@@ -41,6 +41,7 @@ def init_project(
     backlog_dir: str = "backlog",
     config_location: str = "local",
     task_prefix: str = "task",
+    no_git: bool = False,
 ) -> InitProjectResult:
     """Create a non-interactive Backlog.md project skeleton."""
     root_path = root.resolve()
@@ -63,6 +64,7 @@ def init_project(
                 project_name or root_path.name,
                 backlog_directory=root_config_backlog_dir,
                 task_prefix=task_prefix,
+                no_git=no_git,
             ),
         )
 
@@ -103,6 +105,7 @@ def _default_config_source(
     *,
     backlog_directory: str | None = None,
     task_prefix: str = "task",
+    no_git: bool = False,
 ) -> str:
     normalized_task_prefix = _normalize_task_prefix(task_prefix)
     raw = {
@@ -113,10 +116,10 @@ def _default_config_source(
         "includeDatetimeInDates": True,
         "defaultPort": 6420,
         "autoOpenBrowser": True,
-        "remoteOperations": False,
+        "remoteOperations": not no_git,
         "autoCommit": False,
         "bypassGitHooks": False,
-        "checkActiveBranches": False,
+        "checkActiveBranches": not no_git,
         "activeBranchDays": 30,
         "prefixes": {"task": normalized_task_prefix},
     }

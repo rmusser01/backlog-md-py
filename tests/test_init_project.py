@@ -29,7 +29,33 @@ def test_cli_init_defaults_creates_backlog_project(tmp_path):
     project = discover_project(tmp_path)
     assert project.config.project_name == "Demo Project"
     assert project.config.statuses == ["To Do", "In Progress", "Done"]
+    assert project.config.remote_operations is True
+    assert project.config.check_active_branches is True
+    assert project.config.active_branch_days == 30
+    assert project.config.auto_commit is False
+    assert project.config.bypass_git_hooks is False
+
+
+def test_cli_init_no_git_defaults_disable_git_dependent_settings(tmp_path):
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init", "Filesystem Project", "--defaults", "--no-git"],
+    )
+
+    assert result.exit_code == 0
+
+    project = discover_project(tmp_path)
     assert project.config.remote_operations is False
+    assert project.config.check_active_branches is False
+    assert project.config.auto_commit is False
+
+
+def test_cli_init_requires_defaults_for_non_interactive_setup(tmp_path):
+    result = CliRunner().invoke(main, ["--cwd", str(tmp_path), "init", "Interactive Project"])
+
+    assert result.exit_code != 0
+    assert "Pass --defaults" in result.output
+    assert not (tmp_path / "backlog" / "config.yml").exists()
 
 
 def test_cli_init_custom_backlog_dir_uses_discoverable_root_config(tmp_path):

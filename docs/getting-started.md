@@ -38,6 +38,16 @@ backlog-py --cwd /tmp/backlog-md-py-demo task edit task-1 --notes "Edited in a s
 backlog-py --cwd /tmp/backlog-md-py-demo board
 ```
 
+Default initialization writes Git-aware but non-mutating settings for projects
+that may use remote freshness and active branch reads:
+`remoteOperations: true`, `checkActiveBranches: true`,
+`activeBranchDays: 30`, and `autoCommit: false`. For a filesystem-only
+scratch project, pass `--no-git`:
+
+```bash
+backlog-py --cwd /tmp/backlog-md-py-demo init --defaults --no-git
+```
+
 Use the same caution for copied repositories: try mutation examples in a
 scratch project or a copied repository before running them against a live
 project backlog.
