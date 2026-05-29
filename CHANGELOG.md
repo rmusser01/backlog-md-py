@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Improve MCP project-discovery resources and stdio initialization guidance so
+  agents can find project roots and workflow instructions without relying on an
+  MCP SDK.
+- Add explicit `backlog-py init --no-git` support for filesystem-only scratch
+  projects while keeping the default init path Git-aware.
+- Add deterministic fuzzy search matching for CLI, MCP, TUI, document, and
+  decision search surfaces while preserving stable result ordering.
+
+### Changed
+
+- Record the post-TUI beta validation refresh and document isolated daemon
+  state for MCP cutover smoke checks.
+
 ## 0.2.0 - 2026-05-23 (Beta)
 
 ### Changed
