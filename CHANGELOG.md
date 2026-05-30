@@ -26,6 +26,8 @@
   state for MCP cutover smoke checks.
 - Print the audited upstream Backlog.md baseline directly in `compat status`
   plain and JSON output.
+- Clarify that browser feature coverage is implemented for the audited baseline
+  while full browser release readiness remains evidence-gated.
 - Move browser board HTML, CSS, and JavaScript into package-managed template
   and asset resources while preserving the dependency-free, no-build browser
   service.
