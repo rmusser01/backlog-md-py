@@ -107,6 +107,16 @@ def test_agent_critical_inventory_tracks_task_ordinal_mutation_surface():
     assert "ordinal=None" in by_name["mcp:task-edit"].expected
 
 
+def test_agent_critical_inventory_tracks_task_plan_mutation_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+    task_edit = by_name["cli:task-edit"].expected
+
+    assert "--plan <text>" in task_edit
+    assert "--append-plan <text>" in task_edit
+    assert "--clear-plan" in task_edit
+
+
 def test_agent_critical_inventory_tracks_interactive_task_view_editor_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

@@ -28,6 +28,8 @@
   plain and JSON output.
 - Show release-gate evidence errors in plain `compat status` output instead of
   requiring JSON output to diagnose invalid browser release evidence.
+- Track `task edit --append-plan` and `task edit --clear-plan` explicitly in
+  the compatibility inventory and parity docs.
 - Clarify that browser feature coverage is implemented for the audited baseline
   while full browser release readiness remains evidence-gated.
 - Move browser board HTML, CSS, and JavaScript into package-managed template
