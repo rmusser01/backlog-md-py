@@ -873,6 +873,29 @@ def test_compat_evidence_template_writes_portable_manifest(tmp_path):
     assert "fullBrowserReleaseReady: true" in status.output
 
 
+def test_compat_status_plain_outputs_gate_evidence_errors(tmp_path):
+    evidence_path = tmp_path / "browser-release-evidence.json"
+    evidence = _release_evidence_manifest()
+    evidence["release_gates"]["browser:desktop-mobile-screenshot-release-check"]["artifacts"] = [
+        "artifacts/browser-desktop.png"
+    ]
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    result = _invoke("compat", "status", "--release-evidence", str(evidence_path))
+
+    assert result.exit_code == 0
+    assert "releaseEvidence: fresh" in result.output
+    assert (
+        "browser:desktop-mobile-screenshot-release-check: required "
+        "(full-browser-release) - evidenceError: Screenshot release evidence "
+        "requires desktop and mobile artifacts."
+    ) in result.output
+    assert (
+        "browser:rich-edit-e2e-release-check: passed "
+        "(full-browser-release) - evidenceError:"
+    ) not in result.output
+
+
 def test_compat_evidence_template_rejects_absolute_artifact_paths(tmp_path):
     result = _invoke(
         "compat",

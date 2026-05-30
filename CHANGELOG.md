@@ -26,6 +26,8 @@
   state for MCP cutover smoke checks.
 - Print the audited upstream Backlog.md baseline directly in `compat status`
   plain and JSON output.
+- Show release-gate evidence errors in plain `compat status` output instead of
+  requiring JSON output to diagnose invalid browser release evidence.
 - Clarify that browser feature coverage is implemented for the audited baseline
   while full browser release readiness remains evidence-gated.
 - Move browser board HTML, CSS, and JavaScript into package-managed template
