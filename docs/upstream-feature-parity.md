@@ -22,6 +22,7 @@ because they are visible feature-set commitments, not incidental options inside
 larger task commands:
 
 - Task creation with implementation notes.
+- Task editing for plan replacement, plan append, and plan clearing.
 - Task editing for notes replacement, notes append, final summary replacement,
   final summary append, and final summary clearing.
 - Task editing for acceptance-criteria and Definition-of-Done check state,
