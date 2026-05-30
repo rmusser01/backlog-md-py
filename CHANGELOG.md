@@ -28,6 +28,8 @@
   plain and JSON output.
 - Show release-gate evidence errors in plain `compat status` output instead of
   requiring JSON output to diagnose invalid browser release evidence.
+- Track `task create --id` explicitly in the compatibility inventory and
+  parity docs.
 - Track `task edit --title`, `task edit -s`, `task edit -d`, and
   `task edit --dep` explicitly in the compatibility inventory and parity docs.
 - Track `task edit --append-plan` and `task edit --clear-plan` explicitly in

@@ -21,7 +21,7 @@ The compatibility inventory now calls out these upstream surfaces separately
 because they are visible feature-set commitments, not incidental options inside
 larger task commands:
 
-- Task creation with implementation notes.
+- Task creation with explicit IDs and implementation notes.
 - Task editing for title, status, description, dependency, plan replacement,
   plan append, and plan clearing.
 - Task editing for notes replacement, notes append, final summary replacement,
