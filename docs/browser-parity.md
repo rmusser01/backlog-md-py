@@ -1,16 +1,24 @@
-# Browser Parity Decision
+# Browser Parity And Release Evidence
 
-This document records browser UI parity requirements for a full Backlog.md clone
-and separates them from the first local-file agent cutover candidate. Browser
-support is valuable for human project management, but it is not required for
-agent workflows that use plain CLI output and pure MCP helpers.
+This document records browser UI parity requirements for the audited
+Backlog.md baseline, separates them from the first local-file agent cutover
+candidate, and explains the extra evidence required before advertising full
+browser release readiness. Browser support is valuable for human project
+management, but it is not required for agent workflows that use plain CLI
+output and pure MCP helpers.
 
 ## Decision
 
-Browser parity is intentionally deferred for the first agent cutover candidate.
-The Python clone must not silently pretend to support browser behavior until the
-items below are implemented and tested. Each browser item remains required for a
-full clone unless explicitly rejected.
+Browser feature coverage for the audited `backlog.md@1.45.1` baseline is
+implemented in the current compatibility inventory. Browser release readiness
+is still evidence-gated: releases that advertise full browser parity must
+attach fresh rich-edit E2E and desktop/mobile screenshot evidence through
+`backlog-py compat status --release-evidence <manifest.json>`.
+
+Browser capabilities remain independent from the first agent cutover candidate.
+Plain CLI output and pure MCP helpers are the agent automation contract; browser
+features are human-facing project-management workflows and must not be required
+for automated local-file task handling.
 
 The browser service remains dependency-free and does not require a Node, Bun, or
 frontend bundler step. The served board is rendered from packaged resources under
@@ -39,7 +47,7 @@ behavior matches source-tree behavior.
 | service mode | Required for full clone | Implemented for status, request logging, guarded local shutdown state, and SSE shutdown policy | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Shutdown requests are idempotent, surface pending shutdown state in the Service dialog, and notify the SSE board transport so the browser stops reconnecting or polling. |
 | Mobile behavior | Required for full clone | Implemented for narrow viewport layout | Narrow viewport layout is covered by the browser HTML/CSS contract; richer device-specific visual QA can be handled as release validation instead of a missing parity feature. |
 
-## Acceptance For Full Browser Clone
+## Release Evidence For Full Browser Readiness
 
 `backlog-py compat status` tracks these release checks separately from feature
 coverage. The browser feature inventory can be implemented while
@@ -79,6 +87,6 @@ Future browser milestones should not be marked complete until they have:
 
 ## Rejected For Agent Cutover
 
-No browser-only capability is allowed to block the first agent cutover. The
-first candidate is limited to local file operations through plain CLI output and
+No browser-only capability is allowed to block agent cutover. The first
+candidate remains limited to local file operations through plain CLI output and
 pure MCP helper functions.

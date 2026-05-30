@@ -42,7 +42,7 @@ validating, or contributing to `backlog-md-py`.
 - [Upstream feature parity](upstream-feature-parity.md): the broader audited
   upstream Backlog.md feature inventory and current implementation state.
 - [Browser parity](browser-parity.md): browser board requirements, implemented
-  interactions, and explicitly deferred editing behavior.
+  interactions, release-evidence gates, and future full-WYSIWYG scope.
 - [Browser release validation](browser-release-validation.md): release evidence
   rules for browser readiness claims.
 
