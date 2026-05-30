@@ -962,6 +962,11 @@ def compat_status_command(as_json: bool, release_evidence: Path | None) -> None:
     summary = report["summary"]
     click.echo(f"agentCutoverReady: {_bool_text(report['agent_cutover_ready'])}")
     click.echo(f"fullBrowserReleaseReady: {_bool_text(report['full_browser_release_ready'])}")
+    baseline = report["upstream_baseline"]
+    click.echo(
+        "upstreamBaseline: "
+        f"{baseline['package']} {baseline['version']} audited {baseline['audit_date']}"
+    )
     evidence = report["release_evidence"]
     click.echo(f"releaseEvidence: {evidence['status']}")
     if evidence["generated_at"] is not None:

@@ -7,7 +7,7 @@ Backlog.md feature set beyond the first local-file agent cutover gate.
 
 - Upstream package: `backlog.md@1.45.1`
 - Audit date: 2026-05-16
-- Latest release check: 2026-05-22, GitHub latest release still `v1.45.1`
+- Latest release check: 2026-05-30, GitHub latest release still `v1.45.1`
 - Sources: upstream `README.md`, `CLI-INSTRUCTIONS.md`, `ADVANCED-CONFIG.md`,
   and `package.json`.
 
@@ -157,6 +157,13 @@ browser parity must also provide browser release evidence. Use
 `backlog-py compat status --release-evidence <manifest.json>` with the completed
 fresh manifest format in `docs/browser-release-validation.md` to promote
 externally generated release evidence into machine-readable readiness.
+
+The compat report prints the audited upstream baseline independently from
+release evidence, so users can see which upstream Backlog.md version the
+feature inventory covers even when browser release evidence is missing or
+stale. Release-evidence manifests also carry their own upstream baseline and
+must match the current audited baseline before they can satisfy browser release
+gates.
 
 The current browser release gates are:
 

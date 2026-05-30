@@ -24,6 +24,8 @@
 
 - Record the post-TUI beta validation refresh and document isolated daemon
   state for MCP cutover smoke checks.
+- Print the audited upstream Backlog.md baseline directly in `compat status`
+  plain and JSON output.
 - Move browser board HTML, CSS, and JavaScript into package-managed template
   and asset resources while preserving the dependency-free, no-build browser
   service.

@@ -59,6 +59,11 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "command": None,
         "error": None,
     }
+    assert report["upstream_baseline"] == {
+        "package": "backlog.md",
+        "version": "1.45.1",
+        "audit_date": "2026-05-16",
+    }
     assert report["summary"] == {
         "implemented": 100,
         "deferred": 0,
