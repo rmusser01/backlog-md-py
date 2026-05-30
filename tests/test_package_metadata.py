@@ -75,6 +75,27 @@ def test_pyproject_packages_tui_stylesheet():
     assert "tui/styles.tcss" in package_data
 
 
+def test_pyproject_packages_browser_static_assets():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    manifest = Path("MANIFEST.in").read_text(encoding="utf-8")
+
+    package_data = pyproject["tool"]["setuptools"]["package-data"]["backlog_py"]
+
+    assert "browser/templates/*.html" in package_data
+    assert "browser/assets/*.css" in package_data
+    assert "browser/assets/*.js" in package_data
+    assert "recursive-include src/backlog_py/browser/templates *.html" in manifest
+    assert "recursive-include src/backlog_py/browser/assets *.css *.js" in manifest
+
+
+def test_browser_board_assets_are_available_from_package_resources():
+    browser_package = files("backlog_py.browser")
+
+    assert browser_package.joinpath("templates", "board.html").is_file()
+    assert browser_package.joinpath("assets", "board.css").is_file()
+    assert browser_package.joinpath("assets", "board.js").is_file()
+
+
 def test_ci_smokes_sdk_free_mcp_entry_point_without_mcp_extra():
     workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
     package_steps = workflow["jobs"]["package"]["steps"]

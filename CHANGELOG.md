@@ -24,6 +24,9 @@
 
 - Record the post-TUI beta validation refresh and document isolated daemon
   state for MCP cutover smoke checks.
+- Move browser board HTML, CSS, and JavaScript into package-managed template
+  and asset resources while preserving the dependency-free, no-build browser
+  service.
 - Require browser release-evidence manifests to include schema version,
   generation date, upstream audit baseline, command provenance, freshness
   policy, and portable relative artifact paths.

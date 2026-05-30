@@ -12,6 +12,12 @@ The Python clone must not silently pretend to support browser behavior until the
 items below are implemented and tested. Each browser item remains required for a
 full clone unless explicitly rejected.
 
+The browser service remains dependency-free and does not require a Node, Bun, or
+frontend bundler step. The served board is rendered from packaged resources under
+`backlog_py.browser.templates` and `backlog_py.browser.assets`; distribution
+metadata includes those resources in wheels and sdists so installed-package
+behavior matches source-tree behavior.
+
 ## Browser Requirements
 
 | Requirement | Classification | Agent cutover impact | Rationale |
