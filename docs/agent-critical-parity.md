@@ -37,9 +37,9 @@ do not block the first local-file agent cutover candidate.
 | cli:doc-update | implemented | backlog doc update <path-or-id> --title <title> -p <path> -t <type> --tags <tags> --content <body> | cli:doc-update |
 | cli:decision-create | implemented | backlog decision create "Title" -s <status> | cli:decision-create |
 | cli:milestone-list | implemented | backlog milestone list | cli:milestone-list |
-| cli:milestone-add | implemented | backlog milestone add <name> | cli:milestone-add |
-| cli:milestone-rename | implemented | backlog milestone rename <old> <new> | cli:milestone-rename |
-| cli:milestone-remove | implemented | backlog milestone remove <name> | cli:milestone-remove |
+| cli:milestone-add | implemented | backlog milestone add <name> --description <text> | cli:milestone-add |
+| cli:milestone-rename | implemented | backlog milestone rename <old> <new> --update-tasks | cli:milestone-rename |
+| cli:milestone-remove | implemented | backlog milestone remove <name> --clear-tasks | cli:milestone-remove |
 | cli:milestone-archive | implemented | backlog milestone archive <name> | cli:milestone-archive |
 | cli:config-get | implemented | backlog config get <key> | cli:config-get |
 | cli:config-set | implemented | backlog config set <key> <value> | cli:config-set |
