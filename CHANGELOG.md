@@ -28,6 +28,8 @@
   plain and JSON output.
 - Show release-gate evidence errors in plain `compat status` output instead of
   requiring JSON output to diagnose invalid browser release evidence.
+- Track `doc list [query]` explicitly in the compatibility inventory and
+  parity docs.
 - Track init setup options explicitly in the compatibility inventory and parity
   docs.
 - Track milestone mutation options explicitly in the compatibility inventory

@@ -31,7 +31,7 @@ do not block the first local-file agent cutover candidate.
 | cli:task-edit-checklist-state | implemented | backlog task edit <id> --check-ac <index> --uncheck-ac <index> --check-dod <index> --uncheck-dod <index> --remove-ac <index> --remove-dod <index> --plain | cli:task-edit-checklist-state |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
 | cli:cleanup | implemented | backlog cleanup | cli:cleanup |
-| cli:doc-list | implemented | backlog doc list | cli:doc-list |
+| cli:doc-list | implemented | backlog doc list [query] | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
 | cli:doc-create | implemented | backlog doc create <title> -p <path> -t <type> --tags <tags> --content <body> | cli:doc-create |
 | cli:doc-update | implemented | backlog doc update <path-or-id> --title <title> -p <path> -t <type> --tags <tags> --content <body> | cli:doc-update |

@@ -26,6 +26,7 @@ larger task commands:
   remain in Draft status.
 - Milestone mutation options for creation descriptions, rename task reference
   updates, and remove-time task milestone clearing.
+- Document listing with optional query filtering.
 - Task editing for title, status, description, dependency, plan replacement,
   plan append, and plan clearing.
 - Task editing for notes replacement, notes append, final summary replacement,
