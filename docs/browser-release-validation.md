@@ -87,7 +87,9 @@ provenance, freshness policy, and release gate evidence:
 When both required browser release gates pass, `fullBrowserReleaseReady` becomes
 `true` in plain output and `full_browser_release_ready` becomes `true` in JSON
 output. Plain output also reports `releaseEvidence: missing`, `fresh`, or
-`stale`; JSON output includes the same metadata under `release_evidence`.
+`stale`; JSON output includes the same metadata under `release_evidence`. When
+fresh release evidence leaves a gate unsatisfied, both plain and JSON output
+include the gate-specific evidence error.
 
 ## CI Evidence Artifacts
 

@@ -997,7 +997,10 @@ def compat_status_command(as_json: bool, release_evidence: Path | None) -> None:
             click.echo(f"  - {item['name']}: {item['reason']}")
     click.echo("releaseGates:")
     for gate in report["release_gates"]["gates"]:
-        click.echo(f"  - {gate['name']}: {gate['status']} ({gate['scope']})")
+        line = f"  - {gate['name']}: {gate['status']} ({gate['scope']})"
+        if gate["evidence_error"] is not None:
+            line += f" - evidenceError: {gate['evidence_error']}"
+        click.echo(line)
 
 
 @compat_group.command("evidence-template")
