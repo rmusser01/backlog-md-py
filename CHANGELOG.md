@@ -17,6 +17,8 @@
   writes.
 - Expand generated agent instruction blocks with search-before-create,
   task-lifecycle, MCP resource, CLI fallback, and singleton-daemon guidance.
+- Add an opt-in disposable SQLite read index for task list, search, and board
+  reads while keeping Markdown as the source of truth.
 
 ### Changed
 

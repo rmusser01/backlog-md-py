@@ -72,6 +72,26 @@ Agents that need a cheap overlap check before writing can call the read-only
 `project_status` MCP tool. It reports the canonical project root, Backlog paths,
 task counts, recent task activity, and token-safe project lock metadata.
 
+## Disposable Read Index
+
+Read-heavy agents can opt in to the disposable SQLite read index:
+
+```bash
+BACKLOG_PY_SQLITE_INDEX=1 backlog-py --cwd /path/to/project task list --plain
+```
+
+The index is an acceleration cache for task list, search, and board reads. It
+stores task Markdown snapshots under the user state directory and rebuilds when
+the project root, config path, backlog directory, config file signature, task
+file mtime/hash, active-branch settings, or git ref freshness inputs change.
+Markdown task files remain the source of truth. If the index is missing,
+deleted, stale, corrupt, or temporarily unavailable, reads rebuild it or fall
+back to direct Markdown parsing.
+
+This cache is intentionally not a durable task database. It may be deleted at
+any time, and mutation paths continue to write normal Backlog.md files under the
+project's `backlog/` directory.
+
 ### No-Restart Legacy Command Shim
 
 Some already-running Codex app-server instances keep cached MCP commands for
@@ -128,6 +148,7 @@ BACKLOG_PY_STATE_DIR=/tmp/backlog-md-py-state backlog-py daemon ensure
 The state layout contains:
 
 - `runtime/daemon.json`: token-bearing daemon runtime record,
+- `indexes/*.sqlite3`: disposable read indexes for opt-in indexed reads,
 - `locks/`: daemon and project lock files,
 - `logs/`: daemon stdout/stderr logs.
 
