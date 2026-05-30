@@ -58,7 +58,13 @@ backlog-py-mcp = "backlog_py.mcp.server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-backlog_py = ["py.typed", "tui/styles.tcss"]
+backlog_py = [
+  "py.typed",
+  "browser/assets/*.css",
+  "browser/assets/*.js",
+  "browser/templates/*.html",
+  "tui/styles.tcss",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "backlog_py.__version__" }

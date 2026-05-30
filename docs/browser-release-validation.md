@@ -3,6 +3,10 @@
 `backlog-py compat status` separates implemented feature coverage from browser
 release readiness. A clone can report all audited features as implemented while
 still requiring browser release evidence before advertising full browser parity.
+The browser HTML template and its CSS/JavaScript assets are package resources,
+so package build validation should continue to confirm that source
+distributions and wheels include `src/backlog_py/browser/templates` and
+`src/backlog_py/browser/assets` without adding a frontend build step.
 
 ## Evidence Manifest
 

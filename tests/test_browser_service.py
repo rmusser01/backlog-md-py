@@ -15,6 +15,14 @@ from backlog_py.storage.project import discover_project
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
 
 
+def test_browser_service_module_does_not_embed_full_board_assets():
+    source = Path("src/backlog_py/browser/service.py").read_text(encoding="utf-8")
+
+    assert "<style>" not in source
+    assert "<script>" not in source
+    assert "let draggedTaskId = null;" not in source
+
+
 def test_browser_service_serves_health_board_json_and_html(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
