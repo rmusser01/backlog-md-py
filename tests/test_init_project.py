@@ -120,4 +120,8 @@ def test_cli_init_can_create_agent_instructions(tmp_path):
 
     assert result.exit_code == 0
     assert "Updated AGENTS.md" in result.output
-    assert "Agent Demo" in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Agent Demo" in content
+    assert "Search before creating tasks" in content
+    assert "`backlog://docs/task-workflow`" in content
+    assert "Do not manually edit files under `backlog/`" in content
