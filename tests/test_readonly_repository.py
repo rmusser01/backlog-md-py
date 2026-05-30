@@ -86,6 +86,20 @@ def test_repository_groups_board_by_status():
     assert board["Done"] == []
 
 
+def test_repository_can_enable_sqlite_index_from_environment(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("BACKLOG_PY_SQLITE_INDEX", "1")
+
+    repository = ReadOnlyRepository.from_path(repo)
+    tasks = repository.list_tasks()
+
+    assert [task.id for task in tasks] == ["TASK-1"]
+    from backlog_py.indexing.sqlite import index_path_for_project
+
+    assert index_path_for_project(repository.project).exists()
+
+
 def test_readonly_operations_do_not_change_backlog_files():
     before = _snapshot_files(FIXTURE_REPO)
     repository = ReadOnlyRepository.from_path(FIXTURE_REPO)

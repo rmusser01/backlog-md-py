@@ -17,6 +17,9 @@ The beta support contract covers:
   workflow resources, and singleton daemon forwarding path.
 - Local Backlog.md project discovery, task/document/decision/milestone/config
   parsing, and safe mutations that preserve unowned Markdown sections.
+- The opt-in disposable SQLite read index as a rebuildable cache only; its file
+  format and contents are not stable API and must never replace Markdown as the
+  task source of truth.
 - The browser board scope described by the browser parity and browser release
   validation docs.
 

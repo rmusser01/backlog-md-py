@@ -139,6 +139,35 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     return snapshots
 
 
+def read_index_git_freshness(project: BacklogProject) -> dict[str, object]:
+    """Return git inputs that affect disposable read-index freshness."""
+    work_dir = project.root
+    freshness: dict[str, object] = {
+        "remote_operations": project.config.remote_operations,
+        "check_active_branches": project.config.check_active_branches,
+        "active_branch_days": project.config.active_branch_days,
+        "is_git_worktree": _is_git_worktree(work_dir),
+    }
+    if not freshness["is_git_worktree"]:
+        return freshness
+
+    head = _run_git(work_dir, "rev-parse", "HEAD")
+    freshness["head"] = head.stdout.strip() if head.returncode == 0 else ""
+    freshness["current_branch"] = _current_branch_name(work_dir)
+    if not project.config.check_active_branches:
+        freshness["active_refs"] = []
+        return freshness
+
+    freshness["active_refs"] = [
+        {
+            "ref": ref,
+            "timestamp": _ref_commit_timestamp(work_dir, ref),
+        }
+        for ref in _recent_branch_refs(project)
+    ]
+    return freshness
+
+
 def _auto_commit_config(project: BacklogProject) -> BacklogConfig:
     try:
         return load_config(project.config_path)

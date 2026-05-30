@@ -68,10 +68,12 @@ class ReadOnlyRepository:
         *,
         refresh_remote_refs: bool = True,
         include_active_branch_snapshots: bool = True,
+        use_sqlite_index: bool | None = None,
     ) -> None:
         self.project = project
         self._refresh_remote_refs = refresh_remote_refs
         self._include_active_branch_snapshots = include_active_branch_snapshots
+        self._use_sqlite_index = _sqlite_index_enabled() if use_sqlite_index is None else use_sqlite_index
         self._remote_refs_refreshed = False
         self._visible_task_records: dict[str, list[TaskRecord]] | None = None
 
@@ -166,6 +168,68 @@ class ReadOnlyRepository:
         if self._visible_task_records is not None:
             return self._visible_task_records
         self._ensure_remote_refs()
+        if self._use_sqlite_index:
+            from backlog_py.indexing.sqlite import SQLiteIndexError
+
+            try:
+                self._visible_task_records = self._load_visible_task_records_from_sqlite_index()
+                return self._visible_task_records
+            except (OSError, SQLiteIndexError, ValueError):
+                pass
+        self._visible_task_records = self._load_visible_task_records_from_markdown()
+        return self._visible_task_records
+
+    def _load_visible_task_records_from_sqlite_index(self) -> dict[str, list[TaskRecord]]:
+        from backlog_py.indexing.sqlite import load_task_sources
+
+        sources = load_task_sources(
+            self.project,
+            include_active_branch_snapshots=self._include_active_branch_snapshots,
+            rebuild=self._build_indexed_task_sources,
+        )
+        visible: dict[str, list[TaskRecord]] = {"tasks": [], "completed": []}
+        for source in sources:
+            if source.bucket not in visible:
+                raise ValueError(f"Unsupported SQLite index task bucket: {source.bucket}")
+            parsed = parse_task_markdown(source.source)
+            visible[source.bucket].append(_task_record_from_parsed(self.project.root / source.relative_path, parsed))
+        return visible
+
+    def _build_indexed_task_sources(self) -> list["IndexedTaskSource"]:
+        from backlog_py.indexing.sqlite import IndexedTaskSource
+
+        sources: list[IndexedTaskSource] = []
+        candidates = self._visible_task_candidates_from_markdown()
+        for bucket in ("tasks", "completed"):
+            for candidate in candidates[bucket]:
+                try:
+                    relative_path = candidate.task.path.relative_to(self.project.root).as_posix()
+                except ValueError:
+                    continue
+                sources.append(
+                    IndexedTaskSource(
+                        bucket=bucket,
+                        relative_path=relative_path,
+                        source=candidate.task.raw_source,
+                        committed_at=candidate.committed_at,
+                    )
+                )
+        return sources
+
+    def _load_visible_task_records_from_markdown(self) -> dict[str, list[TaskRecord]]:
+        candidates = self._visible_task_candidates_from_markdown()
+        return {
+            "tasks": [
+                candidate.task
+                for candidate in candidates["tasks"]
+            ],
+            "completed": [
+                candidate.task
+                for candidate in candidates["completed"]
+            ],
+        }
+
+    def _visible_task_candidates_from_markdown(self) -> dict[str, list[_VisibleTaskRecord]]:
         candidates = [
             *_current_branch_records(self.project, "tasks", self.project.backlog_dir / "tasks"),
             *_current_branch_records(self.project, "completed", self.project.backlog_dir / "completed"),
@@ -180,20 +244,18 @@ class ReadOnlyRepository:
             if current is None or _visible_record_key(candidate) >= _visible_record_key(current):
                 selected[key] = candidate
 
-        visible = {
+        return {
             "tasks": [
-                candidate.task
+                candidate
                 for candidate in selected.values()
                 if candidate.bucket == "tasks"
             ],
             "completed": [
-                candidate.task
+                candidate
                 for candidate in selected.values()
                 if candidate.bucket == "completed"
             ],
         }
-        self._visible_task_records = visible
-        return visible
 
     def _ensure_remote_refs(self) -> None:
         if not self._refresh_remote_refs:
@@ -202,6 +264,11 @@ class ReadOnlyRepository:
             return
         self._remote_refs_refreshed = True
         maybe_fetch_remote_refs(self.project)
+
+
+def _sqlite_index_enabled() -> bool:
+    value = os.environ.get("BACKLOG_PY_SQLITE_INDEX", "")
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
@@ -263,6 +330,7 @@ class MutableRepository(ReadOnlyRepository):
             project,
             refresh_remote_refs=refresh_remote_refs,
             include_active_branch_snapshots=False,
+            use_sqlite_index=False,
         )
 
     @classmethod
