@@ -121,6 +121,15 @@ def test_agent_critical_inventory_tracks_draft_create_status_compatibility_surfa
     assert "-s <status>" in by_name["cli:draft-create"].expected
 
 
+def test_agent_critical_inventory_tracks_milestone_mutation_option_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "--description <text>" in by_name["cli:milestone-add"].expected
+    assert "--update-tasks" in by_name["cli:milestone-rename"].expected
+    assert "--clear-tasks" in by_name["cli:milestone-remove"].expected
+
+
 def test_agent_critical_inventory_tracks_task_plan_mutation_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
