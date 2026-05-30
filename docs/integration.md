@@ -80,6 +80,9 @@ implemented inventory can still report `fullBrowserReleaseReady: false` when
 browser release gates such as rich-edit E2E coverage and desktop/mobile
 screenshot checks still need recorded evidence. See
 `docs/browser-release-validation.md` for the JSON manifest format.
+The plain and JSON status output also includes the audited upstream baseline
+covered by the compatibility inventory; release-evidence manifests repeat that
+baseline and are rejected when they do not match it.
 
 Unfiltered `search` output includes matching tasks, documents, and decisions.
 Search uses deterministic fuzzy ranking: exact token and substring matches rank

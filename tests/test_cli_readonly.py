@@ -742,6 +742,7 @@ def test_compat_status_outputs_cutover_summary():
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
     assert "fullBrowserReleaseReady: false" in result.output
+    assert "upstreamBaseline: backlog.md 1.45.1 audited 2026-05-16" in result.output
     assert "implemented: 100" in result.output
     assert "deferred: 0" in result.output
     assert "total: 100" in result.output
@@ -761,6 +762,10 @@ def test_compat_status_json_outputs_deferred_items():
     assert result.exit_code == 0
     assert '"agent_cutover_ready": true' in result.output
     assert '"full_browser_release_ready": false' in result.output
+    assert '"upstream_baseline": {' in result.output
+    assert '"package": "backlog.md"' in result.output
+    assert '"version": "1.45.1"' in result.output
+    assert '"audit_date": "2026-05-16"' in result.output
     assert '"browser:rich-edit-e2e-release-check"' in result.output
     assert '"browser:desktop-mobile-screenshot-release-check"' in result.output
     assert '"cli:interactive-task-view-editor"' in result.output

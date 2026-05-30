@@ -126,6 +126,7 @@ def build_compatibility_report(
     return {
         "agent_cutover_ready": _agent_cutover_ready(inventory.items),
         "full_browser_release_ready": _full_browser_release_ready(release_gates),
+        "upstream_baseline": dict(UPSTREAM_BASELINE),
         "summary": summary,
         "categories": categories,
         "items": [_item_to_dict(item) for item in inventory.items],
