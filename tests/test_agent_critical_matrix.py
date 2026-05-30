@@ -498,8 +498,13 @@ def test_agent_critical_inventory_tracks_browser_safe_git_settings_surface():
 def test_agent_critical_inventory_tracks_init_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
+    init_surface = by_name["cli:init"].expected
 
-    assert by_name["cli:init"].expected == "backlog init [project-name] --defaults [--no-git]"
+    assert init_surface.startswith("backlog init [project-name] --defaults [--no-git]")
+    assert "--backlog-dir <path>" in init_surface
+    assert "--task-prefix <prefix>" in init_surface
+    assert "--config-location <location>" in init_surface
+    assert "--agent-instructions" in init_surface
 
 
 def test_agent_critical_inventory_tracks_cli_search_file_and_limit_filters():
