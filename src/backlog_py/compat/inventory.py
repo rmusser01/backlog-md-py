@@ -86,7 +86,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:doc-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog doc create <title> -p <path> -t <type> --tags <tags> --content <body>",
+            "backlog doc create <path-or-title> --title <title> -p <path> -t <type> --tags <tags> --content <body>",
         ),
         _golden(
             "cli:doc-update",

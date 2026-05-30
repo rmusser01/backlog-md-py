@@ -33,7 +33,7 @@ do not block the first local-file agent cutover candidate.
 | cli:cleanup | implemented | backlog cleanup | cli:cleanup |
 | cli:doc-list | implemented | backlog doc list [query] | cli:doc-list |
 | cli:doc-view | implemented | backlog doc view <path-or-id> | cli:doc-view |
-| cli:doc-create | implemented | backlog doc create <title> -p <path> -t <type> --tags <tags> --content <body> | cli:doc-create |
+| cli:doc-create | implemented | backlog doc create <path-or-title> --title <title> -p <path> -t <type> --tags <tags> --content <body> | cli:doc-create |
 | cli:doc-update | implemented | backlog doc update <path-or-id> --title <title> -p <path> -t <type> --tags <tags> --content <body> | cli:doc-update |
 | cli:decision-create | implemented | backlog decision create "Title" -s <status> | cli:decision-create |
 | cli:milestone-list | implemented | backlog milestone list | cli:milestone-list |
