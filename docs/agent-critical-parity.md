@@ -26,7 +26,7 @@ do not block the first local-file agent cutover candidate.
 | cli:draft-promote | implemented | backlog draft promote <id> | cli:draft-promote |
 | cli:task-demote | implemented | backlog task demote <id> | cli:task-demote |
 | cli:draft-archive | implemented | backlog draft archive <id> | cli:draft-archive |
-| cli:task-edit | implemented | backlog task edit <id> --plan <text> --append-plan <text> --clear-plan --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain | cli:task-edit |
+| cli:task-edit | implemented | backlog task edit <id> --title <title> -s <status> -d <text> --plan <text> --append-plan <text> --clear-plan --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --dep <id> --plain | cli:task-edit |
 | cli:task-edit-rich-sections | implemented | backlog task edit <id> --notes <text> --append-notes <text> --final-summary <text> --append-final-summary <text> --clear-final-summary --plain | cli:task-edit-rich-sections |
 | cli:task-edit-checklist-state | implemented | backlog task edit <id> --check-ac <index> --uncheck-ac <index> --check-dod <index> --uncheck-dod <index> --remove-ac <index> --remove-dod <index> --plain | cli:task-edit-checklist-state |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |

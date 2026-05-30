@@ -117,6 +117,17 @@ def test_agent_critical_inventory_tracks_task_plan_mutation_surface():
     assert "--clear-plan" in task_edit
 
 
+def test_agent_critical_inventory_tracks_task_edit_core_field_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+    task_edit = by_name["cli:task-edit"].expected
+
+    assert "--title <title>" in task_edit
+    assert "-s <status>" in task_edit
+    assert "-d <text>" in task_edit
+    assert "--dep <id>" in task_edit
+
+
 def test_agent_critical_inventory_tracks_interactive_task_view_editor_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
