@@ -63,7 +63,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
-            "backlog task edit <id> --plan <text> --append-plan <text> --clear-plan --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --plain",
+            "backlog task edit <id> --title <title> -s <status> -d <text> --plan <text> --append-plan <text> --clear-plan --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --remove-ac <index> --dep <id> --plain",
         ),
         _golden(
             "cli:task-edit-rich-sections",
