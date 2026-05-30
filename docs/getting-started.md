@@ -143,6 +143,19 @@ backlog-py daemon ensure
 backlog-py daemon status --json
 ```
 
+To keep local agent guidance synchronized with the supported workflow, generate
+Backlog.md instruction blocks for common agent files:
+
+```bash
+backlog-py --cwd /path/to/project agents --update-instructions
+```
+
+The generated instructions cover search-before-create, status and notes
+updates, Acceptance Criteria and Definition of Done checkoff, Final Summary
+expectations, MCP workflow resources, CLI fallback commands with explicit
+`--cwd`, singleton daemon guidance, and the guardrail against manually editing
+files under `backlog/`.
+
 Use [integration.md](integration.md) for MCP client configuration and
 [singleton-daemon.md](singleton-daemon.md) for lifecycle, verification, and
 rollback details.

@@ -98,6 +98,38 @@ python -m backlog_py --cwd /path/to/project task list --plain
 Do not alias this command to `backlog` for production use until the cutover gate
 for your target project is satisfied and the aliasing decision is explicit.
 
+## Generated Agent Instructions
+
+Use the generator to add or refresh a Backlog.md workflow section in common
+agent instruction files:
+
+```bash
+backlog-py --cwd /path/to/project agents --update-instructions
+```
+
+The command updates `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and
+`.github/copilot-instructions.md`. The generated block is delimited by
+Backlog-owned markers and can be refreshed idempotently while preserving local
+instructions outside the block.
+
+The generated workflow tells agents to search before creating tasks, keep task
+status and implementation notes current, check Acceptance Criteria and
+Definition of Done items, add a Final Summary before marking work Done, read
+the MCP workflow resources, and fall back to the CLI with explicit `--cwd`
+paths when MCP is unavailable. It also warns agents not to manually edit files
+under `backlog/` unless both MCP and CLI paths are unavailable and a human
+explicitly approves the exception.
+
+For multi-agent environments, the block recommends a shared singleton daemon:
+
+```bash
+backlog-py daemon ensure
+backlog-py daemon status --json
+```
+
+Agents can also call the read-only MCP `project_status` tool before
+write-heavy work to inspect recent task activity and project lock metadata.
+
 ### TUI vs Automation Interfaces
 
 `backlog-py tui` is a human-facing Textual interface for keyboard board work.

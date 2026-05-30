@@ -15,6 +15,8 @@
   evidence artifacts for browser readiness validation.
 - Add shared Definition of Done defaults normalization for config, MCP, and TUI
   writes.
+- Expand generated agent instruction blocks with search-before-create,
+  task-lifecycle, MCP resource, CLI fallback, and singleton-daemon guidance.
 
 ### Changed
 
