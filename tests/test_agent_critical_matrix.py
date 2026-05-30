@@ -529,6 +529,7 @@ def test_agent_critical_inventory_tracks_document_path_type_and_tags_surface():
     by_name = {item.name: item for item in inventory.items}
 
     assert "[query]" in by_name["cli:doc-list"].expected
+    assert "--title <title>" in by_name["cli:doc-create"].expected
     assert "-p <path>" in by_name["cli:doc-create"].expected
     assert "-t <type>" in by_name["cli:doc-create"].expected
     assert "--tags <tags>" in by_name["cli:doc-create"].expected
