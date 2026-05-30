@@ -114,6 +114,13 @@ def test_agent_critical_inventory_tracks_task_create_explicit_id_surface():
     assert "--id <id>" in by_name["cli:task-create"].expected
 
 
+def test_agent_critical_inventory_tracks_draft_create_status_compatibility_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert "-s <status>" in by_name["cli:draft-create"].expected
+
+
 def test_agent_critical_inventory_tracks_task_plan_mutation_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}
