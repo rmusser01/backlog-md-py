@@ -23,6 +23,15 @@ def test_browser_service_module_does_not_embed_full_board_assets():
     assert "let draggedTaskId = null;" not in source
 
 
+def test_browser_board_asset_uses_static_javascript_escape_sequences():
+    source = Path("src/backlog_py/browser/assets/board.js").read_text(encoding="utf-8")
+
+    assert r"/^\\[" not in source
+    assert r"\\s+" not in source
+    assert r".split(/[\\n,]/)" not in source
+    assert r"const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);" in source
+
+
 def test_browser_service_serves_health_board_json_and_html(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -46,6 +55,25 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "In Progress" in html
     assert "TASK-1" in html
     assert "Example task" in html
+
+
+def test_browser_board_html_embeds_one_complete_script_block(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert html.count("<script>") == 1
+    script = html.split("<script>", maxsplit=1)[1].split("</script>", maxsplit=1)[0]
+    assert "<script>" not in script
+    assert "async function submitTaskEdit" in script
+    assert 'document.querySelectorAll("[data-task-edit]")' in script
 
 
 def test_browser_service_serves_favicon_without_not_found(tmp_path):
