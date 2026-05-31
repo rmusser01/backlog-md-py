@@ -148,6 +148,7 @@ def test_agent_critical_inventory_tracks_task_edit_core_field_surface():
     assert "--title <title>" in task_edit
     assert "-s <status>" in task_edit
     assert "-d <text>" in task_edit
+    assert "--desc <text>" in task_edit
     assert "--dep <id>" in task_edit
 
 
@@ -547,6 +548,7 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
     by_name = {item.name: item for item in inventory.items}
 
     assert "-d <text>" in by_name["cli:task-create"].expected
+    assert "--desc <text>" in by_name["cli:task-create"].expected
     assert "-s <status>" in by_name["cli:task-create"].expected
     assert "--draft" in by_name["cli:task-create"].expected
     assert "--notes <text>" in by_name["cli:task-create"].expected
