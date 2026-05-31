@@ -194,7 +194,7 @@
     }
 
     function metadataList(value) {
-      return String(value || "").split(/[\\n,]/).map((item) => item.trim()).filter(Boolean);
+      return String(value || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
     }
 
     async function openDocumentDetail(identifier) {
@@ -386,7 +386,7 @@
 
     function appendInlineMarkdown(parent, source) {
       const text = String(source || "");
-      const tokenPattern = /(\\*\\*[^*]+\\*\\*|`[^`]+`|\\[[^\\]]+\\]\\([^)]+\\)|\\*[^*]+\\*)/g;
+      const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*)/g;
       let lastIndex = 0;
       let match;
       while ((match = tokenPattern.exec(text)) !== null) {
@@ -408,7 +408,7 @@
         code.textContent = token.slice(1, -1);
         return code;
       }
-      const linkMatch = /^\\[([^\\]]+)\\]\\(([^)]+)\\)$/.exec(token);
+      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
       if (linkMatch) {
         const link = document.createElement("a");
         link.textContent = linkMatch[1];
@@ -442,7 +442,7 @@
 
     function markdownToRichHtml(markdown) {
       const root = document.createElement("div");
-      const lines = String(markdown || "").replace(/\\r\\n/g, "\\n").split("\\n");
+      const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
       let index = 0;
       while (index < lines.length) {
         const line = lines[index];
@@ -450,7 +450,7 @@
           index += 1;
           continue;
         }
-        const fence = /^```([^`]*)\\s*$/.exec(line);
+        const fence = /^```([^`]*)\s*$/.exec(line);
         if (fence) {
           const language = String(fence[1] || "").trim();
           const codeLines = [];
@@ -468,7 +468,7 @@
           root.appendChild(pre);
           continue;
         }
-        const heading = /^(#{1,6})\\s+(.*)$/.exec(line);
+        const heading = /^(#{1,6})\s+(.*)$/.exec(line);
         if (heading) {
           const element = document.createElement("h" + heading[1].length);
           appendInlineMarkdown(element, heading[2]);
@@ -476,19 +476,19 @@
           index += 1;
           continue;
         }
-        if (/^[-*]\\s+/.test(line)) {
+        if (/^[-*]\s+/.test(line)) {
           const items = [];
-          while (index < lines.length && /^[-*]\\s+/.test(lines[index])) {
-            items.push(lines[index].replace(/^[-*]\\s+/, ""));
+          while (index < lines.length && /^[-*]\s+/.test(lines[index])) {
+            items.push(lines[index].replace(/^[-*]\s+/, ""));
             index += 1;
           }
           appendRichList(root, items, false);
           continue;
         }
-        if (/^\\d+\\.\\s+/.test(line)) {
+        if (/^\d+\.\s+/.test(line)) {
           const items = [];
-          while (index < lines.length && /^\\d+\\.\\s+/.test(lines[index])) {
-            items.push(lines[index].replace(/^\\d+\\.\\s+/, ""));
+          while (index < lines.length && /^\d+\.\s+/.test(lines[index])) {
+            items.push(lines[index].replace(/^\d+\.\s+/, ""));
             index += 1;
           }
           appendRichList(root, items, true);
@@ -499,9 +499,9 @@
           index < lines.length &&
           lines[index].trim() &&
           !/^```/.test(lines[index]) &&
-          !/^(#{1,6})\\s+/.test(lines[index]) &&
-          !/^[-*]\\s+/.test(lines[index]) &&
-          !/^\\d+\\.\\s+/.test(lines[index])
+          !/^(#{1,6})\s+/.test(lines[index]) &&
+          !/^[-*]\s+/.test(lines[index]) &&
+          !/^\d+\.\s+/.test(lines[index])
         ) {
           paragraphLines.push(lines[index]);
           index += 1;
@@ -539,12 +539,12 @@
         return Array.from(element.children)
           .filter((item) => item.tagName === "LI")
           .map((item, index) => (tag === "OL" ? `${index + 1}. ` : "- ") + inlineMarkdownFromNode(item).trim())
-          .join("\\n");
+          .join("\n");
       }
       if (tag === "PRE") {
         const code = element.querySelector("code") || element;
         const language = element.dataset.codeLanguage || "";
-        return "```" + language + "\\n" + (code.textContent || "").replace(/\\n$/, "") + "\\n```";
+        return "```" + language + "\n" + (code.textContent || "").replace(/\n$/, "") + "\n```";
       }
       return inlineMarkdownFromNode(element).trim();
     }
@@ -554,7 +554,7 @@
       return Array.from(root.childNodes)
         .map(richBlockToMarkdown)
         .filter((block) => block.length > 0)
-        .join("\\n\\n")
+        .join("\n\n")
         .trim();
     }
 
@@ -1086,4 +1086,3 @@
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) pollBoardRevision();
     });
-
