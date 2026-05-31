@@ -557,6 +557,7 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
     assert "--draft" in by_name["cli:task-create"].expected
     assert "--notes <text>" in by_name["cli:task-create"].expected
     assert "--no-dod-defaults" in by_name["cli:task-create"].expected
+    assert "--dependency <id>" in by_name["cli:task-create"].expected
 
 
 def test_agent_critical_inventory_tracks_task_edit_rich_sections_and_checklists():
@@ -572,6 +573,7 @@ def test_agent_critical_inventory_tracks_task_edit_rich_sections_and_checklists(
 
     checklist_state = by_name["cli:task-edit-checklist-state"].expected
     assert "--dod <item>" in by_name["cli:task-edit"].expected
+    assert "--dependency <id>" in by_name["cli:task-edit"].expected
     assert "--check-ac <index>" in checklist_state
     assert "--uncheck-ac <index>" in checklist_state
     assert "--check-dod <index>" in checklist_state
