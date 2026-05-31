@@ -190,7 +190,7 @@
     }
 
     function checklistText(items) {
-      return (items || []).map((item) => item.text || "").filter(Boolean).join("\\n");
+      return (items || []).map((item) => item.text || "").filter(Boolean).join("\n");
     }
 
     function metadataList(value) {
@@ -312,17 +312,17 @@
 
     function applyMarkdownLineFormat(textarea, range, command) {
       const value = textarea.value || "";
-      const lineStart = range.start === 0 ? 0 : value.lastIndexOf("\\n", range.start - 1) + 1;
-      const nextLineBreak = value.indexOf("\\n", range.end);
+      const lineStart = range.start === 0 ? 0 : value.lastIndexOf("\n", range.start - 1) + 1;
+      const nextLineBreak = value.indexOf("\n", range.end);
       const lineEnd = nextLineBreak === -1 ? value.length : nextLineBreak;
       const segment = value.slice(lineStart, lineEnd);
       const placeholder = command === "heading" ? "Heading" : "List item";
-      const lines = (segment || placeholder).split("\\n");
+      const lines = (segment || placeholder).split("\n");
       const replacement = lines.map((line, index) => {
         if (command === "heading") return line.startsWith("#") ? line : `## ${line}`;
         if (command === "numbered") return `${index + 1}. ${line}`;
         return `- ${line}`;
-      }).join("\\n");
+      }).join("\n");
       replaceMarkdownSelection(textarea, lineStart, lineEnd, replacement, lineStart, lineStart + replacement.length);
     }
 
@@ -463,7 +463,7 @@
           const pre = document.createElement("pre");
           if (language) pre.dataset.codeLanguage = language;
           const code = document.createElement("code");
-          code.textContent = codeLines.join("\\n");
+          code.textContent = codeLines.join("\n");
           pre.appendChild(code);
           root.appendChild(pre);
           continue;
@@ -517,7 +517,7 @@
       if (node.nodeType !== Node.ELEMENT_NODE) return "";
       const element = node;
       const tag = element.tagName;
-      if (tag === "BR") return "\\n";
+      if (tag === "BR") return "\n";
       const content = Array.from(element.childNodes).map(inlineMarkdownFromNode).join("");
       if (tag === "STRONG" || tag === "B") return `**${content}**`;
       if (tag === "EM" || tag === "I") return `*${content}*`;
@@ -726,7 +726,7 @@
         configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
         configSettingsForm.elements.activeBranchDays.value = settings.activeBranchDays || "";
         configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
-        configSettingsForm.elements.statuses.value = (settings.statuses || []).join("\\n");
+        configSettingsForm.elements.statuses.value = (settings.statuses || []).join("\n");
         configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
         configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
         configSettingsForm.elements.remoteOperations.checked = Boolean(settings.remoteOperations);
@@ -745,7 +745,7 @@
       }
       const payload = await response.json();
       if (dodDefaultsForm) {
-        dodDefaultsForm.elements.items.value = (payload.items || []).join("\\n");
+        dodDefaultsForm.elements.items.value = (payload.items || []).join("\n");
       }
       if (dodDefaultsDialog && dodDefaultsDialog.showModal) dodDefaultsDialog.showModal();
       else if (dodDefaultsDialog) dodDefaultsDialog.setAttribute("open", "open");
@@ -844,7 +844,7 @@
       syncAllRichEditors(taskCreateForm);
       const data = new FormData(form);
       const criteria = String(data.get("acceptanceCriteria") || "")
-        .split("\\n")
+        .split("\n")
         .map((item) => item.trim())
         .filter(Boolean);
       const response = await fetch("/api/tasks", {
@@ -872,7 +872,7 @@
       syncAllRichEditors(taskEditForm);
       const data = new FormData(form);
       const criteria = String(data.get("acceptanceCriteria") || "")
-        .split("\\n")
+        .split("\n")
         .map((item) => item.trim())
         .filter(Boolean);
       const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/edit`, {
@@ -941,7 +941,7 @@
       const form = event.currentTarget;
       const data = new FormData(form);
       const statuses = String(data.get("statuses") || "")
-        .split("\\n")
+        .split("\n")
         .map((item) => item.trim())
         .filter(Boolean);
       const response = await fetch("/api/settings/config", {
@@ -977,7 +977,7 @@
       const form = event.currentTarget;
       const data = new FormData(form);
       const items = String(data.get("items") || "")
-        .split("\\n")
+        .split("\n")
         .map((item) => item.trim())
         .filter(Boolean);
       const response = await fetch("/api/settings/dod-defaults", {
