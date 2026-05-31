@@ -29,6 +29,7 @@ def test_browser_board_asset_uses_static_javascript_escape_sequences():
     assert r"/^\\[" not in source
     assert r"\\s+" not in source
     assert r".split(/[\\n,]/)" not in source
+    assert r'"\\n"' not in source
     assert r"const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);" in source
 
 
