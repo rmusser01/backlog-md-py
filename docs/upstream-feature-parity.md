@@ -27,7 +27,8 @@ larger task commands:
 - Milestone mutation options for creation descriptions, rename task reference
   updates, and remove-time task milestone clearing.
 - Document listing with optional query filtering.
-- Document creation by explicit path and title.
+- Document creation/update by explicit path and title, including `-p/--path`
+  and `-t/--type` aliases.
 - Task editing for title, status, description, dependency, acceptance criteria,
   Definition of Done additions, plan replacement, plan append, and plan
   clearing.
