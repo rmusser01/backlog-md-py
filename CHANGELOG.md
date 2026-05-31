@@ -25,6 +25,8 @@
 - Refresh the audited upstream compatibility baseline to `backlog.md@1.45.2`
   and document that the upstream delta is packaging-only for the Python clone's
   audited CLI/MCP/browser surfaces.
+- Track task create/list `-p` parent alias explicitly in the compatibility
+  inventory and parity docs.
 - Track task create/edit `--desc` description alias explicitly in the
   compatibility inventory and parity docs.
 - Track document `-p/--path` and `-t/--type` aliases explicitly in the

@@ -28,6 +28,8 @@ larger task commands:
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through both `-d` and upstream-documented
   `--desc` aliases.
+- Task create/list parent selection through both upstream-documented `-p` and
+  `--parent` aliases.
 - Draft creation with upstream-compatible status option acceptance while drafts
   remain in Draft status.
 - Milestone mutation options for creation descriptions, rename task reference
