@@ -22,6 +22,8 @@ because they are visible feature-set commitments, not incidental options inside
 larger task commands:
 
 - Task creation with explicit IDs and implementation notes.
+- Task create/edit description entry through both `-d` and upstream-documented
+  `--desc` aliases.
 - Draft creation with upstream-compatible status option acceptance while drafts
   remain in Draft status.
 - Milestone mutation options for creation descriptions, rename task reference
