@@ -19,7 +19,7 @@ do not block the first local-file agent cutover candidate.
 | cli:overview | implemented | backlog overview | cli:overview |
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |
 | cli:config-list | implemented | backlog config list | cli:config-list |
-| cli:task-create | implemented | backlog task create <title> --id <id> --draft -d <text> --desc <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --dependency <id> --plain | cli:task-create |
+| cli:task-create | implemented | backlog task create <title> --id <id> --draft -d <text> --desc <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain | cli:task-create |
 | cli:draft-create | implemented | backlog draft create <title> -d <text> -s <status> -a <assignee> -l <label> | cli:draft-create |
 | cli:draft-list | implemented | backlog draft list --plain | cli:draft-list |
 | cli:draft-view | implemented | backlog draft view <id> --plain | cli:draft-view |

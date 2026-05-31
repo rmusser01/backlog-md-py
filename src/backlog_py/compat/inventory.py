@@ -52,7 +52,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> --id <id> --draft -d <text> --desc <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --no-dod-defaults --dep <id> --dependency <id> --plain",
+            "backlog task create <title> --id <id> --draft -d <text> --desc <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain",
         ),
         _golden(
             "cli:draft-create",

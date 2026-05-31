@@ -40,6 +40,10 @@ larger task commands:
 - Task editing for title, status, description, dependency, acceptance criteria,
   Definition of Done additions, plan replacement, plan append, and plan
   clearing.
+- Task creation Definition-of-Done entry through `--definition-of-done`,
+  `--dod`, and implemented `--definition-of-done-add`, plus disabling
+  inherited defaults through both `--disable-definition-of-done-defaults` and
+  `--no-dod-defaults`.
 - Task create/edit dependency entry through both `--dep` and implemented
   `--dependency` aliases.
 - Task editing for notes replacement, notes append, final summary replacement,

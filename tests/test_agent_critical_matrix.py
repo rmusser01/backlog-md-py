@@ -556,6 +556,9 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
     assert "-s <status>" in by_name["cli:task-create"].expected
     assert "--draft" in by_name["cli:task-create"].expected
     assert "--notes <text>" in by_name["cli:task-create"].expected
+    assert "--definition-of-done <item>" in by_name["cli:task-create"].expected
+    assert "--definition-of-done-add <item>" in by_name["cli:task-create"].expected
+    assert "--disable-definition-of-done-defaults" in by_name["cli:task-create"].expected
     assert "--no-dod-defaults" in by_name["cli:task-create"].expected
     assert "--dependency <id>" in by_name["cli:task-create"].expected
 
