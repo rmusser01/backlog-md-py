@@ -27,6 +27,8 @@
   audited CLI/MCP/browser surfaces.
 - Track task create/list `-p` parent alias explicitly in the compatibility
   inventory and parity docs.
+- Track task create/edit `--dependency` alias explicitly in the compatibility
+  inventory and parity docs.
 - Track task create/edit `--desc` description alias explicitly in the
   compatibility inventory and parity docs.
 - Track document `-p/--path` and `-t/--type` aliases explicitly in the
