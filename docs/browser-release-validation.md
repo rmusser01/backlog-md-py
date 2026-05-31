@@ -31,11 +31,11 @@ provenance, freshness policy, and release gate evidence:
 ```json
 {
   "schema_version": 1,
-  "generated_at": "2026-05-29",
+  "generated_at": "2026-05-31",
   "upstream_baseline": {
     "package": "backlog.md",
-    "version": "1.45.1",
-    "audit_date": "2026-05-16"
+    "version": "1.45.2",
+    "audit_date": "2026-05-31"
   },
   "command": {
     "argv": [
@@ -69,7 +69,7 @@ provenance, freshness policy, and release gate evidence:
 - `generated_at`, `upstream_baseline`, `command.argv`, `command.cwd`,
   `freshness.max_age_days`, and `release_gates` are required.
 - `schema_version` must be `1`, and `upstream_baseline` must match the current
-  compatibility baseline (`backlog.md` `1.45.1`, audited `2026-05-16`).
+  compatibility baseline (`backlog.md` `1.45.2`, audited `2026-05-31`).
 - Evidence is `fresh` only when `generated_at` is not in the future and its age
   is less than or equal to `freshness.max_age_days`.
 - Artifact paths must be repo-relative or artifact-bundle-relative. Absolute

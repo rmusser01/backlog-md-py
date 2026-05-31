@@ -61,8 +61,8 @@ backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project search "query" --type document --plain
 backlog-py --cwd /path/to/project search "query" --modified-file "src/api.py" --limit 5 --plain
 backlog-py --cwd /path/to/project board
-backlog-py --cwd /path/to/project board export Backlog.md --force --export-version v1.45.1
-backlog-py --cwd /path/to/project board export --readme --export-version v1.45.1
+backlog-py --cwd /path/to/project board export Backlog.md --force --export-version v1.45.2
+backlog-py --cwd /path/to/project board export --readme --export-version v1.45.2
 backlog-py --cwd /path/to/project tui
 ```
 

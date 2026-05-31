@@ -9,7 +9,7 @@ output and pure MCP helpers.
 
 ## Decision
 
-Browser feature coverage for the audited `backlog.md@1.45.1` baseline is
+Browser feature coverage for the audited `backlog.md@1.45.2` baseline is
 implemented in the current compatibility inventory. Browser release readiness
 is still evidence-gated: releases that advertise full browser parity must
 attach fresh rich-edit E2E and desktop/mobile screenshot evidence through

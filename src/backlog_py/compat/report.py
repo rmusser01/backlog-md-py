@@ -14,8 +14,8 @@ RELEASE_EVIDENCE_SCHEMA_VERSION = 1
 DEFAULT_RELEASE_EVIDENCE_MAX_AGE_DAYS = 14
 UPSTREAM_BASELINE = {
     "package": "backlog.md",
-    "version": "1.45.1",
-    "audit_date": "2026-05-16",
+    "version": "1.45.2",
+    "audit_date": "2026-05-31",
 }
 
 
