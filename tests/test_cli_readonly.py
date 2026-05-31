@@ -37,8 +37,8 @@ def _release_evidence_manifest() -> dict[str, object]:
         "generated_at": date.today().isoformat(),
         "upstream_baseline": {
             "package": "backlog.md",
-            "version": "1.45.1",
-            "audit_date": "2026-05-16",
+            "version": "1.45.2",
+            "audit_date": "2026-05-31",
         },
         "command": {
             "argv": ["backlog-py", "compat", "evidence-template"],
@@ -742,7 +742,7 @@ def test_compat_status_outputs_cutover_summary():
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
     assert "fullBrowserReleaseReady: false" in result.output
-    assert "upstreamBaseline: backlog.md 1.45.1 audited 2026-05-16" in result.output
+    assert "upstreamBaseline: backlog.md 1.45.2 audited 2026-05-31" in result.output
     assert "implemented: 100" in result.output
     assert "deferred: 0" in result.output
     assert "total: 100" in result.output
@@ -764,8 +764,8 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"full_browser_release_ready": false' in result.output
     assert '"upstream_baseline": {' in result.output
     assert '"package": "backlog.md"' in result.output
-    assert '"version": "1.45.1"' in result.output
-    assert '"audit_date": "2026-05-16"' in result.output
+    assert '"version": "1.45.2"' in result.output
+    assert '"audit_date": "2026-05-31"' in result.output
     assert '"browser:rich-edit-e2e-release-check"' in result.output
     assert '"browser:desktop-mobile-screenshot-release-check"' in result.output
     assert '"cli:interactive-task-view-editor"' in result.output
@@ -853,8 +853,8 @@ def test_compat_evidence_template_writes_portable_manifest(tmp_path):
     assert manifest["schema_version"] == 1
     assert manifest["upstream_baseline"] == {
         "package": "backlog.md",
-        "version": "1.45.1",
-        "audit_date": "2026-05-16",
+        "version": "1.45.2",
+        "audit_date": "2026-05-31",
     }
     assert manifest["freshness"]["max_age_days"] == 14
     assert manifest["command"]["argv"] == ["manual browser validation"]

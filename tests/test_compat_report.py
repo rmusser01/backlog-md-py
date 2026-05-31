@@ -7,7 +7,7 @@ from backlog_py.compat.report import build_compatibility_report
 
 def _release_evidence(
     *,
-    generated_at: str = "2026-05-29",
+    generated_at: str = "2026-05-31",
     max_age_days: int = 14,
     rich_artifacts: list[str] | None = None,
     screenshot_artifacts: list[str] | None = None,
@@ -17,8 +17,8 @@ def _release_evidence(
         "generated_at": generated_at,
         "upstream_baseline": {
             "package": "backlog.md",
-            "version": "1.45.1",
-            "audit_date": "2026-05-16",
+            "version": "1.45.2",
+            "audit_date": "2026-05-31",
         },
         "command": {
             "argv": ["backlog-py", "compat", "evidence-template"],
@@ -61,8 +61,8 @@ def test_compatibility_report_summarizes_inventory_statuses():
     }
     assert report["upstream_baseline"] == {
         "package": "backlog.md",
-        "version": "1.45.1",
-        "audit_date": "2026-05-16",
+        "version": "1.45.2",
+        "audit_date": "2026-05-31",
     }
     assert report["summary"] == {
         "implemented": 100,
@@ -208,19 +208,19 @@ def test_compatibility_report_marks_browser_release_ready_with_evidence_manifest
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 29),
+        today=date(2026, 5, 31),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
     assert report["full_browser_release_ready"] is True
     assert report["release_evidence"]["status"] == "fresh"
-    assert report["release_evidence"]["generated_at"] == "2026-05-29"
+    assert report["release_evidence"]["generated_at"] == "2026-05-31"
     assert report["release_evidence"]["age_days"] == 0
     assert report["release_evidence"]["max_age_days"] == 14
     assert report["release_evidence"]["upstream_baseline"] == {
         "package": "backlog.md",
-        "version": "1.45.1",
-        "audit_date": "2026-05-16",
+        "version": "1.45.2",
+        "audit_date": "2026-05-31",
     }
     assert report["release_evidence"]["command"]["argv"] == [
         "backlog-py",
@@ -254,13 +254,13 @@ def test_compatibility_report_keeps_release_gates_required_with_stale_evidence(t
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 29),
+        today=date(2026, 5, 31),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
     assert report["full_browser_release_ready"] is False
     assert report["release_evidence"]["status"] == "stale"
-    assert report["release_evidence"]["age_days"] == 28
+    assert report["release_evidence"]["age_days"] == 30
     assert "stale" in report["release_evidence"]["error"]
     assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
     assert "stale" in gates_by_name["browser:rich-edit-e2e-release-check"]["evidence_error"]
@@ -307,7 +307,7 @@ def test_compatibility_report_keeps_release_gates_required_with_mismatched_upstr
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 29),
+        today=date(2026, 5, 31),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
@@ -337,7 +337,7 @@ def test_compatibility_report_rejects_absolute_artifact_paths(tmp_path):
         report = build_compatibility_report(
             load_builtin_inventory(),
             release_evidence_path=evidence_path,
-            today=date(2026, 5, 29),
+            today=date(2026, 5, 31),
         )
         gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
@@ -356,7 +356,7 @@ def test_compatibility_report_keeps_screenshot_gate_required_without_desktop_and
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 29),
+        today=date(2026, 5, 31),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 

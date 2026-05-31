@@ -1,8 +1,8 @@
-upstream_version: "1.45.1"
-source_kind: "github-main-package"
-source_ref: "backlog.md@1.45.1"
-package_metadata_sha256: "4b93cc1703bfab79a3c65653a2feda44cdc15b8e243720b486538102057aafde"
-generated_at: "2026-05-16"
+upstream_version: "1.45.2"
+source_kind: "npm-release"
+source_ref: "backlog.md@1.45.2"
+package_metadata_sha256: "1ea61bb6ed235b5a19af96a8c81046718a044ca025bdb81951912557c36b0893"
+generated_at: "2026-05-31"
 fixtures:
   - name: "cli:help"
     command: ["backlog", "--help"]
@@ -29,7 +29,7 @@ fixtures:
     command: ["backlog", "overview"]
     agent_critical: true
   - name: "cli:board-export"
-    command: ["backlog", "board", "export", "status.md", "--force", "--export-version", "v1.45.1"]
+    command: ["backlog", "board", "export", "status.md", "--force", "--export-version", "v1.45.2"]
     agent_critical: true
   - name: "cli:task-create"
     command: ["backlog", "task", "create", "Temporary smoke task", "-d", "Created through task aliases", "-s", "To Do", "--notes", "Initial fixture note", "--parent", "1", "--ordinal", "1000", "--final-summary", "Created summary", "--no-dod-defaults", "--plain"]

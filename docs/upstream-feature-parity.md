@@ -5,11 +5,15 @@ Backlog.md feature set beyond the first local-file agent cutover gate.
 
 ## Current Upstream Baseline
 
-- Upstream package: `backlog.md@1.45.1`
-- Audit date: 2026-05-16
-- Latest release check: 2026-05-30, GitHub latest release still `v1.45.1`
+- Upstream package: `backlog.md@1.45.2`
+- Audit date: 2026-05-31
+- Latest release check: 2026-05-31, GitHub latest release `v1.45.2`
 - Sources: upstream `README.md`, `CLI-INSTRUCTIONS.md`, `ADVANCED-CONFIG.md`,
   and `package.json`.
+
+`v1.45.2` is a packaging release for upstream Windows ARM prebuilt binary
+support and release workflow updates. The audited CLI, MCP, browser, and
+configuration surfaces remain unchanged from the previous `v1.45.1` inventory.
 
 The agent-critical matrix remains focused on deterministic CLI, MCP, and file
 format behavior. Full upstream parity additionally includes human-facing
@@ -151,6 +155,9 @@ larger task commands:
   `/api/service/requests` endpoint and Service dialog request list.
 - Browser service shutdown state through idempotent stop scheduling and
   `/api/service/status` shutdown metadata.
+- Upstream `v1.45.2` Windows ARM packaging coverage maps to the Python
+  package's platform-independent wheel/sdist distribution model; no runtime
+  compatibility inventory item changed for this packaging-only upstream delta.
 
 ## Remaining Scope Decisions
 
