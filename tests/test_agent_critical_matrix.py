@@ -561,6 +561,7 @@ def test_agent_critical_inventory_tracks_task_edit_rich_sections_and_checklists(
     assert "--clear-final-summary" in rich_sections
 
     checklist_state = by_name["cli:task-edit-checklist-state"].expected
+    assert "--dod <item>" in by_name["cli:task-edit"].expected
     assert "--check-ac <index>" in checklist_state
     assert "--uncheck-ac <index>" in checklist_state
     assert "--check-dod <index>" in checklist_state

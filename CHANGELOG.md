@@ -22,6 +22,8 @@
 
 ### Changed
 
+- Track `task edit --dod` explicitly in the compatibility inventory and parity
+  docs.
 - Record the post-TUI beta validation refresh and document isolated daemon
   state for MCP cutover smoke checks.
 - Print the audited upstream Backlog.md baseline directly in `compat status`

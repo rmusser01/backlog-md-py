@@ -28,8 +28,9 @@ larger task commands:
   updates, and remove-time task milestone clearing.
 - Document listing with optional query filtering.
 - Document creation by explicit path and title.
-- Task editing for title, status, description, dependency, plan replacement,
-  plan append, and plan clearing.
+- Task editing for title, status, description, dependency, acceptance criteria,
+  Definition of Done additions, plan replacement, plan append, and plan
+  clearing.
 - Task editing for notes replacement, notes append, final summary replacement,
   final summary append, and final summary clearing.
 - Task editing for acceptance-criteria and Definition-of-Done check state,
