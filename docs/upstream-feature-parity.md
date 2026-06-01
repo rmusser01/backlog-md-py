@@ -30,6 +30,8 @@ larger task commands:
   `--desc` aliases.
 - Task create/list parent selection through both upstream-documented `-p` and
   `--parent` aliases.
+- Task list/create/edit milestone selection through both `-m` and `--milestone`
+  aliases.
 - Draft creation with upstream-compatible status option acceptance while drafts
   remain in Draft status.
 - Milestone mutation options for creation descriptions, rename task reference

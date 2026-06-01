@@ -549,10 +549,12 @@ def test_agent_critical_inventory_tracks_task_cli_alias_surface():
 
     assert "-p <taskId>" in by_name["cli:task-list-plain"].expected
     assert "--parent <taskId>" in by_name["cli:task-list-plain"].expected
+    assert "-m <milestone>" in by_name["cli:task-list-plain"].expected
     assert "-d <text>" in by_name["cli:task-create"].expected
     assert "--desc <text>" in by_name["cli:task-create"].expected
     assert "-p <taskId>" in by_name["cli:task-create"].expected
     assert "--parent <taskId>" in by_name["cli:task-create"].expected
+    assert "-m <milestone>" in by_name["cli:task-create"].expected
     assert "-s <status>" in by_name["cli:task-create"].expected
     assert "--draft" in by_name["cli:task-create"].expected
     assert "--notes <text>" in by_name["cli:task-create"].expected
@@ -575,6 +577,7 @@ def test_agent_critical_inventory_tracks_task_edit_rich_sections_and_checklists(
     assert "--clear-final-summary" in rich_sections
 
     checklist_state = by_name["cli:task-edit-checklist-state"].expected
+    assert "-m <milestone>" in by_name["cli:task-edit"].expected
     assert "--dod <item>" in by_name["cli:task-edit"].expected
     assert "--dependency <id>" in by_name["cli:task-edit"].expected
     assert "--check-ac <index>" in checklist_state
