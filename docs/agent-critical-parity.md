@@ -12,21 +12,21 @@ do not block the first local-file agent cutover candidate.
 | --- | --- | --- | --- |
 | cli:help | implemented | backlog --help | cli:help |
 | cli:init | implemented | backlog init [project-name] --defaults [--no-git] --backlog-dir <path> --task-prefix <prefix> --config-location <location> --agent-instructions | cli:init |
-| cli:task-list-plain | implemented | backlog task list --status <status> --priority <priority> -a <assignee> -l <label> --milestone <milestone> -p <taskId> --parent <taskId> --plain | cli:task-list-plain |
+| cli:task-list-plain | implemented | backlog task list --status <status> --priority <priority> -a <assignee> -l <label> -m <milestone> --milestone <milestone> -p <taskId> --parent <taskId> --plain | cli:task-list-plain |
 | cli:task-view-plain | implemented | backlog task <id> --plain | cli:task-view-plain |
 | cli:search-plain | implemented | backlog search <query> --type <type> --status <status> --priority <priority> --modified-file <path> --limit <number> --plain; unfiltered fuzzy-ranked search returns tasks, documents, and decisions | cli:search-plain |
 | cli:board | implemented | backlog board | cli:board |
 | cli:overview | implemented | backlog overview | cli:overview |
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |
 | cli:config-list | implemented | backlog config list | cli:config-list |
-| cli:task-create | implemented | backlog task create <title> --id <id> --draft -d <text> --desc <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain | cli:task-create |
+| cli:task-create | implemented | backlog task create <title> --id <id> --draft -d <text> --desc <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> -m <milestone> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain | cli:task-create |
 | cli:draft-create | implemented | backlog draft create <title> -d <text> -s <status> -a <assignee> -l <label> | cli:draft-create |
 | cli:draft-list | implemented | backlog draft list --plain | cli:draft-list |
 | cli:draft-view | implemented | backlog draft view <id> --plain | cli:draft-view |
 | cli:draft-promote | implemented | backlog draft promote <id> | cli:draft-promote |
 | cli:task-demote | implemented | backlog task demote <id> | cli:task-demote |
 | cli:draft-archive | implemented | backlog draft archive <id> | cli:draft-archive |
-| cli:task-edit | implemented | backlog task edit <id> --title <title> -s <status> -d <text> --desc <text> --plan <text> --append-plan <text> --clear-plan --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --remove-ac <index> --dep <id> --dependency <id> --plain | cli:task-edit |
+| cli:task-edit | implemented | backlog task edit <id> --title <title> -s <status> -d <text> --desc <text> --plan <text> --append-plan <text> --clear-plan -m <milestone> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --dod <item> --remove-ac <index> --dep <id> --dependency <id> --plain | cli:task-edit |
 | cli:task-edit-rich-sections | implemented | backlog task edit <id> --notes <text> --append-notes <text> --final-summary <text> --append-final-summary <text> --clear-final-summary --plain | cli:task-edit-rich-sections |
 | cli:task-edit-checklist-state | implemented | backlog task edit <id> --check-ac <index> --uncheck-ac <index> --check-dod <index> --uncheck-dod <index> --remove-ac <index> --remove-dod <index> --plain | cli:task-edit-checklist-state |
 | cli:task-archive | implemented | backlog task archive <id> --plain | cli:task-archive |
