@@ -26,8 +26,8 @@ because they are visible feature-set commitments, not incidental options inside
 larger task commands:
 
 - Task creation with explicit IDs and implementation notes.
-- Task create/edit description entry through both `-d` and upstream-documented
-  `--desc` aliases.
+- Task create/edit description entry through `-d`, upstream-documented `--desc`,
+  and implemented `--description` aliases.
 - Task create/list parent selection through both upstream-documented `-p` and
   `--parent` aliases.
 - Task list/create/edit milestone selection through both `-m` and `--milestone`
