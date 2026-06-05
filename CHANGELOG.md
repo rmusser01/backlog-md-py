@@ -59,6 +59,8 @@
   and parity docs.
 - Track `draft create -s/--status` compatibility explicitly in the
   compatibility inventory and parity docs.
+- Track `draft create` long aliases for description, assignee, label, and
+  status explicitly in the compatibility inventory and parity docs.
 - Track `task create --id` explicitly in the compatibility inventory and
   parity docs.
 - Track `task edit --title`, `task edit -s`, `task edit -d`, and

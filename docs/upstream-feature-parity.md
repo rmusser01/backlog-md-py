@@ -35,7 +35,8 @@ larger task commands:
 - Task create/edit acceptance-criteria entry through both `--ac` and
   implemented `--acceptance-criteria` aliases.
 - Draft creation with upstream-compatible status option acceptance while drafts
-  remain in Draft status.
+  remain in Draft status, including long aliases for description, assignee,
+  label, and status inputs.
 - Milestone mutation options for creation descriptions, rename task reference
   updates, and remove-time task milestone clearing.
 - Document listing with optional query filtering.

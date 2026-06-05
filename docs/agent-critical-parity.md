@@ -20,7 +20,7 @@ do not block the first local-file agent cutover candidate.
 | cli:board-export | implemented | backlog board export [file] --readme --force --export-version <version> | cli:board-export |
 | cli:config-list | implemented | backlog config list | cli:config-list |
 | cli:task-create | implemented | backlog task create <title> --id <id> --draft -d <text> --desc <text> --description <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> -m <milestone> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --acceptance-criteria <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain | cli:task-create |
-| cli:draft-create | implemented | backlog draft create <title> -d <text> -s <status> -a <assignee> -l <label> | cli:draft-create |
+| cli:draft-create | implemented | backlog draft create <title> -d <text> --desc <text> --description <text> -s <status> --status <status> -a <assignee> --assignee <assignee> -l <label> --label <label> | cli:draft-create |
 | cli:draft-list | implemented | backlog draft list --plain | cli:draft-list |
 | cli:draft-view | implemented | backlog draft view <id> --plain | cli:draft-view |
 | cli:draft-promote | implemented | backlog draft promote <id> | cli:draft-promote |
