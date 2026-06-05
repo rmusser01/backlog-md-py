@@ -33,7 +33,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-list-plain",
             "CLI-INSTRUCTIONS.md",
-            "backlog task list --status <status> --priority <priority> -a <assignee> -l <label> -m <milestone> --milestone <milestone> -p <taskId> --parent <taskId> --plain",
+            "backlog task list --status <status> --priority <priority> -a <assignee> --assignee <assignee> -l <label> --label <label> -m <milestone> --milestone <milestone> -p <taskId> --parent <taskId> --plain",
         ),
         _golden("cli:task-view-plain", "CLI-INSTRUCTIONS.md", "backlog task <id> --plain"),
         _golden(
@@ -52,7 +52,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog task create <title> --id <id> --draft -d <text> --desc <text> --description <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> -m <milestone> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --acceptance-criteria <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain",
+            "backlog task create <title> --id <id> --draft -d <text> --desc <text> --description <text> -s <status> --plan <text> --notes <text> --final-summary <text> -p <taskId> --parent <taskId> -m <milestone> --milestone <milestone> --ordinal <number> --ref <item> --doc <item> --modified-file <path> -a <assignee> --assignee <assignee> -l <label> --label <label> --priority <priority> --ac <item> --acceptance-criteria <item> --definition-of-done <item> --dod <item> --definition-of-done-add <item> --disable-definition-of-done-defaults --no-dod-defaults --dep <id> --dependency <id> --plain",
         ),
         _golden(
             "cli:draft-create",
@@ -67,7 +67,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:task-edit",
             "CLI-INSTRUCTIONS.md",
-            "backlog task edit <id> --title <title> -s <status> -d <text> --desc <text> --description <text> --plan <text> --append-plan <text> --clear-plan -m <milestone> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> -l <label> --priority <priority> --ac <item> --acceptance-criteria <item> --dod <item> --remove-ac <index> --dep <id> --dependency <id> --plain",
+            "backlog task edit <id> --title <title> -s <status> -d <text> --desc <text> --description <text> --plan <text> --append-plan <text> --clear-plan -m <milestone> --milestone <milestone> --ordinal <number> --clear-milestone --ref <item> --doc <item> --modified-file <path> -a <assignee> --assignee <assignee> -l <label> --label <label> --priority <priority> --ac <item> --acceptance-criteria <item> --dod <item> --remove-ac <index> --dep <id> --dependency <id> --plain",
         ),
         _golden(
             "cli:task-edit-rich-sections",
