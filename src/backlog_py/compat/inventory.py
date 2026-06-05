@@ -57,7 +57,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:draft-create",
             "CLI-INSTRUCTIONS.md",
-            "backlog draft create <title> -d <text> -s <status> -a <assignee> -l <label>",
+            "backlog draft create <title> -d <text> --desc <text> --description <text> -s <status> --status <status> -a <assignee> --assignee <assignee> -l <label> --label <label>",
         ),
         _golden("cli:draft-list", "CLI-INSTRUCTIONS.md", "backlog draft list --plain"),
         _golden("cli:draft-view", "CLI-INSTRUCTIONS.md", "backlog draft view <id> --plain"),

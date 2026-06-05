@@ -119,6 +119,7 @@ def test_agent_critical_inventory_tracks_draft_create_status_compatibility_surfa
     by_name = {item.name: item for item in inventory.items}
 
     assert "-s <status>" in by_name["cli:draft-create"].expected
+    assert "--status <status>" in by_name["cli:draft-create"].expected
 
 
 def test_agent_critical_inventory_tracks_milestone_mutation_option_surface():
@@ -597,6 +598,13 @@ def test_agent_critical_inventory_tracks_draft_cli_surface():
     by_name = {item.name: item for item in inventory.items}
 
     assert "draft create <title>" in by_name["cli:draft-create"].expected
+    assert "-d <text>" in by_name["cli:draft-create"].expected
+    assert "--desc <text>" in by_name["cli:draft-create"].expected
+    assert "--description <text>" in by_name["cli:draft-create"].expected
+    assert "-a <assignee>" in by_name["cli:draft-create"].expected
+    assert "--assignee <assignee>" in by_name["cli:draft-create"].expected
+    assert "-l <label>" in by_name["cli:draft-create"].expected
+    assert "--label <label>" in by_name["cli:draft-create"].expected
     assert "draft list --plain" in by_name["cli:draft-list"].expected
     assert "draft view <id> --plain" in by_name["cli:draft-view"].expected
     assert "draft promote <id>" in by_name["cli:draft-promote"].expected
