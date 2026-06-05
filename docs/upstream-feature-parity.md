@@ -32,6 +32,8 @@ larger task commands:
   `--parent` aliases.
 - Task list/create/edit milestone selection through both `-m` and `--milestone`
   aliases.
+- Task create/edit acceptance-criteria entry through both `--ac` and
+  implemented `--acceptance-criteria` aliases.
 - Draft creation with upstream-compatible status option acceptance while drafts
   remain in Draft status.
 - Milestone mutation options for creation descriptions, rename task reference

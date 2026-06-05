@@ -37,6 +37,8 @@
   compatibility inventory and parity docs.
 - Track task create/edit `--description` description alias explicitly in the
   compatibility inventory and parity docs.
+- Track task create/edit `--acceptance-criteria` alias explicitly in the
+  compatibility inventory and parity docs.
 - Track document `-p/--path` and `-t/--type` aliases explicitly in the
   compatibility inventory and parity docs.
 - Track `task edit --dod` explicitly in the compatibility inventory and parity
