@@ -642,6 +642,7 @@ def test_agent_critical_inventory_tracks_decision_create_surface():
 
     assert 'decision create "Title"' in by_name["cli:decision-create"].expected
     assert "-s <status>" in by_name["cli:decision-create"].expected
+    assert "--status <status>" in by_name["cli:decision-create"].expected
 
 
 def test_agent_critical_inventory_has_fixture_coverage():

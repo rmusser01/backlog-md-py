@@ -37,6 +37,7 @@ larger task commands:
 - Draft creation with upstream-compatible status option acceptance while drafts
   remain in Draft status, including long aliases for description, assignee,
   label, and status inputs.
+- Decision creation status entry through both `-s` and `--status` aliases.
 - Milestone mutation options for creation descriptions, rename task reference
   updates, and remove-time task milestone clearing.
 - Document listing with optional query filtering.

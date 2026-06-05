@@ -96,7 +96,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "cli:decision-create",
             "CLI-INSTRUCTIONS.md",
-            'backlog decision create "Title" -s <status>',
+            'backlog decision create "Title" -s <status> --status <status>',
         ),
         _golden("cli:milestone-list", "CLI-INSTRUCTIONS.md", "backlog milestone list"),
         _golden("cli:milestone-add", "CLI-INSTRUCTIONS.md", "backlog milestone add <name> --description <text>"),
