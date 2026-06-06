@@ -602,6 +602,7 @@ def test_agent_critical_inventory_tracks_task_edit_rich_sections_and_checklists(
     assert "--description <text>" in by_name["cli:task-edit"].expected
     assert "--acceptance-criteria <item>" in by_name["cli:task-edit"].expected
     assert "--dod <item>" in by_name["cli:task-edit"].expected
+    assert "--definition-of-done-add <item>" in by_name["cli:task-edit"].expected
     assert "--dependency <id>" in by_name["cli:task-edit"].expected
     assert "--check-ac <index>" in checklist_state
     assert "--uncheck-ac <index>" in checklist_state
