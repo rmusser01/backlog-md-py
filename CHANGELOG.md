@@ -35,6 +35,8 @@
   compatibility inventory and parity docs.
 - Track task list/create/edit `--assignee` and `--label` aliases explicitly in
   the compatibility inventory and parity docs.
+- Track task list/create/edit `-s/--status` aliases explicitly in the
+  compatibility inventory and parity docs.
 - Track task create/edit `--desc` description alias explicitly in the
   compatibility inventory and parity docs.
 - Track task create/edit `--description` description alias explicitly in the
