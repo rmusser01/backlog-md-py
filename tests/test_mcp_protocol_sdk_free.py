@@ -51,6 +51,7 @@ def test_tools_list_contains_existing_task_search_tool():
     assert "id" in task_create["inputSchema"]["properties"]
     assert "status" in task_create["inputSchema"]["properties"]
     assert "parentTaskId" in task_create["inputSchema"]["properties"]
+    assert "milestone" in task_create["inputSchema"]["properties"]
 
 
 def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
