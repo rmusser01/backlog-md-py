@@ -38,6 +38,8 @@ larger task commands:
   including tools/list schema discovery.
 - MCP task creation exposes `status=None` in compatibility inventory, workflow
   guidance, and tools/list schema for deterministic initial task states.
+- MCP task creation exposes `parentTaskId=None` in tools/list schema discovery
+  for deterministic child task creation.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
   and implemented `--description` aliases.
