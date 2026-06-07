@@ -18,7 +18,7 @@ Supported tools:
 - task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, parentTaskId=None, search=None)
 - task_search(project, query="", limit=10, *, status=None, priority=None, modified_files=None)
 - task_view(project, task_id)
-- task_create(project, ordinal=None, milestone=None, parentTaskId=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs)
+- task_create(project, id=None, ordinal=None, milestone=None, parentTaskId=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs)
 - task_edit(project, task_id, ordinal=None, milestone=None, clearPriority=False, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs)
 - task_archive(project, task_id)
 - task_complete(project, task_id)

@@ -135,6 +135,7 @@ def test_agent_critical_inventory_tracks_task_create_explicit_id_surface():
     by_name = {item.name: item for item in inventory.items}
 
     assert "--id <id>" in by_name["cli:task-create"].expected
+    assert "id=None" in by_name["mcp:task-create"].expected
 
 
 def test_agent_critical_inventory_tracks_task_status_alias_surface():
