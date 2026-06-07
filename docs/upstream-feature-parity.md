@@ -50,6 +50,8 @@ larger task commands:
   for deterministic task documentation metadata.
 - MCP task creation exposes `modifiedFiles=None` in tools/list schema discovery
   for deterministic touched-file metadata.
+- MCP task creation exposes `implementationPlan=None` in tools/list schema
+  discovery for deterministic implementation planning metadata.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
   and implemented `--description` aliases.
