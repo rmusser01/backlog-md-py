@@ -106,6 +106,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "parentTaskId": {"type": "string", "description": "Parent task ID for child task creation."},
                 "milestone": {"type": "string", "description": "Initial task milestone."},
                 "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
+                "references": _string_array_schema("References to store on the task."),
             },
             required=("project", "title"),
         ),

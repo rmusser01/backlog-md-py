@@ -41,6 +41,7 @@
 - Advertise MCP `task_create` `parentTaskId` support in the tools/list schema.
 - Advertise MCP `task_create` `milestone` support in the tools/list schema.
 - Advertise MCP `task_create` `ordinal` support in the tools/list schema.
+- Advertise MCP `task_create` `references` support in the tools/list schema.
 - Track task create/list `-p` parent alias explicitly in the compatibility
   inventory and parity docs.
 - Track task create/edit `--dependency` alias explicitly in the compatibility
