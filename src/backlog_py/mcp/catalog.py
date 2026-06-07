@@ -129,6 +129,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "acceptanceCriteriaSet": _string_array_schema("Acceptance criteria to replace the section with."),
                 "clearPriority": {"type": "boolean", "description": "Clear priority frontmatter."},
                 "clearMilestone": {"type": "boolean", "description": "Clear milestone frontmatter."},
+                "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
             },
             required=("project", "task_id"),
         ),
