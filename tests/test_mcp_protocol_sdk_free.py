@@ -54,6 +54,7 @@ def test_tools_list_contains_existing_task_search_tool():
     assert "milestone" in task_create["inputSchema"]["properties"]
     assert "ordinal" in task_create["inputSchema"]["properties"]
     assert "references" in task_create["inputSchema"]["properties"]
+    assert "documentation" in task_create["inputSchema"]["properties"]
 
 
 def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
