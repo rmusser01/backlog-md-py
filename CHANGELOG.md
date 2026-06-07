@@ -35,6 +35,7 @@
   compatibility inventory, workflow resource, tools/list schema, and parity docs.
 - Track MCP `task_create(..., id=None, ...)` explicitly in the compatibility
   inventory, workflow resource, and parity docs.
+- Advertise MCP `task_create` explicit `id` support in the tools/list schema.
 - Track task create/list `-p` parent alias explicitly in the compatibility
   inventory and parity docs.
 - Track task create/edit `--dependency` alias explicitly in the compatibility

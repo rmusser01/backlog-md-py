@@ -98,7 +98,13 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "task_create",
         "Create a task in a Backlog.md project.",
-        _project_schema({"title": {"type": "string"}}, required=("project", "title")),
+        _project_schema(
+            {
+                "title": {"type": "string"},
+                "id": {"type": "string", "description": "Explicit task ID to create."},
+            },
+            required=("project", "title"),
+        ),
         tool_registry.task_create,
     ),
     ToolDefinition(
