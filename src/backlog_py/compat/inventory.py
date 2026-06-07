@@ -152,7 +152,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-edit",
             "MCP tools",
-            "task_edit(project, task_id, ordinal=None, milestone=None, clearPriority=False, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs)",
+            "task_edit(project, task_id, ordinal=None, milestone=None, clearPriority=False, clearMilestone=False, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs)",
         ),
         _golden("mcp:task-archive", "MCP tools", "task_archive(project, task_id)"),
         _golden("mcp:task-complete", "MCP tools", "task_complete(project, task_id)"),

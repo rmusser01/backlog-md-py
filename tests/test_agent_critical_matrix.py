@@ -114,6 +114,7 @@ def test_agent_critical_inventory_tracks_mcp_task_edit_clear_priority_surface():
     by_name = {item.name: item for item in inventory.items}
 
     assert "clearPriority=False" in by_name["mcp:task-edit"].expected
+    assert "clearMilestone=False" in by_name["mcp:task-edit"].expected
 
 
 def test_agent_critical_inventory_tracks_mcp_project_status_surface():

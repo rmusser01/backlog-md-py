@@ -31,6 +31,9 @@ larger task commands:
   paths, task counts, recent activity, and active write locks.
 - MCP task editing exposes `clearPriority=False` so agents can clear priority
   metadata without replacing the task body manually.
+- MCP task editing exposes `clearMilestone=False` in compatibility inventory,
+  workflow guidance, and tools/list schema so agents can clear milestone
+  metadata without relying on implicit `milestone=None` behavior.
 - MCP task creation exposes `id=None` for deterministic agent-created task IDs.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
