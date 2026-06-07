@@ -48,6 +48,7 @@ do not block the first local-file agent cutover candidate.
 | cli:agents-update-instructions | implemented | backlog agents --update-instructions | cli:agents-update-instructions |
 | mcp:workflow-overview | implemented | backlog://workflow/overview | mcp:workflow-overview |
 | mcp:task-workflow-alias | implemented | backlog://docs/task-workflow | mcp:task-workflow-alias |
+| mcp:project-status | implemented | project_status(project, recentLimit=5) | mcp:project-status |
 | mcp:board | implemented | task_board(project) | mcp:board |
 | mcp:task-list | implemented | task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, parentTaskId=None, search=None) | mcp:task-list |
 | mcp:task-search | implemented | task_search(project, query='', limit=10, *, status=None, priority=None, modified_files=None) | mcp:task-search |
