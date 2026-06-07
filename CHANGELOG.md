@@ -31,6 +31,8 @@
   compatibility inventory and parity docs.
 - Track MCP `task_edit(..., clearPriority=False, ...)` explicitly in the
   compatibility inventory and parity docs.
+- Track MCP `task_create(..., id=None, ...)` explicitly in the compatibility
+  inventory, workflow resource, and parity docs.
 - Track task create/list `-p` parent alias explicitly in the compatibility
   inventory and parity docs.
 - Track task create/edit `--dependency` alias explicitly in the compatibility

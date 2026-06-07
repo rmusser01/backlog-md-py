@@ -32,7 +32,7 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
     assert "milestone_add" in content
     assert "definition_of_done_defaults_get" in content
     assert "project_status(project, recentLimit=5)" in content
-    assert "task_create(project, ordinal=None" in content
+    assert "task_create(project, id=None, ordinal=None" in content
     assert "task_edit(project, task_id, ordinal=None" in content
     assert "backlog://init-required" in content
 
