@@ -29,6 +29,8 @@
   and parity docs.
 - Track MCP `project_status(project, recentLimit=5)` explicitly in the
   compatibility inventory and parity docs.
+- Track MCP `task_edit(..., clearPriority=False, ...)` explicitly in the
+  compatibility inventory and parity docs.
 - Track task create/list `-p` parent alias explicitly in the compatibility
   inventory and parity docs.
 - Track task create/edit `--dependency` alias explicitly in the compatibility
