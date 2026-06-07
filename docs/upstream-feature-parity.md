@@ -48,8 +48,8 @@ larger task commands:
 - Document creation/update by explicit path and title, including `-p/--path`
   and `-t/--type` aliases.
 - Task editing for title, status, description, dependency, acceptance criteria,
-  Definition of Done additions, plan replacement, plan append, and plan
-  clearing.
+  Definition of Done additions through both `--dod` and
+  `--definition-of-done-add`, plan replacement, plan append, and plan clearing.
 - Task creation Definition-of-Done entry through `--definition-of-done`,
   `--dod`, and implemented `--definition-of-done-add`, plus disabling
   inherited defaults through both `--disable-definition-of-done-defaults` and
