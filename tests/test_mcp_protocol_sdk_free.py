@@ -56,6 +56,7 @@ def test_tools_list_contains_existing_task_search_tool():
     assert "references" in task_create["inputSchema"]["properties"]
     assert "documentation" in task_create["inputSchema"]["properties"]
     assert "modifiedFiles" in task_create["inputSchema"]["properties"]
+    assert "implementationPlan" in task_create["inputSchema"]["properties"]
 
 
 def test_tools_list_advertises_task_edit_acceptance_criteria_fields():

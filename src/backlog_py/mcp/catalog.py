@@ -109,6 +109,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "references": _string_array_schema("References to store on the task."),
                 "documentation": _string_array_schema("Documentation links to store on the task."),
                 "modifiedFiles": _string_array_schema("Modified file paths to store on the task."),
+                "implementationPlan": {"type": "string", "description": "Initial implementation plan section."},
             },
             required=("project", "title"),
         ),
