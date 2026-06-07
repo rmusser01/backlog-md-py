@@ -54,7 +54,7 @@ do not block the first local-file agent cutover candidate.
 | mcp:task-list | implemented | task_list(project, status=None, limit=100, *, assignee=None, labels=None, priority=None, milestone=None, parentTaskId=None, search=None) | mcp:task-list |
 | mcp:task-search | implemented | task_search(project, query='', limit=10, *, status=None, priority=None, modified_files=None) | mcp:task-search |
 | mcp:task-view | implemented | task_view(project, task_id) | mcp:task-view |
-| mcp:task-create | implemented | task_create(project, id=None, ordinal=None, milestone=None, parentTaskId=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs) | mcp:task-create |
+| mcp:task-create | implemented | task_create(project, id=None, status=None, ordinal=None, milestone=None, parentTaskId=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs) | mcp:task-create |
 | mcp:task-edit | implemented | task_edit(project, task_id, ordinal=None, milestone=None, clearPriority=False, clearMilestone=False, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs) | mcp:task-edit |
 | mcp:task-archive | implemented | task_archive(project, task_id) | mcp:task-archive |
 | mcp:task-complete | implemented | task_complete(project, task_id) | mcp:task-complete |

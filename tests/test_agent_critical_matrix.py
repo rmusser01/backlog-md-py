@@ -147,6 +147,7 @@ def test_agent_critical_inventory_tracks_task_status_alias_surface():
     assert "--status <status>" in by_name["cli:task-list-plain"].expected
     assert "-s <status>" in by_name["cli:task-create"].expected
     assert "--status <status>" in by_name["cli:task-create"].expected
+    assert "status=None" in by_name["mcp:task-create"].expected
     assert "-s <status>" in by_name["cli:task-edit"].expected
     assert "--status <status>" in by_name["cli:task-edit"].expected
 

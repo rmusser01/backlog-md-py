@@ -36,6 +36,8 @@ larger task commands:
   metadata without relying on implicit `milestone=None` behavior.
 - MCP task creation exposes `id=None` for deterministic agent-created task IDs,
   including tools/list schema discovery.
+- MCP task creation exposes `status=None` in compatibility inventory, workflow
+  guidance, and tools/list schema for deterministic initial task states.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
   and implemented `--description` aliases.

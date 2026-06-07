@@ -49,6 +49,7 @@ def test_tools_list_contains_existing_task_search_tool():
     assert "project" not in task_search["inputSchema"]["required"]
     assert task_view["inputSchema"]["required"] == ["task_id"]
     assert "id" in task_create["inputSchema"]["properties"]
+    assert "status" in task_create["inputSchema"]["properties"]
 
 
 def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
