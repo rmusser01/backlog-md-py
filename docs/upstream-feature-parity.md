@@ -34,7 +34,8 @@ larger task commands:
 - MCP task editing exposes `clearMilestone=False` in compatibility inventory,
   workflow guidance, and tools/list schema so agents can clear milestone
   metadata without relying on implicit `milestone=None` behavior.
-- MCP task creation exposes `id=None` for deterministic agent-created task IDs.
+- MCP task creation exposes `id=None` for deterministic agent-created task IDs,
+  including tools/list schema discovery.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
   and implemented `--description` aliases.

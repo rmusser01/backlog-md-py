@@ -39,6 +39,7 @@ def test_tools_list_contains_existing_task_search_tool():
     project_status = next(tool for tool in tools if tool["name"] == "project_status")
     task_search = next(tool for tool in tools if tool["name"] == "task_search")
     task_view = next(tool for tool in tools if tool["name"] == "task_view")
+    task_create = next(tool for tool in tools if tool["name"] == "task_create")
     assert "project_status" in names
     assert "task_search" in names
     assert "task_create" in names
@@ -47,6 +48,7 @@ def test_tools_list_contains_existing_task_search_tool():
     assert task_search["inputSchema"]["type"] == "object"
     assert "project" not in task_search["inputSchema"]["required"]
     assert task_view["inputSchema"]["required"] == ["task_id"]
+    assert "id" in task_create["inputSchema"]["properties"]
 
 
 def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
