@@ -40,6 +40,8 @@ larger task commands:
   guidance, and tools/list schema for deterministic initial task states.
 - MCP task creation exposes `parentTaskId=None` in tools/list schema discovery
   for deterministic child task creation.
+- MCP task creation exposes `milestone=None` in tools/list schema discovery for
+  deterministic milestone assignment.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
   and implemented `--description` aliases.

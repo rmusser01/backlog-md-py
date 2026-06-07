@@ -104,6 +104,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "id": {"type": "string", "description": "Explicit task ID to create."},
                 "status": {"type": "string", "description": "Initial task status."},
                 "parentTaskId": {"type": "string", "description": "Parent task ID for child task creation."},
+                "milestone": {"type": "string", "description": "Initial task milestone."},
             },
             required=("project", "title"),
         ),
