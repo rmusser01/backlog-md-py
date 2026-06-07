@@ -25,6 +25,8 @@
 - Refresh the audited upstream compatibility baseline to `backlog.md@1.45.2`
   and document that the upstream delta is packaging-only for the Python clone's
   audited CLI/MCP/browser surfaces.
+- Track MCP `backlog://init-required` explicitly in the compatibility inventory
+  and parity docs.
 - Track MCP `project_status(project, recentLimit=5)` explicitly in the
   compatibility inventory and parity docs.
 - Track task create/list `-p` parent alias explicitly in the compatibility

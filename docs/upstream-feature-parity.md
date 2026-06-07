@@ -25,6 +25,8 @@ The compatibility inventory now calls out these upstream surfaces separately
 because they are visible feature-set commitments, not incidental options inside
 larger task commands:
 
+- MCP `backlog://init-required` project-initialization guidance for clients
+  launched outside a Backlog.md project.
 - MCP `project_status(project, recentLimit=5)` coordination summary for project
   paths, task counts, recent activity, and active write locks.
 - Task creation with explicit IDs and implementation notes.

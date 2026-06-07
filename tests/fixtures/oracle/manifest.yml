@@ -118,6 +118,9 @@ fixtures:
   - name: "mcp:task-workflow-alias"
     resource: "backlog://docs/task-workflow"
     agent_critical: true
+  - name: "mcp:init-required"
+    resource: "backlog://init-required"
+    agent_critical: true
   - name: "mcp:project-status"
     tool: "project_status"
     agent_critical: true

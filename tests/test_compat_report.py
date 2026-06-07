@@ -65,9 +65,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "audit_date": "2026-05-31",
     }
     assert report["summary"] == {
-        "implemented": 101,
+        "implemented": 102,
         "deferred": 0,
-        "total": 101,
+        "total": 102,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -75,9 +75,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 45,
     }
     assert report["categories"]["mcp"] == {
-        "implemented": 23,
+        "implemented": 24,
         "deferred": 0,
-        "total": 23,
+        "total": 24,
     }
     assert report["categories"]["browser"] == {
         "implemented": 24,
@@ -191,7 +191,7 @@ def test_compatibility_report_separates_release_validation_from_feature_counts()
 
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
-    assert report["summary"]["implemented"] == 101
+    assert report["summary"]["implemented"] == 102
     assert report["summary"]["deferred"] == 0
     assert report["full_browser_release_ready"] is False
     assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
