@@ -25,6 +25,8 @@ The compatibility inventory now calls out these upstream surfaces separately
 because they are visible feature-set commitments, not incidental options inside
 larger task commands:
 
+- MCP `project_status(project, recentLimit=5)` coordination summary for project
+  paths, task counts, recent activity, and active write locks.
 - Task creation with explicit IDs and implementation notes.
 - Task create/edit description entry through `-d`, upstream-documented `--desc`,
   and implemented `--description` aliases.

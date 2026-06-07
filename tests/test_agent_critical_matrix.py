@@ -46,6 +46,7 @@ EXPECTED_AGENT_CRITICAL = {
     "cli:agents-update-instructions",
     "mcp:workflow-overview",
     "mcp:task-workflow-alias",
+    "mcp:project-status",
     "mcp:board",
     "mcp:task-list",
     "mcp:task-search",
@@ -105,6 +106,13 @@ def test_agent_critical_inventory_tracks_task_ordinal_mutation_surface():
     assert "--ordinal <number>" in by_name["cli:task-edit"].expected
     assert "ordinal=None" in by_name["mcp:task-create"].expected
     assert "ordinal=None" in by_name["mcp:task-edit"].expected
+
+
+def test_agent_critical_inventory_tracks_mcp_project_status_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+
+    assert by_name["mcp:project-status"].expected == "project_status(project, recentLimit=5)"
 
 
 def test_agent_critical_inventory_tracks_task_create_explicit_id_surface():

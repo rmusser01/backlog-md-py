@@ -743,9 +743,9 @@ def test_compat_status_outputs_cutover_summary():
     assert "agentCutoverReady: true" in result.output
     assert "fullBrowserReleaseReady: false" in result.output
     assert "upstreamBaseline: backlog.md 1.45.2 audited 2026-05-31" in result.output
-    assert "implemented: 100" in result.output
+    assert "implemented: 101" in result.output
     assert "deferred: 0" in result.output
-    assert "total: 100" in result.output
+    assert "total: 101" in result.output
     assert "cli: 45 implemented, 0 deferred, 45 total" in result.output
     assert "browser: 24 implemented, 0 deferred, 24 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
