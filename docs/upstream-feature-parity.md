@@ -36,6 +36,8 @@ larger task commands:
   metadata without relying on implicit `milestone=None` behavior.
 - MCP task editing exposes `ordinal=None` in tools/list schema discovery for
   deterministic task ordering.
+- MCP task editing exposes `milestone=None` in tools/list schema discovery for
+  deterministic milestone reassignment.
 - MCP task creation exposes `id=None` for deterministic agent-created task IDs,
   including tools/list schema discovery.
 - MCP task creation exposes `status=None` in compatibility inventory, workflow

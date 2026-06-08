@@ -130,6 +130,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "clearPriority": {"type": "boolean", "description": "Clear priority frontmatter."},
                 "clearMilestone": {"type": "boolean", "description": "Clear milestone frontmatter."},
                 "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
+                "milestone": {"type": "string", "description": "Task milestone."},
             },
             required=("project", "task_id"),
         ),
