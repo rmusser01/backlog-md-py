@@ -70,6 +70,7 @@ def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
     assert "acceptanceCriteriaSet" in properties
     assert "clearPriority" in properties
     assert "clearMilestone" in properties
+    assert "ordinal" in properties
 
 
 def test_resources_list_contains_workflow_resources():
