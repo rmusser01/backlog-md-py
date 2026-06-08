@@ -131,6 +131,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "clearMilestone": {"type": "boolean", "description": "Clear milestone frontmatter."},
                 "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
                 "milestone": {"type": "string", "description": "Task milestone."},
+                "references": _string_array_schema("References to replace on the task."),
             },
             required=("project", "task_id"),
         ),
