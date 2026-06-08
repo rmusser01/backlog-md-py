@@ -132,6 +132,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
                 "milestone": {"type": "string", "description": "Task milestone."},
                 "references": _string_array_schema("References to replace on the task."),
+                "addReferences": _string_array_schema("References to append to the task."),
             },
             required=("project", "task_id"),
         ),

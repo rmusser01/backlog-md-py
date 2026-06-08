@@ -40,6 +40,8 @@ larger task commands:
   deterministic milestone reassignment.
 - MCP task editing exposes `references=None` in tools/list schema discovery for
   deterministic task reference metadata replacement.
+- MCP task editing exposes `addReferences=None` in tools/list schema discovery
+  for deterministic task reference metadata appends.
 - MCP task creation exposes `id=None` for deterministic agent-created task IDs,
   including tools/list schema discovery.
 - MCP task creation exposes `status=None` in compatibility inventory, workflow

@@ -36,6 +36,7 @@
 - Advertise MCP `task_edit` `ordinal` support in the tools/list schema.
 - Advertise MCP `task_edit` `milestone` support in the tools/list schema.
 - Advertise MCP `task_edit` `references` support in the tools/list schema.
+- Advertise MCP `task_edit` `addReferences` support in the tools/list schema.
 - Track MCP `task_create(..., id=None, ...)` explicitly in the compatibility
   inventory, workflow resource, and parity docs.
 - Advertise MCP `task_create` explicit `id` support in the tools/list schema.
