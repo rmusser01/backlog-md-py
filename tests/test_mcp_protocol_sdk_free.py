@@ -74,6 +74,7 @@ def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
     assert "milestone" in properties
     assert "references" in properties
     assert "addReferences" in properties
+    assert "documentation" in properties
 
 
 def test_resources_list_contains_workflow_resources():
