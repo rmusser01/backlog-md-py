@@ -1,6 +1,9 @@
+import ast
 import json
 import shutil
+from pathlib import Path
 
+from backlog_py.mcp.catalog import list_tools
 from backlog_py.mcp.protocol import (
     McpRequestContext,
     handle_jsonrpc_message,
@@ -12,6 +15,57 @@ def _tool_properties(name):
     response = handle_jsonrpc_message({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"})
     tool = next(tool for tool in response["result"]["tools"] if tool["name"] == name)
     return tool["inputSchema"]["properties"]
+
+
+def _handler_accepted_arguments():
+    source = Path("src/backlog_py/mcp/tools.py").read_text()
+    module = ast.parse(source)
+    tool_names = {tool["name"] for tool in list_tools()}
+
+    class AcceptedArgumentVisitor(ast.NodeVisitor):
+        def __init__(self):
+            self.owner_stack = []
+            self.names_by_tool = {name: set() for name in tool_names}
+
+        @property
+        def owner(self):
+            return self.owner_stack[-1] if self.owner_stack else None
+
+        def visit_FunctionDef(self, node):
+            owner = node.name if node.name in tool_names else self.owner
+            self.owner_stack.append(owner)
+            if node.name in tool_names:
+                for arg in [*node.args.args, *node.args.kwonlyargs]:
+                    if arg.arg != "project":
+                        self.names_by_tool[node.name].add(arg.arg)
+            self.generic_visit(node)
+            self.owner_stack.pop()
+
+        def visit_Call(self, node):
+            owner = self.owner
+            if owner:
+                if isinstance(node.func, ast.Name) and node.func.id in {
+                    "_get_alias",
+                    "_combined_optional_string_list",
+                }:
+                    for arg in node.args[1:]:
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            self.names_by_tool[owner].add(arg.value)
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "kwargs"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                ):
+                    self.names_by_tool[owner].add(node.args[0].value)
+            self.generic_visit(node)
+
+    visitor = AcceptedArgumentVisitor()
+    visitor.visit(module)
+    return visitor.names_by_tool
 
 
 def test_initialize_returns_server_capabilities():
@@ -152,6 +206,18 @@ def test_tools_list_advertises_document_and_milestone_optional_fields():
     assert "description" in _tool_properties("milestone_add")
     assert "update_tasks" in _tool_properties("milestone_rename")
     assert "clear_tasks" in _tool_properties("milestone_remove")
+
+
+def test_tools_list_advertises_all_handler_accepted_argument_names():
+    properties_by_tool = {tool["name"]: set(tool["inputSchema"]["properties"]) for tool in list_tools()}
+
+    missing = {
+        name: sorted(accepted_names - properties_by_tool[name])
+        for name, accepted_names in _handler_accepted_arguments().items()
+        if accepted_names - properties_by_tool[name]
+    }
+
+    assert missing == {}
 
 
 def test_resources_list_contains_workflow_resources():

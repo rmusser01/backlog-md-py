@@ -49,6 +49,9 @@ larger task commands:
 - MCP tools/list schemas explicitly advertise task read filters, task mutation
   metadata/checklist/status controls, document query/update metadata fields, and
   milestone optional flags accepted by the SDK-free MCP handlers.
+- MCP tools/list schemas explicitly advertise handler-accepted aliases,
+  including snake_case task mutation fields and legacy task edit aliases such as
+  `planSet`, `removeAc`, and `removeDod`.
 - MCP task creation exposes `id=None` for deterministic agent-created task IDs,
   including tools/list schema discovery.
 - MCP task creation exposes `status=None` in compatibility inventory, workflow
