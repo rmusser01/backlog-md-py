@@ -133,6 +133,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "milestone": {"type": "string", "description": "Task milestone."},
                 "references": _string_array_schema("References to replace on the task."),
                 "addReferences": _string_array_schema("References to append to the task."),
+                "documentation": _string_array_schema("Documentation links to replace on the task."),
             },
             required=("project", "task_id"),
         ),
