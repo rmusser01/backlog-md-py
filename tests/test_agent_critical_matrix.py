@@ -117,6 +117,24 @@ def test_agent_critical_inventory_tracks_mcp_task_edit_clear_priority_surface():
     assert "clearMilestone=False" in by_name["mcp:task-edit"].expected
 
 
+def test_agent_critical_inventory_tracks_expanded_mcp_task_mutation_schema_surface():
+    inventory = load_builtin_inventory()
+    by_name = {item.name: item for item in inventory.items}
+    task_create = by_name["mcp:task-create"].expected
+    task_edit = by_name["mcp:task-edit"].expected
+
+    assert "description=None" in task_create
+    assert "acceptanceCriteria=None" in task_create
+    assert "definitionOfDone=None" in task_create
+    assert "disableDefinitionOfDoneDefaults=False" in task_create
+    assert "onStatusChange=None" in task_create
+    assert "planAppend=None" in task_edit
+    assert "checkAc=None" in task_edit
+    assert "removeReferences=None" in task_edit
+    assert "removeDocumentation=None" in task_edit
+    assert "modifiedFiles=None" in task_edit
+
+
 def test_agent_critical_inventory_tracks_mcp_project_status_surface():
     inventory = load_builtin_inventory()
     by_name = {item.name: item for item in inventory.items}

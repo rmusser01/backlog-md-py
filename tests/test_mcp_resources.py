@@ -32,10 +32,27 @@ def test_workflow_overview_resource_returns_task_workflow_guidance():
     assert "milestone_add" in content
     assert "definition_of_done_defaults_get" in content
     assert "project_status(project, recentLimit=5)" in content
-    assert "task_create(project, id=None, status=None, ordinal=None" in content
-    assert "task_edit(project, task_id, ordinal=None" in content
+    assert "task_create(project, title, id=None, status=None" in content
+    assert "task_edit(project, task_id, title=None" in content
     assert "clearMilestone=False" in content
     assert "backlog://init-required" in content
+
+
+def test_workflow_overview_resource_documents_expanded_task_mutation_schema():
+    content = read_resource("backlog://workflow/overview")
+
+    assert "task_create(project" in content
+    assert "description=None" in content
+    assert "acceptanceCriteria=None" in content
+    assert "definitionOfDone=None" in content
+    assert "disableDefinitionOfDoneDefaults=False" in content
+    assert "onStatusChange=None" in content
+    assert "task_edit(project" in content
+    assert "planAppend=None" in content
+    assert "checkAc=None" in content
+    assert "removeReferences=None" in content
+    assert "removeDocumentation=None" in content
+    assert "modifiedFiles=None" in content
 
 
 def test_task_list_returns_fixture_backed_readonly_dicts():
