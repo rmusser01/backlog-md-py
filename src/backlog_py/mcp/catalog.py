@@ -134,6 +134,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "references": _string_array_schema("References to replace on the task."),
                 "addReferences": _string_array_schema("References to append to the task."),
                 "documentation": _string_array_schema("Documentation links to replace on the task."),
+                "addDocumentation": _string_array_schema("Documentation links to append to the task."),
             },
             required=("project", "task_id"),
         ),
