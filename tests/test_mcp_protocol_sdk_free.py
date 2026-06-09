@@ -8,6 +8,12 @@ from backlog_py.mcp.protocol import (
 )
 
 
+def _tool_properties(name):
+    response = handle_jsonrpc_message({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"})
+    tool = next(tool for tool in response["result"]["tools"] if tool["name"] == name)
+    return tool["inputSchema"]["properties"]
+
+
 def test_initialize_returns_server_capabilities():
     response = handle_jsonrpc_message(
         {
@@ -61,10 +67,7 @@ def test_tools_list_contains_existing_task_search_tool():
 
 
 def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
-    response = handle_jsonrpc_message({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"})
-
-    task_edit = next(tool for tool in response["result"]["tools"] if tool["name"] == "task_edit")
-    properties = task_edit["inputSchema"]["properties"]
+    properties = _tool_properties("task_edit")
     assert "acceptanceCriteria" in properties
     assert "acceptanceCriteriaAdd" in properties
     assert "acceptanceCriteriaSet" in properties
@@ -76,6 +79,79 @@ def test_tools_list_advertises_task_edit_acceptance_criteria_fields():
     assert "addReferences" in properties
     assert "documentation" in properties
     assert "addDocumentation" in properties
+
+
+def test_tools_list_advertises_task_read_filter_fields():
+    task_list = _tool_properties("task_list")
+    task_search = _tool_properties("task_search")
+
+    assert {
+        "status",
+        "limit",
+        "assignee",
+        "labels",
+        "priority",
+        "milestone",
+        "parentTaskId",
+        "search",
+    }.issubset(task_list)
+    assert {"query", "limit", "status", "priority", "modified_files", "modifiedFiles"}.issubset(task_search)
+
+
+def test_tools_list_advertises_task_mutation_metadata_fields():
+    task_create = _tool_properties("task_create")
+    task_edit = _tool_properties("task_edit")
+
+    assert {
+        "description",
+        "notes",
+        "acceptanceCriteria",
+        "definitionOfDone",
+        "definitionOfDoneAdd",
+        "disableDefinitionOfDoneDefaults",
+        "dependencies",
+        "assignee",
+        "labels",
+        "priority",
+        "onStatusChange",
+    }.issubset(task_create)
+    assert {
+        "title",
+        "description",
+        "implementationPlan",
+        "planAppend",
+        "planClear",
+        "notes",
+        "appendNotes",
+        "definitionOfDoneAdd",
+        "finalSummary",
+        "finalSummaryAppend",
+        "finalSummaryClear",
+        "checkAc",
+        "checkDod",
+        "uncheckAc",
+        "uncheckDod",
+        "acceptanceCriteriaRemove",
+        "definitionOfDoneRemove",
+        "dependencies",
+        "assignee",
+        "labels",
+        "priority",
+        "status",
+        "onStatusChange",
+        "removeReferences",
+        "removeDocumentation",
+        "modifiedFiles",
+    }.issubset(task_edit)
+
+
+def test_tools_list_advertises_document_and_milestone_optional_fields():
+    assert {"query", "limit"}.issubset(_tool_properties("document_list"))
+    assert "metadata" in _tool_properties("document_create")
+    assert {"title", "content"}.issubset(_tool_properties("document_update"))
+    assert "description" in _tool_properties("milestone_add")
+    assert "update_tasks" in _tool_properties("milestone_rename")
+    assert "clear_tasks" in _tool_properties("milestone_remove")
 
 
 def test_resources_list_contains_workflow_resources():

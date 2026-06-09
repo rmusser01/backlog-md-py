@@ -46,6 +46,9 @@ larger task commands:
   for deterministic task documentation metadata replacement.
 - MCP task editing exposes `addDocumentation=None` in tools/list schema
   discovery for deterministic task documentation metadata appends.
+- MCP tools/list schemas explicitly advertise task read filters, task mutation
+  metadata/checklist/status controls, document query/update metadata fields, and
+  milestone optional flags accepted by the SDK-free MCP handlers.
 - MCP task creation exposes `id=None` for deterministic agent-created task IDs,
   including tools/list schema discovery.
 - MCP task creation exposes `status=None` in compatibility inventory, workflow
