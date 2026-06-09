@@ -38,6 +38,12 @@
 - Advertise MCP `task_edit` `references` support in the tools/list schema.
 - Advertise MCP `task_edit` `addReferences` support in the tools/list schema.
 - Advertise MCP `task_edit` `documentation` support in the tools/list schema.
+- Advertise MCP `task_edit` `addDocumentation` support in the tools/list schema.
+- Expand SDK-free MCP tools/list schemas for task filters, task mutation
+  metadata/checklist/status controls, document optional fields, and milestone
+  optional flags.
+- Advertise MCP tools/list schemas for handler-accepted aliases, including
+  snake_case task fields and legacy task edit aliases.
 - Track MCP `task_create(..., id=None, ...)` explicitly in the compatibility
   inventory, workflow resource, and parity docs.
 - Advertise MCP `task_create` explicit `id` support in the tools/list schema.

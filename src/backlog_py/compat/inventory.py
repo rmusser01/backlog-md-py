@@ -147,12 +147,12 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-create",
             "MCP tools",
-            "task_create(project, id=None, status=None, ordinal=None, milestone=None, parentTaskId=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, **kwargs)",
+            "task_create(project, title, id=None, status=None, description=None, notes=None, ordinal=None, milestone=None, parentTaskId=None, acceptanceCriteria=None, definitionOfDone=None, definitionOfDoneAdd=None, disableDefinitionOfDoneDefaults=False, dependencies=None, assignee=None, labels=None, priority=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, onStatusChange=None)",
         ),
         _golden(
             "mcp:task-edit",
             "MCP tools",
-            "task_edit(project, task_id, ordinal=None, milestone=None, clearPriority=False, clearMilestone=False, references=None, addReferences=None, documentation=None, addDocumentation=None, modifiedFiles=None, **kwargs)",
+            "task_edit(project, task_id, title=None, description=None, implementationPlan=None, planAppend=None, planClear=False, notes=None, appendNotes=None, acceptanceCriteria=None, acceptanceCriteriaAdd=None, acceptanceCriteriaSet=None, definitionOfDoneAdd=None, finalSummary=None, finalSummaryAppend=None, finalSummaryClear=False, checkAc=None, checkDod=None, uncheckAc=None, uncheckDod=None, acceptanceCriteriaRemove=None, definitionOfDoneRemove=None, dependencies=None, assignee=None, labels=None, priority=None, clearPriority=False, ordinal=None, milestone=None, clearMilestone=False, references=None, addReferences=None, removeReferences=None, documentation=None, addDocumentation=None, removeDocumentation=None, modifiedFiles=None, status=None, onStatusChange=None)",
         ),
         _golden("mcp:task-archive", "MCP tools", "task_archive(project, task_id)"),
         _golden("mcp:task-complete", "MCP tools", "task_complete(project, task_id)"),

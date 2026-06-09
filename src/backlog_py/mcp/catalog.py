@@ -70,23 +70,68 @@ def _project_schema(
     }
 
 
-def _string_array_schema(description: str) -> dict[str, Any]:
-    return {"type": "array", "items": {"type": "string"}, "description": description}
+def _string_or_string_array_schema(description: str) -> dict[str, Any]:
+    return {
+        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+        "description": description,
+    }
+
+
+def _integer_or_integer_array_schema(description: str) -> dict[str, Any]:
+    return {
+        "oneOf": [{"type": "integer"}, {"type": "array", "items": {"type": "integer"}}],
+        "description": description,
+    }
+
+
+def _metadata_schema(description: str) -> dict[str, Any]:
+    return {"type": "object", "description": description, "additionalProperties": True}
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "project_status",
         "Return read-only project coordination status for overlap checks.",
-        _project_schema({"recentLimit": {"type": "integer"}}),
+        _project_schema(
+            {
+                "recentLimit": {"type": "integer"},
+                "recent_limit": {"type": "integer", "description": "Alias for recentLimit."},
+            }
+        ),
         tool_registry.project_status,
     ),
     ToolDefinition("task_board", "Return tasks grouped by board status.", _project_schema(), tool_registry.task_board),
-    ToolDefinition("task_list", "List tasks in a Backlog.md project.", _project_schema(), tool_registry.task_list),
+    ToolDefinition(
+        "task_list",
+        "List tasks in a Backlog.md project.",
+        _project_schema(
+            {
+                "status": {"type": "string", "description": "Filter by task status."},
+                "limit": {"type": "integer", "description": "Maximum number of tasks to return."},
+                "assignee": _string_or_string_array_schema("Filter by assignee."),
+                "labels": _string_or_string_array_schema("Filter by label."),
+                "priority": {"type": "string", "description": "Filter by task priority."},
+                "milestone": {"type": "string", "description": "Filter by milestone."},
+                "parentTaskId": {"type": "string", "description": "Filter by parent task ID."},
+                "parent_task_id": {"type": "string", "description": "Alias for parentTaskId."},
+                "search": {"type": "string", "description": "Search query to apply while listing tasks."},
+            }
+        ),
+        tool_registry.task_list,
+    ),
     ToolDefinition(
         "task_search",
         "Search tasks in a Backlog.md project.",
-        _project_schema({"query": {"type": "string"}, "limit": {"type": "integer"}}),
+        _project_schema(
+            {
+                "query": {"type": "string", "description": "Search query."},
+                "limit": {"type": "integer", "description": "Maximum number of results to return."},
+                "status": {"type": "string", "description": "Filter by task status."},
+                "priority": {"type": "string", "description": "Filter by task priority."},
+                "modified_files": _string_or_string_array_schema("Filter by modified file path."),
+                "modifiedFiles": _string_or_string_array_schema("Filter by modified file path."),
+            }
+        ),
         tool_registry.task_search,
     ),
     ToolDefinition(
@@ -102,15 +147,51 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             {
                 "title": {"type": "string"},
                 "id": {"type": "string", "description": "Explicit task ID to create."},
+                "task_id": {"type": "string", "description": "Alias for id."},
                 "status": {"type": "string", "description": "Initial task status."},
+                "description": {"type": "string", "description": "Initial task description section."},
+                "notes": {"type": "string", "description": "Initial implementation notes section."},
                 "parentTaskId": {"type": "string", "description": "Parent task ID for child task creation."},
+                "parent_task_id": {"type": "string", "description": "Alias for parentTaskId."},
+                "parent": {"type": "string", "description": "Alias for parentTaskId."},
                 "milestone": {"type": "string", "description": "Initial task milestone."},
                 "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
-                "references": _string_array_schema("References to store on the task."),
-                "documentation": _string_array_schema("Documentation links to store on the task."),
-                "modifiedFiles": _string_array_schema("Modified file paths to store on the task."),
+                "acceptanceCriteria": _string_or_string_array_schema("Acceptance criteria to store on the task."),
+                "acceptance_criteria": _string_or_string_array_schema("Alias for acceptanceCriteria."),
+                "definitionOfDone": _string_or_string_array_schema("Definition of Done items to store on the task."),
+                "definition_of_done": _string_or_string_array_schema("Alias for definitionOfDone."),
+                "definitionOfDoneAdd": _string_or_string_array_schema("Definition of Done items to append."),
+                "definition_of_done_add": _string_or_string_array_schema("Alias for definitionOfDoneAdd."),
+                "disableDefinitionOfDoneDefaults": {
+                    "type": "boolean",
+                    "description": "Disable project-level Definition of Done defaults for this task.",
+                },
+                "disable_definition_of_done_defaults": {
+                    "type": "boolean",
+                    "description": "Alias for disableDefinitionOfDoneDefaults.",
+                },
+                "dependencies": _string_or_string_array_schema("Task dependencies to store."),
+                "assignee": _string_or_string_array_schema("Task assignee values to store."),
+                "assignees": _string_or_string_array_schema("Alias for assignee."),
+                "labels": _string_or_string_array_schema("Task labels to store."),
+                "priority": {"type": "string", "description": "Initial task priority."},
+                "references": _string_or_string_array_schema("References to store on the task."),
+                "documentation": _string_or_string_array_schema("Documentation links to store on the task."),
+                "modifiedFiles": _string_or_string_array_schema("Modified file paths to store on the task."),
+                "modified_files": _string_or_string_array_schema("Alias for modifiedFiles."),
                 "implementationPlan": {"type": "string", "description": "Initial implementation plan section."},
+                "implementation_plan": {"type": "string", "description": "Alias for implementationPlan."},
+                "plan": {"type": "string", "description": "Alias for implementationPlan."},
                 "finalSummary": {"type": "string", "description": "Initial final summary section."},
+                "final_summary": {"type": "string", "description": "Alias for finalSummary."},
+                "onStatusChange": {
+                    "oneOf": [{"type": "string"}, {"type": "boolean"}],
+                    "description": "Status-change hook command, or false to disable it.",
+                },
+                "on_status_change": {
+                    "oneOf": [{"type": "string"}, {"type": "boolean"}],
+                    "description": "Alias for onStatusChange.",
+                },
             },
             required=("project", "title"),
         ),
@@ -122,18 +203,83 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         _project_schema(
             {
                 "task_id": {"type": "string"},
-                "acceptanceCriteria": _string_array_schema(
+                "title": {"type": "string", "description": "Replacement task title."},
+                "description": {"type": "string", "description": "Replacement task description section."},
+                "implementationPlan": {"type": "string", "description": "Replacement implementation plan section."},
+                "implementation_plan": {"type": "string", "description": "Alias for implementationPlan."},
+                "planSet": {"type": "string", "description": "Alias for implementationPlan."},
+                "plan": {"type": "string", "description": "Alias for implementationPlan."},
+                "planAppend": _string_or_string_array_schema("Implementation plan lines to append."),
+                "append_plan": _string_or_string_array_schema("Alias for planAppend."),
+                "planClear": {"type": "boolean", "description": "Clear the implementation plan section."},
+                "clear_plan": {"type": "boolean", "description": "Alias for planClear."},
+                "notes": {"type": "string", "description": "Replacement implementation notes section."},
+                "appendNotes": {"type": "string", "description": "Implementation notes text to append."},
+                "append_notes": {"type": "string", "description": "Alias for appendNotes."},
+                "acceptanceCriteria": _string_or_string_array_schema(
                     "Acceptance criteria to add; alias for acceptanceCriteriaAdd."
                 ),
-                "acceptanceCriteriaAdd": _string_array_schema("Acceptance criteria to append."),
-                "acceptanceCriteriaSet": _string_array_schema("Acceptance criteria to replace the section with."),
+                "acceptance_criteria": _string_or_string_array_schema("Alias for acceptanceCriteria."),
+                "acceptanceCriteriaAdd": _string_or_string_array_schema("Acceptance criteria to append."),
+                "acceptance_criteria_add": _string_or_string_array_schema("Alias for acceptanceCriteriaAdd."),
+                "acceptanceCriteriaSet": _string_or_string_array_schema(
+                    "Acceptance criteria to replace the section with."
+                ),
+                "acceptance_criteria_set": _string_or_string_array_schema("Alias for acceptanceCriteriaSet."),
+                "definitionOfDoneAdd": _string_or_string_array_schema("Definition of Done items to append."),
+                "definition_of_done_add": _string_or_string_array_schema("Alias for definitionOfDoneAdd."),
+                "finalSummary": {"type": "string", "description": "Replacement final summary section."},
+                "final_summary": {"type": "string", "description": "Alias for finalSummary."},
+                "finalSummaryAppend": _string_or_string_array_schema("Final summary lines to append."),
+                "append_final_summary": _string_or_string_array_schema("Alias for finalSummaryAppend."),
+                "finalSummaryClear": {"type": "boolean", "description": "Clear the final summary section."},
+                "clear_final_summary": {"type": "boolean", "description": "Alias for finalSummaryClear."},
+                "checkAc": _integer_or_integer_array_schema("Acceptance criteria indexes to mark complete."),
+                "check_ac": _integer_or_integer_array_schema("Alias for checkAc."),
+                "checkDod": _integer_or_integer_array_schema("Definition of Done indexes to mark complete."),
+                "check_dod": _integer_or_integer_array_schema("Alias for checkDod."),
+                "uncheckAc": _integer_or_integer_array_schema("Acceptance criteria indexes to mark incomplete."),
+                "uncheck_ac": _integer_or_integer_array_schema("Alias for uncheckAc."),
+                "uncheckDod": _integer_or_integer_array_schema("Definition of Done indexes to mark incomplete."),
+                "uncheck_dod": _integer_or_integer_array_schema("Alias for uncheckDod."),
+                "acceptanceCriteriaRemove": _integer_or_integer_array_schema("Acceptance criteria indexes to remove."),
+                "removeAc": _integer_or_integer_array_schema("Alias for acceptanceCriteriaRemove."),
+                "remove_ac": _integer_or_integer_array_schema("Alias for acceptanceCriteriaRemove."),
+                "definitionOfDoneRemove": _integer_or_integer_array_schema("Definition of Done indexes to remove."),
+                "removeDod": _integer_or_integer_array_schema("Alias for definitionOfDoneRemove."),
+                "remove_dod": _integer_or_integer_array_schema("Alias for definitionOfDoneRemove."),
+                "dependencies": _string_or_string_array_schema("Task dependencies to replace."),
+                "assignee": _string_or_string_array_schema("Task assignee values to replace."),
+                "assignees": _string_or_string_array_schema("Alias for assignee."),
+                "labels": _string_or_string_array_schema("Task labels to replace."),
+                "priority": {"type": "string", "description": "Task priority."},
                 "clearPriority": {"type": "boolean", "description": "Clear priority frontmatter."},
+                "clear_priority": {"type": "boolean", "description": "Alias for clearPriority."},
                 "clearMilestone": {"type": "boolean", "description": "Clear milestone frontmatter."},
+                "clear_milestone": {"type": "boolean", "description": "Alias for clearMilestone."},
                 "ordinal": {"type": "integer", "description": "Task ordering ordinal."},
                 "milestone": {"type": "string", "description": "Task milestone."},
-                "references": _string_array_schema("References to replace on the task."),
-                "addReferences": _string_array_schema("References to append to the task."),
-                "documentation": _string_array_schema("Documentation links to replace on the task."),
+                "references": _string_or_string_array_schema("References to replace on the task."),
+                "addReferences": _string_or_string_array_schema("References to append to the task."),
+                "add_references": _string_or_string_array_schema("Alias for addReferences."),
+                "removeReferences": _string_or_string_array_schema("References to remove from the task."),
+                "remove_references": _string_or_string_array_schema("Alias for removeReferences."),
+                "documentation": _string_or_string_array_schema("Documentation links to replace on the task."),
+                "addDocumentation": _string_or_string_array_schema("Documentation links to append to the task."),
+                "add_documentation": _string_or_string_array_schema("Alias for addDocumentation."),
+                "removeDocumentation": _string_or_string_array_schema("Documentation links to remove from the task."),
+                "remove_documentation": _string_or_string_array_schema("Alias for removeDocumentation."),
+                "modifiedFiles": _string_or_string_array_schema("Modified file paths to replace on the task."),
+                "modified_files": _string_or_string_array_schema("Alias for modifiedFiles."),
+                "status": {"type": "string", "description": "Task status."},
+                "onStatusChange": {
+                    "oneOf": [{"type": "string"}, {"type": "boolean"}],
+                    "description": "Status-change hook command, or false to disable it.",
+                },
+                "on_status_change": {
+                    "oneOf": [{"type": "string"}, {"type": "boolean"}],
+                    "description": "Alias for onStatusChange.",
+                },
             },
             required=("project", "task_id"),
         ),
@@ -151,7 +297,17 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
         tool_registry.task_complete,
     ),
-    ToolDefinition("document_list", "List or search documents.", _project_schema(), tool_registry.document_list),
+    ToolDefinition(
+        "document_list",
+        "List or search documents.",
+        _project_schema(
+            {
+                "query": {"type": "string", "description": "Search query."},
+                "limit": {"type": "integer", "description": "Maximum number of documents to return."},
+            }
+        ),
+        tool_registry.document_list,
+    ),
     ToolDefinition(
         "document_view",
         "Return one document by path or id.",
@@ -166,6 +322,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "path": {"type": "string"},
                 "title": {"type": "string"},
                 "content": {"type": "string"},
+                "metadata": _metadata_schema("Frontmatter metadata to store on the document."),
             },
             required=("project", "path", "title", "content"),
         ),
@@ -174,21 +331,38 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "document_update",
         "Update a project document.",
-        _project_schema({"path_or_id": {"type": "string"}}, required=("project", "path_or_id")),
+        _project_schema(
+            {
+                "path_or_id": {"type": "string"},
+                "title": {"type": "string", "description": "Replacement document title."},
+                "content": {"type": "string", "description": "Replacement document content."},
+            },
+            required=("project", "path_or_id"),
+        ),
         tool_registry.document_update,
     ),
     ToolDefinition("milestone_list", "List project milestones.", _project_schema(), tool_registry.milestone_list),
     ToolDefinition(
         "milestone_add",
         "Create a milestone.",
-        _project_schema({"name": {"type": "string"}}, required=("project", "name")),
+        _project_schema(
+            {
+                "name": {"type": "string"},
+                "description": {"type": "string", "description": "Initial milestone description."},
+            },
+            required=("project", "name"),
+        ),
         tool_registry.milestone_add,
     ),
     ToolDefinition(
         "milestone_rename",
         "Rename a milestone.",
         _project_schema(
-            {"old_name": {"type": "string"}, "new_name": {"type": "string"}},
+            {
+                "old_name": {"type": "string"},
+                "new_name": {"type": "string"},
+                "update_tasks": {"type": "boolean", "description": "Update matching task milestone references."},
+            },
             required=("project", "old_name", "new_name"),
         ),
         tool_registry.milestone_rename,
@@ -196,7 +370,13 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "milestone_remove",
         "Remove a milestone.",
-        _project_schema({"name": {"type": "string"}}, required=("project", "name")),
+        _project_schema(
+            {
+                "name": {"type": "string"},
+                "clear_tasks": {"type": "boolean", "description": "Clear matching task milestone references."},
+            },
+            required=("project", "name"),
+        ),
         tool_registry.milestone_remove,
     ),
     ToolDefinition(
