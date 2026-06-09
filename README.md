@@ -1,21 +1,26 @@
 # backlog-md-py
 
-`backlog-md-py` is a standalone Python compatibility implementation of
-Backlog.md for local-file task workflows, CLI, MCP, and agent integration
-without a Node/Bun runtime dependency.
+`backlog-md-py` is a standalone Python implementation of the local-file
+[Backlog.md](https://github.com/MrLesk/Backlog.md) task workflow. It keeps
+Backlog.md projects as Markdown files on disk, while providing a Python CLI,
+Python helper functions, SDK-free MCP server, singleton daemon for multi-agent
+setups, browser board, and optional Textual TUI.
+
+Use it when you want Backlog.md-compatible project tracking from Python tooling
+or local agents without requiring a Node or Bun runtime.
 
 ## Status And Safety
 
-This project is in beta. The agent-critical cutover gate and audited parity
-inventory have passed for the documented local-file CLI, Python helper, MCP,
-daemon, and browser-board workflows. Beta means the supported contract is ready
-for real project integration after validation, but it is not yet a 1.0 API
-freeze.
+This project is in beta. The audited compatibility inventory reports the
+documented local-file CLI, Python helper, MCP, daemon, browser-board, and TUI
+surfaces as implemented for the current baseline. Beta means the supported
+contract is ready for real project integration after validation, but it is not
+yet a 1.0 API freeze.
 
+The source of truth remains the `backlog/` Markdown directory in each project.
 Before live mutation in a consuming project, run copied-repository smoke tests
-and review the resulting Backlog.md diff. See the
-[stability policy](docs/stability-policy.md) for the supported contract and
-release gate.
+and review the resulting diff. See the [stability policy](docs/stability-policy.md)
+for the supported contract and release gate.
 
 Do not alias `backlog-py` to `backlog` unless the target project has made an
 explicit project cutover decision.
@@ -44,15 +49,28 @@ backlog-py --cwd /path/to/project browser --port 6420 --no-open
 backlog-py compat status
 ```
 
-- Optional terminal Kanban board: `python -m pip install "backlog-md-py[tui]"`
-  and run `backlog-py --cwd /path/to/project tui` for keyboard navigation,
-  task detail, global search, Markdown preview, dependency visibility, filters,
-  safe project settings, Definition of Done defaults, checklist toggles, and
-  create/edit/move/archive workflows.
+For a safe first run, start with a scratch project:
 
-The browser board is optional; see the
-[browser release validation guide](docs/browser-release-validation.md) for the
-release-readiness evidence model.
+```bash
+mkdir -p /tmp/backlog-md-py-demo
+backlog-py --cwd /tmp/backlog-md-py-demo init --defaults --no-git
+backlog-py --cwd /tmp/backlog-md-py-demo task create "Try backlog-md-py" --plain
+backlog-py --cwd /tmp/backlog-md-py-demo board
+```
+
+## Interfaces At A Glance
+
+- CLI: `backlog-py --cwd /path/to/project ...`
+- Python module entry point: `python -m backlog_py ...`
+- Python helpers: import from `backlog_py.mcp` and `backlog_py.storage.project`
+- MCP stdio: `backlog-py-mcp`
+- Multi-agent singleton daemon: `backlog-py daemon ensure`
+- Browser board: `backlog-py --cwd /path/to/project browser --port 6420`
+- Optional TUI: install `backlog-md-py[tui]`, then run
+  `backlog-py --cwd /path/to/project tui`
+
+The plain CLI and MCP tools are the recommended automation surfaces. The
+browser board and TUI are human-facing project navigation surfaces.
 
 ## Agent And MCP Use
 
@@ -74,12 +92,25 @@ See [integration.md](docs/integration.md) for CLI, Python helper, and MCP
 configuration, and [singleton-daemon.md](docs/singleton-daemon.md) for daemon
 setup and rollback guidance.
 
+## How It Fits Together
+
+All interfaces resolve a Backlog.md project, parse Markdown-backed records, and
+delegate mutations to shared core services that preserve unowned Markdown
+sections and serialize writes with local filesystem locks. The daemon is a
+process-reuse and coordination layer, not a separate database. The optional
+SQLite index is disposable read acceleration; Markdown remains authoritative.
+
+See [architecture.md](docs/architecture.md) for a contributor-oriented system
+map.
+
 ## Documentation
 
 Start with the [documentation index](docs/README.md). The most commonly used
 references are:
 
+- [Getting started](docs/getting-started.md)
 - [Integration guide](docs/integration.md)
+- [Architecture guide](docs/architecture.md)
 - [Stability policy](docs/stability-policy.md)
 - [Singleton daemon guide](docs/singleton-daemon.md)
 - [Cutover validation checklist](docs/cutover-validation.md)
@@ -105,5 +136,5 @@ uv run --extra dev python -m pytest tests/test_agent_critical_matrix.py -v
 uv run --extra dev python -m pytest tests -v
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full local validation and release
-gate.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow and
+[architecture.md](docs/architecture.md) for the source layout.

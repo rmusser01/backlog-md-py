@@ -2,10 +2,20 @@
 
 ## What This Project Is
 
-`backlog-md-py` is a standalone Python compatibility implementation for
-Backlog.md local-file task workflows. It provides the `backlog-py` CLI, Python
-helpers, SDK-free MCP stdio through `backlog-py-mcp`, and agent-oriented
-integration paths without requiring a Node/Bun runtime.
+`backlog-md-py` is a standalone Python implementation of the Backlog.md
+local-file task workflow. It keeps project tasks, documents, decisions, and
+milestones as Markdown files under a project's `backlog/` directory, and
+provides Python-native ways to read and mutate them.
+
+The main entry points are:
+
+- `backlog-py`: CLI and browser/TUI launcher.
+- `python -m backlog_py`: module form of the CLI.
+- `backlog-py-mcp`: SDK-free MCP stdio server.
+- `backlog-py daemon ...`: optional singleton daemon for multi-agent process
+  reuse.
+- Python helper functions under `backlog_py.mcp` and project discovery helpers
+  under `backlog_py.storage.project`.
 
 It is not a hosted task service, and adopting it does not require replacing
 upstream Backlog.md immediately. Treat live mutation as a project cutover
@@ -25,9 +35,19 @@ For unreleased commits, install from GitHub:
 python -m pip install "git+https://github.com/rmusser01/backlog-md-py.git"
 ```
 
-## Try It In A Scratch Project
+Optional extras:
 
-Start in an empty scratch directory so task creation and editing are safe:
+```bash
+python -m pip install "backlog-md-py[tui]"
+```
+
+Use the TUI extra only when you want the Textual terminal board. MCP stdio and
+the daemon are included in the base package.
+
+## First Run In A Scratch Project
+
+Start in an empty scratch directory. This lets you try reads and writes without
+touching a real project backlog:
 
 ```bash
 mkdir -p /tmp/backlog-md-py-demo
@@ -48,9 +68,8 @@ scratch project, pass `--no-git`:
 backlog-py --cwd /tmp/backlog-md-py-demo init --defaults --no-git
 ```
 
-Use the same caution for copied repositories: try mutation examples in a
-scratch project or a copied repository before running them against a live
-project backlog.
+After the scratch run, inspect `/tmp/backlog-md-py-demo/backlog/` to see the
+Markdown files that were created.
 
 ## Point At An Existing Project
 
@@ -63,10 +82,19 @@ backlog-py --cwd /path/to/project task <id> --plain
 backlog-py --cwd /path/to/project board
 ```
 
-Before live task creation, editing, archiving, or export operations, run a
-copied-repository mutation smoke and review the resulting diff. The
-[cutover validation checklist](cutover-validation.md) has a full copied-repo
-sequence.
+For mutation commands such as `task create`, `task edit`, `task archive`,
+document updates, cleanup, or board export, copy the repository first and review
+the diff after the smoke test:
+
+```bash
+cp -R /path/to/project /tmp/project-backlog-py-smoke
+backlog-py --cwd /tmp/project-backlog-py-smoke task create "Smoke task" --plain
+backlog-py --cwd /tmp/project-backlog-py-smoke task edit task-1 --notes "Smoke edit." --plain
+git -C /tmp/project-backlog-py-smoke diff -- backlog
+```
+
+Use the [cutover validation checklist](cutover-validation.md) for the full
+copied-repository sequence before live project writes.
 
 ## Common CLI Commands
 
@@ -143,6 +171,11 @@ backlog-py daemon ensure
 backlog-py daemon status --json
 ```
 
+In multi-agent environments, the daemon prevents each client from launching its
+own long-lived server process. The daemon is not a durable task database; it
+coordinates requests and forwards them to the same Markdown-backed core
+services used by the CLI.
+
 To keep local agent guidance synchronized with the supported workflow, generate
 Backlog.md instruction blocks for common agent files:
 
@@ -181,6 +214,7 @@ and release gate.
 - Run create/edit/archive examples in a scratch project first.
 - Run copied-repository mutation smoke before live mutation.
 - Review the copied repository diff before accepting the workflow.
+- Keep Markdown task files as the source of truth.
 - Do not alias `backlog-py` to `backlog` without an explicit project cutover
   decision.
 - Do not run upstream Backlog.md mutation paths and `backlog-md-py` mutation
@@ -189,6 +223,7 @@ and release gate.
 ## Next Steps
 
 - [Integration guide](integration.md) for CLI, Python helper, and MCP details.
+- [Architecture guide](architecture.md) for the source layout and runtime model.
 - [Stability policy](stability-policy.md) for the beta support contract.
 - [Singleton daemon guide](singleton-daemon.md) for multi-agent process reuse.
 - [Cutover validation checklist](cutover-validation.md) for migration gates.
