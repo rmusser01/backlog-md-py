@@ -122,6 +122,12 @@
 - Reject non-string Definition of Done defaults without partially mutating
   project configuration.
 
+### Fixed
+
+- Preserve intentionally empty task Description sections in CLI and browser
+  task detail views after notes-only edits, instead of falling back to the full
+  sectioned Markdown body.
+
 ## 0.2.0 - 2026-05-23 (Beta)
 
 ### Changed
