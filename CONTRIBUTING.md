@@ -104,6 +104,8 @@ Before pushing a release tag:
 - Confirm `src/backlog_py/__init__.py` has the intended `__version__`.
 - Confirm `pyproject.toml`, `CHANGELOG.md`, and `docs/stability-policy.md`
   describe the intended release status.
+- Follow `docs/release-checklist.md` for the version, validation, tag,
+  post-publish, and failure-handling gates.
 - Confirm PyPI has a trusted publisher for project `backlog-md-py`, repository
   `rmusser01/backlog-md-py`, workflow `.github/workflows/release.yml`, and
   environment `pypi`.

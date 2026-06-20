@@ -117,6 +117,7 @@ references are:
 - [Browser release validation](docs/browser-release-validation.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing guide](CONTRIBUTING.md)
+- [Release checklist](docs/release-checklist.md)
 
 ## Development
 

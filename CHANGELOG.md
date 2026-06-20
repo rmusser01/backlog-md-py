@@ -2,11 +2,15 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-06-20 (Beta)
+
 ### Added
 
 - Improve MCP project-discovery resources and stdio initialization guidance so
   agents can find project roots and workflow instructions without relying on an
   MCP SDK.
+- Add a release tag and publish checklist covering version, validation, tag,
+  GitHub Release, PyPI, and rollback gates.
 - Add explicit `backlog-py init --no-git` support for filesystem-only scratch
   projects while keeping the default init path Git-aware.
 - Add deterministic fuzzy search matching for CLI, MCP, TUI, document, and
