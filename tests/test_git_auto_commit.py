@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -317,7 +318,7 @@ def _git_repo_with_recent_branch_status_update(tmp_path: Path) -> Path:
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test User")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "main task", env=_git_date_env("2026-05-20T10:00:00Z"))
+    _git(repo, "commit", "-m", "main task", env=_recent_git_date_env(0))
     _git(repo, "checkout", "-b", "feature/status-done")
     task_path = repo / "backlog" / "tasks" / "task-1 - Cross Branch.md"
     task_path.write_text(
@@ -399,11 +400,11 @@ def _git_repo_with_stale_branch_task_and_recent_unrelated_commit(tmp_path: Path)
         encoding="utf-8",
     )
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "advance task on main", env=_git_date_env("2026-05-20T10:00:01Z"))
+    _git(repo, "commit", "-m", "advance task on main", env=_recent_git_date_env(1))
     _git(repo, "checkout", "feature/unrelated-work")
     (repo / "feature.txt").write_text("recent unrelated branch work\n", encoding="utf-8")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "recent unrelated branch work", env=_git_date_env("2026-05-20T10:00:02Z"))
+    _git(repo, "commit", "-m", "recent unrelated branch work", env=_recent_git_date_env(2))
     _git(repo, "checkout", "main")
     return repo
 
@@ -434,7 +435,7 @@ def _git_repo_with_current_unrelated_commit_after_branch_task_update(tmp_path: P
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test User")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "main task", env=_git_date_env("2026-05-20T10:00:00Z"))
+    _git(repo, "commit", "-m", "main task", env=_recent_git_date_env(0))
     _git(repo, "checkout", "-b", "feature/status-done")
     task_path = repo / "backlog" / "tasks" / "task-1 - Cross Branch.md"
     task_path.write_text(
@@ -442,11 +443,11 @@ def _git_repo_with_current_unrelated_commit_after_branch_task_update(tmp_path: P
         encoding="utf-8",
     )
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "mark task done", env=_git_date_env("2026-05-20T10:00:01Z"))
+    _git(repo, "commit", "-m", "mark task done", env=_recent_git_date_env(1))
     _git(repo, "checkout", "main")
     (repo / "current.txt").write_text("recent unrelated current work\n", encoding="utf-8")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "recent unrelated current work", env=_git_date_env("2026-05-20T10:00:02Z"))
+    _git(repo, "commit", "-m", "recent unrelated current work", env=_recent_git_date_env(2))
     return repo
 
 
@@ -490,6 +491,11 @@ def _git_date_env(timestamp: str) -> dict[str, str]:
         "GIT_AUTHOR_DATE": timestamp,
         "GIT_COMMITTER_DATE": timestamp,
     }
+
+
+def _recent_git_date_env(offset_seconds: int) -> dict[str, str]:
+    timestamp = datetime.now(timezone.utc) - timedelta(days=1) + timedelta(seconds=offset_seconds)
+    return _git_date_env(timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 def _status_entries(repo: Path) -> list[str]:
