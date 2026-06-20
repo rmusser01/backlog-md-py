@@ -46,6 +46,12 @@ class TaskRecord:
         return "" if section is None else section.content.strip()
 
     @property
+    def description_or_legacy_body(self) -> str:
+        if "DESCRIPTION" in self.parsed.sections:
+            return self.description
+        return self.body.strip()
+
+    @property
     def body(self) -> str:
         return self.parsed.body
 

@@ -1655,7 +1655,7 @@ def _append_plain_section(lines: list[str], heading: str, body: str) -> None:
 
 
 def _plain_task_description(task_record: TaskRecord) -> str:
-    return task_record.description or task_record.body.strip() or "(empty)"
+    return task_record.description_or_legacy_body or "(empty)"
 
 
 def _section_content(task_record: TaskRecord, section_name: str) -> str:
@@ -1695,7 +1695,7 @@ def _format_interactive_task_detail(project: BacklogProject, task_record: TaskRe
         path_display = task_record.path.relative_to(project.root).as_posix()
     except ValueError:
         path_display = task_record.path.as_posix()
-    description = task_record.description or task_record.body.strip() or "(empty)"
+    description = task_record.description_or_legacy_body or "(empty)"
     lines = [
         click.style(f"Task {task_record.id}", fg="cyan", bold=True),
         f"Title: {task_record.title}",

@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
+from backlog_py.core.repository import MutableRepository
 from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
 
@@ -540,6 +541,27 @@ def test_browser_task_detail_endpoint_returns_markdown_html_sections(tmp_path):
     assert "A --&gt; B" in task["descriptionHtml"]
     assert "<li>Keep frontmatter order stable.</li>" in task["implementationNotesHtml"]
     assert task["finalSummaryHtml"] == "<p>No final summary yet.</p>"
+
+
+def test_browser_task_detail_preserves_empty_owned_description_after_notes_edit(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    repository = MutableRepository.from_path(repo)
+    repository.create_task(title="Notes only task", task_id="TASK-2")
+    repository.edit_task("TASK-2", notes="Edited in a scratch project.")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-2")
+    finally:
+        service.shutdown()
+
+    assert task["description"] == ""
+    assert task["descriptionHtml"] == ""
+    assert task["implementationNotes"] == "Edited in a scratch project."
+    assert task["implementationNotesHtml"] == "<p>Edited in a scratch project.</p>"
 
 
 def test_browser_task_detail_markdown_html_escapes_unsafe_content(tmp_path):
