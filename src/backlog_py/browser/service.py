@@ -778,13 +778,13 @@ def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, obj
 
 def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
     payload = _task_payload(task, project=project)
-    description = task.description or task.body.strip()
+    description = task.description_or_legacy_body
     implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
     final_summary = _section_content(task, "FINAL_SUMMARY")
     payload.update(
         {
             "description": description,
-            "descriptionHtml": _markdown_to_html(description),
+            "descriptionHtml": _markdown_to_html(description) if description else "",
             "implementationNotes": implementation_notes,
             "implementationNotesHtml": _markdown_to_html(implementation_notes),
             "finalSummary": final_summary,

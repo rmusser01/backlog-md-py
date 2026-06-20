@@ -237,6 +237,23 @@ def test_task_view_plain_falls_back_to_legacy_body_without_description_section(t
     assert "Description:\nLegacy body only." in result.output
 
 
+def test_task_view_plain_preserves_empty_owned_description_after_notes_edit(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    repository = MutableRepository.from_path(repo)
+    repository.create_task(title="Notes only task", task_id="TASK-2")
+    repository.edit_task("TASK-2", notes="Edited in a scratch project.")
+
+    result = _invoke_repo(repo, "task", "TASK-2", "--plain")
+
+    assert result.exit_code == 0
+    assert "Task TASK-2 - Notes only task" in result.output
+    assert "Description:\n(empty)\n\nAcceptance Criteria:" in result.output
+    assert "Implementation Notes:\nEdited in a scratch project." in result.output
+    assert "<!-- SECTION:DESCRIPTION:BEGIN -->" not in result.output
+    assert "## Implementation Notes" not in result.output
+
+
 def test_task_view_default_renders_interactive_task_detail():
     result = _invoke_color("task", "TASK-1")
 
