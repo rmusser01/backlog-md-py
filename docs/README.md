@@ -28,6 +28,8 @@ This index is organized by what you are trying to do with `backlog-md-py`.
   runtime state, compatibility inventory, and safety invariants.
 - [Contributing guide](../CONTRIBUTING.md): local development setup, workflow,
   validation commands, packaging checks, and release expectations.
+- [Release process](../RELEASE.md): PyPI/TestPyPI publishing flow, tag trigger
+  behavior, Trusted Publishing setup, and post-publish verification.
 - [Release checklist](release-checklist.md): version, validation, tag, GitHub
   Release, PyPI, and failure-handling gates for maintainers.
 - [Agent-critical parity](agent-critical-parity.md): the CLI, MCP, helper, and
