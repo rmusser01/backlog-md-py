@@ -636,6 +636,21 @@ class MutableRepository(ReadOnlyRepository):
             _run_status_change_callback(self.project, updated_task, old_status, updated_task.status)
         return updated_task
 
+    def replace_task_source(self, task_id: str, source: str) -> TaskRecord:
+        task = self.get_task(task_id)
+        safe_current_path = _mutation_path(task.path.parent, task.path)
+        parsed = parse_task_markdown(source)
+        parsed_id = str(parsed.frontmatter.get("id") or "")
+        if parsed_id.casefold() != task.id.casefold():
+            raise TaskMutationError(f"Task source id mismatch: expected {task.id}, got {parsed_id or '<missing>'}")
+        _atomic_write_text(safe_current_path, source)
+        return _load_task(safe_current_path)
+
+    def replace_task_frontmatter_values(self, task_id: str, updates: dict[str, object]) -> TaskRecord:
+        task = self.get_task(task_id)
+        source = _replace_frontmatter_values(task.raw_source, task.parsed, updates)
+        return self.replace_task_source(task.id, source)
+
     def archive_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
         safe_current_path = _mutation_path(task.path.parent, task.path)

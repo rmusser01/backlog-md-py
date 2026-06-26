@@ -259,6 +259,56 @@ def test_edit_task_updates_metadata_frontmatter_without_rewriting_unowned_body(t
     assert "Trailing unowned body content must also round trip." in written
 
 
+def test_replace_task_source_validates_and_preserves_path(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = MutableRepository.from_path(repo)
+    task = repository.get_task("TASK-1")
+    source = task.raw_source.replace("status: In Progress", "status: To Do")
+
+    updated = repository.replace_task_source("TASK-1", source)
+
+    assert updated.path == task.path
+    assert updated.status == "To Do"
+
+
+def test_replace_task_source_rejects_malformed_yaml_without_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = MutableRepository.from_path(repo)
+    task = repository.get_task("TASK-1")
+    before = task.path.read_text(encoding="utf-8")
+    source = task.raw_source.replace("status: In Progress", "status: [")
+
+    with pytest.raises(ValueError, match="Invalid YAML frontmatter"):
+        repository.replace_task_source("TASK-1", source)
+
+    assert task.path.read_text(encoding="utf-8") == before
+
+
+def test_replace_task_source_rejects_id_changes_without_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = MutableRepository.from_path(repo)
+    task = repository.get_task("TASK-1")
+    before = task.path.read_text(encoding="utf-8")
+    source = task.raw_source.replace("id: TASK-1", "id: TASK-2")
+
+    with pytest.raises(TaskMutationError, match="Task source id mismatch"):
+        repository.replace_task_source("TASK-1", source)
+
+    assert task.path.read_text(encoding="utf-8") == before
+
+
+def test_replace_task_frontmatter_values_updates_nested_orchestration(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = MutableRepository.from_path(repo)
+
+    updated = repository.replace_task_frontmatter_values(
+        "TASK-1",
+        {"orchestration": {"status_key": "inprogress", "version": 1}},
+    )
+
+    assert updated.parsed.frontmatter["orchestration"]["version"] == 1
+
+
 def test_edit_task_can_clear_milestone_frontmatter(tmp_path):
     repo = _copy_fixture(tmp_path)
     repository = _repository(repo)

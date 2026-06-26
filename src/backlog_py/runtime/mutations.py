@@ -54,6 +54,36 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
         "Moves Done task markdown into the project completed tree.",
     ),
     MutationSurface(
+        "orchestration_claim",
+        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        "project",
+        "Claims task orchestration ownership in active task frontmatter.",
+    ),
+    MutationSurface(
+        "orchestration_release",
+        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        "project",
+        "Releases task orchestration ownership in active task frontmatter.",
+    ),
+    MutationSurface(
+        "orchestration_transition",
+        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        "project",
+        "Transitions task orchestration state in active task frontmatter.",
+    ),
+    MutationSurface(
+        "orchestration_record_run",
+        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        "project",
+        "Appends orchestration run history and may update orchestration frontmatter.",
+    ),
+    MutationSurface(
+        "orchestration_split",
+        ("backlog_py.cli.main", "backlog_py.mcp.tools"),
+        "project",
+        "Creates follow-up orchestration tasks and may update source task frontmatter.",
+    ),
+    MutationSurface(
         "cleanup_complete_done",
         ("backlog_py.cli.main",),
         "project",
