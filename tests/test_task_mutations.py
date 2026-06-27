@@ -400,6 +400,126 @@ def test_edit_task_can_append_and_clear_final_summary(tmp_path):
     assert "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n\n<!-- SECTION:FINAL_SUMMARY:END -->" in after_clear
 
 
+def test_edit_task_append_notes_canonicalizes_legacy_notes_section(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        original.replace("SECTION:IMPLEMENTATION_NOTES", "SECTION:NOTES"),
+        encoding="utf-8",
+    )
+
+    _repository(repo).edit_task("TASK-1", append_notes="- Added legacy note.")
+
+    after = task_path.read_text(encoding="utf-8")
+    assert after.count("## Implementation Notes") == 1
+    assert "<!-- SECTION:NOTES:BEGIN -->" not in after
+    assert "<!-- SECTION:NOTES:END -->" not in after
+    assert after.count("<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->") == 1
+    assert after.count("<!-- SECTION:IMPLEMENTATION_NOTES:END -->") == 1
+    assert "- Keep frontmatter order stable." in after
+    assert "- Added legacy note." in after
+    assert after.count("<!-- SECTION:FINAL_SUMMARY:BEGIN -->") == 1
+    assert after.count("<!-- SECTION:FINAL_SUMMARY:END -->") == 1
+
+
+def test_edit_task_append_notes_unwraps_nested_legacy_notes_section(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        original.replace(
+            "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\n"
+            "- Keep frontmatter order stable.\n"
+            "- Keep unknown body text stable.\n"
+            "<!-- SECTION:IMPLEMENTATION_NOTES:END -->",
+            "<!-- SECTION:NOTES:BEGIN -->\n"
+            "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\n"
+            "- Keep frontmatter order stable.\n"
+            "- Keep unknown body text stable.\n"
+            "<!-- SECTION:IMPLEMENTATION_NOTES:END -->\n"
+            "<!-- SECTION:NOTES:END -->",
+        ),
+        encoding="utf-8",
+    )
+
+    _repository(repo).edit_task("TASK-1", append_notes="- Added nested legacy note.")
+
+    after = task_path.read_text(encoding="utf-8")
+    assert "<!-- SECTION:NOTES:BEGIN -->" not in after
+    assert "<!-- SECTION:NOTES:END -->" not in after
+    assert after.count("<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->") == 1
+    assert after.count("<!-- SECTION:IMPLEMENTATION_NOTES:END -->") == 1
+    assert "- Keep frontmatter order stable." in after
+    assert "- Added nested legacy note." in after
+
+
+def test_edit_task_clear_final_summary_canonicalizes_duplicate_markers(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        original.replace(
+            "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n"
+            "No final summary yet.\n"
+            "<!-- SECTION:FINAL_SUMMARY:END -->",
+            "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n"
+            "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n"
+            "\n"
+            "<!-- SECTION:FINAL_SUMMARY:END -->\n"
+            "<!-- SECTION:FINAL_SUMMARY:END -->\n"
+            "\n"
+            "<!-- SECTION:FINAL_SUMMARY:END -->",
+        ),
+        encoding="utf-8",
+    )
+
+    _repository(repo).edit_task("TASK-1", clear_final_summary=True)
+
+    after = task_path.read_text(encoding="utf-8")
+    assert "No final summary yet." not in after
+    assert after.count("<!-- SECTION:FINAL_SUMMARY:BEGIN -->") == 1
+    assert after.count("<!-- SECTION:FINAL_SUMMARY:END -->") == 1
+    assert "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n\n<!-- SECTION:FINAL_SUMMARY:END -->" in after
+
+
+def test_edit_task_empty_final_summary_restores_section_after_orphan_marker(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        original.replace(
+            "## Final Summary\n\n"
+            "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n"
+            "No final summary yet.\n"
+            "<!-- SECTION:FINAL_SUMMARY:END -->\n\n",
+            "<!-- SECTION:FINAL_SUMMARY:END -->\n\n",
+        ),
+        encoding="utf-8",
+    )
+
+    _repository(repo).edit_task("TASK-1", final_summary="")
+
+    after = task_path.read_text(encoding="utf-8")
+    assert after.count("## Final Summary") == 1
+    assert after.count("<!-- SECTION:FINAL_SUMMARY:BEGIN -->") == 1
+    assert after.count("<!-- SECTION:FINAL_SUMMARY:END -->") == 1
+    assert after.index("## Final Summary") < after.index("## Definition of Done")
+    assert "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n\n<!-- SECTION:FINAL_SUMMARY:END -->" in after
+
+
+def test_get_task_prefers_active_task_when_completed_task_shares_id(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_task = _task_file(repo)
+    completed_dir = repo / "backlog" / "completed"
+    completed_dir.mkdir()
+    shutil.copy(active_task, completed_dir / active_task.name)
+
+    task = _repository(repo).get_task("TASK-1")
+
+    assert task.path.parent.name == "tasks"
+
+
 def test_archive_task_moves_active_file_to_archive_without_rewrite(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)

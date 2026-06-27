@@ -29,7 +29,11 @@ from backlog_py.storage.project import discover_project
 
 _TASK_ID_RE = re.compile(r"^[A-Z]+-\d+(?:\.\d+)*$")
 _CHECKLIST_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*]\s+\[)[ xX](?P<suffix>\]\s+.*)$")
+_SECTION_MARKER_LINE_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):(?P<kind>BEGIN|END) -->\s*$")
 _NO_STATUS_CALLBACK_UPDATE = object()
+_SECTION_NAME_ALIASES = {
+    "IMPLEMENTATION_NOTES": ("IMPLEMENTATION_NOTES", "NOTES"),
+}
 
 
 @dataclass(frozen=True)
@@ -120,6 +124,9 @@ class ReadOnlyRepository:
         except TaskMutationError:
             normalized_lookup_id = normalized_id
         for task in self.list_tasks():
+            if task.id.casefold() in {normalized_id, normalized_lookup_id}:
+                return task
+        for task in _load_tasks_from_dir(self.project.backlog_dir / "tasks"):
             if task.id.casefold() in {normalized_id, normalized_lookup_id}:
                 return task
         raise KeyError(f"Task not found: {task_id}")
@@ -507,8 +514,7 @@ class MutableRepository(ReadOnlyRepository):
             source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", _normalize_block(notes))
             parsed = parse_task_markdown(source)
         if append_notes is not None:
-            existing_notes = parsed.sections.get("IMPLEMENTATION_NOTES")
-            existing_content = "" if existing_notes is None else existing_notes.content.rstrip()
+            existing_content = _section_content_for_edit(parsed, "IMPLEMENTATION_NOTES")
             appended = _normalize_block(append_notes)
             notes_content = appended if not existing_content else f"{existing_content}\n{appended}"
             source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", notes_content)
@@ -907,11 +913,18 @@ def _mutation_path(base: Path, candidate: Path) -> Path:
 
 
 def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
-    section = parsed.sections.get(name)
+    section = _find_section(parsed, name)
     new_section = _render_section_markers(name, content)
     if section is not None:
-        return source.replace(section.raw.rstrip("\r\n"), new_section, 1)
-    return source.rstrip() + f"\n\n{_heading_for_section(name)}\n\n{new_section}\n"
+        section_start = source.find(section.raw)
+        if section_start == -1:
+            return source.replace(section.raw.rstrip("\r\n"), new_section, 1)
+        section_end = _section_replace_end(source, section_start + len(section.raw), _section_lookup_names(name))
+        tail = source[section_end:]
+        separator = "" if not tail or tail.startswith(("\n", "\r")) else "\n"
+        return f"{source[:section_start]}{new_section}{separator}{tail}"
+    cleaned = _remove_orphan_section_marker_lines(source, _section_lookup_names(name))
+    return _insert_section(cleaned, name, content)
 
 
 def _replace_or_insert_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
@@ -926,8 +939,7 @@ def _append_to_structured_section(
     name: str,
     items: Sequence[str],
 ) -> str:
-    section = parsed.sections.get(name)
-    existing_content = "" if section is None else section.content.rstrip()
+    existing_content = _section_content_for_edit(parsed, name)
     appended = "\n".join(_normalize_block(item) for item in items if _normalize_block(item))
     if not appended:
         return source
@@ -957,6 +969,57 @@ def _remove_section(source: str, parsed: ParsedTaskMarkdown, name: str) -> str:
     return after
 
 
+def _find_section(parsed: ParsedTaskMarkdown, name: str):
+    for section_name in _section_lookup_names(name):
+        section = parsed.sections.get(section_name)
+        if section is not None:
+            return section
+    return None
+
+
+def _section_lookup_names(name: str) -> tuple[str, ...]:
+    return _SECTION_NAME_ALIASES.get(name, (name,))
+
+
+def _section_content_for_edit(parsed: ParsedTaskMarkdown, name: str) -> str:
+    section = _find_section(parsed, name)
+    if section is None:
+        return ""
+    return _strip_section_marker_lines(section.content, _section_lookup_names(name)).rstrip()
+
+
+def _strip_section_marker_lines(content: str, names: Sequence[str]) -> str:
+    name_set = set(names)
+    return "".join(line for line in content.splitlines(keepends=True) if not _is_section_marker_line(line, name_set))
+
+
+def _remove_orphan_section_marker_lines(source: str, names: Sequence[str]) -> str:
+    name_set = set(names)
+    return "".join(line for line in source.splitlines(keepends=True) if not _is_section_marker_line(line, name_set))
+
+
+def _is_section_marker_line(line: str, names: set[str]) -> bool:
+    match = _SECTION_MARKER_LINE_RE.match(line.rstrip("\r\n"))
+    return match is not None and match.group("name") in names
+
+
+def _section_replace_end(source: str, cursor: int, names: Sequence[str]) -> int:
+    end_pattern = _section_end_line_pattern(names)
+    while cursor < len(source):
+        whitespace = re.match(r"(?:[ \t]*(?:\r?\n))*", source[cursor:])
+        marker_start = cursor + (0 if whitespace is None else whitespace.end())
+        marker_match = end_pattern.match(source, marker_start)
+        if marker_match is None:
+            return cursor
+        cursor = marker_match.end()
+    return cursor
+
+
+def _section_end_line_pattern(names: Sequence[str]) -> re.Pattern[str]:
+    alternatives = "|".join(re.escape(name) for name in names)
+    return re.compile(rf"<!-- SECTION:(?:{alternatives}):END -->[ \t]*(?:\r?\n|$)")
+
+
 def _insert_section(source: str, name: str, content: str) -> str:
     block = f"{_heading_for_section(name)}\n\n{_render_section_markers(name, content)}"
     if name == "PLAN":
@@ -966,7 +1029,25 @@ def _insert_section(source: str, name: str, content: str) -> str:
             acceptance_block = ""
         if acceptance_block:
             return source.replace(acceptance_block, f"{acceptance_block.rstrip()}\n\n{block}", 1)
+    if name == "FINAL_SUMMARY":
+        return _insert_section_before_heading(source, "## Definition of Done", block)
     return source.rstrip() + f"\n\n{block}\n"
+
+
+def _insert_section_before_heading(source: str, heading: str, block: str) -> str:
+    heading_start = source.find(f"\n{heading}")
+    if heading_start != -1:
+        heading_start += 1
+    elif source.startswith(heading):
+        heading_start = 0
+    else:
+        return source.rstrip() + f"\n\n{block}\n"
+
+    before = source[:heading_start].rstrip()
+    after = source[heading_start:].lstrip()
+    if before:
+        return f"{before}\n\n{block}\n\n{after}"
+    return f"{block}\n\n{after}"
 
 
 def _append_to_section(
@@ -975,8 +1056,7 @@ def _append_to_section(
     name: str,
     items: Sequence[str],
 ) -> str:
-    section = parsed.sections.get(name)
-    existing_content = "" if section is None else section.content.rstrip()
+    existing_content = _section_content_for_edit(parsed, name)
     appended = "\n".join(_normalize_block(item) for item in items if _normalize_block(item))
     content = appended if not existing_content else f"{existing_content}\n{appended}"
     return _replace_section(source, parsed, name, content)
