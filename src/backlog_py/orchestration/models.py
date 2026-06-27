@@ -95,6 +95,48 @@ class TaskSplitError(OrchestrationError):
 
 
 @dataclass(frozen=True)
+class OrchestrationStateUpdate:
+    status_key: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: str | None = None
+    correlation_id: str | None = None
+    review_state: str | None = None
+    reviewer: str | None = None
+    review_attempts: int | None = None
+    review_max_attempts: int | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationActorContext:
+    adapter_identity: str | None = None
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OrchestrationRecordRunRequest:
+    task_id: str
+    actor: str | None
+    result: str
+    summary: str
+    files: tuple[str, ...] = ()
+    verification: tuple[str, ...] = ()
+    idempotency_key: str | None = None
+    expected_version: int | None = None
+    state_update: OrchestrationStateUpdate | None = None
+    actor_context: OrchestrationActorContext | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationMutationResult:
+    task_id: str
+    path: str
+    version: int
+    event: OrchestrationRunEvent
+    idempotent_replay: bool = False
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class OrchestrationWorkspace:
     path: str | None = None
     branch: str | None = None
