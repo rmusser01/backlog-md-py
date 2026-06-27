@@ -8,6 +8,7 @@ from backlog_py.core.repository import TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.orchestration import (
     OrchestrationPolicy,
+    OrchestrationValidationError,
     WorkflowStatePolicy,
     list_active_claims,
     list_eligible_tasks,
@@ -122,6 +123,13 @@ def test_default_policy_accepts_expected_transitions():
     assert policy.can_transition("inprogress", "review")
     assert policy.can_transition("review", "complete")
     assert not policy.can_transition("complete", "todo")
+
+
+def test_orchestration_validation_error_preserves_details():
+    error = OrchestrationValidationError("invalid", details={"code": "example"})
+
+    assert str(error) == "invalid"
+    assert error.details == {"code": "example"}
 
 
 def test_validate_orchestration_reports_invalid_known_fields():

@@ -56,6 +56,45 @@ class RunHistoryParseError(ValueError):
 
 
 @dataclass(frozen=True)
+class OrchestrationError(ValueError):
+    message: str
+    details: dict[str, object] = field(default_factory=dict)
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
+class OrchestrationPolicyError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationValidationError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationVersionConflict(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationLeaseConflict(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationTransitionError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class TaskSplitError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
 class OrchestrationWorkspace:
     path: str | None = None
     branch: str | None = None
