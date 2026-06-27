@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
 
+QueueCategory = str
+
 
 @dataclass(frozen=True)
 class OrchestrationRunEvent:
@@ -134,6 +136,27 @@ class OrchestrationMutationResult:
     event: OrchestrationRunEvent
     idempotent_replay: bool = False
     details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OrchestrationQueueItem:
+    task_id: str
+    path: str
+    title: str
+    version: int
+    effective_status: str
+    category: QueueCategory
+    validation_issues: list[ValidationIssue] = field(default_factory=list)
+    dependency_ids: list[str] = field(default_factory=list)
+    lease_owner: str | None = None
+    lease_expires_at: str | None = None
+    run_history_issues: list[ValidationIssue] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class OrchestrationQueueReport:
+    items: list[OrchestrationQueueItem]
+    by_category: dict[str, int]
 
 
 @dataclass(frozen=True)

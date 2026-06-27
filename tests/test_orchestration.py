@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 import yaml
 
 from backlog_py.core.repository import ReadOnlyRepository
@@ -9,7 +10,9 @@ from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.orchestration import (
     OrchestrationPolicy,
     OrchestrationValidationError,
+    ValidationIssue,
     WorkflowStatePolicy,
+    categorize_task,
     list_active_claims,
     list_eligible_tasks,
     list_stale_leases,
@@ -59,6 +62,22 @@ def _repo_with_tasks(tmp_path: Path, tasks: dict[str, dict[str, object]]) -> Pat
 def _utc(value: str) -> datetime:
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     return datetime.fromisoformat(normalized).astimezone(timezone.utc)
+
+
+def _queue_item(
+    frontmatter: dict[str, object],
+    *,
+    complete_task_ids: set[str] | None = None,
+    now: datetime | None = None,
+    run_history_issues: tuple[ValidationIssue, ...] = (),
+):
+    return categorize_task(
+        _task_with_frontmatter(frontmatter),
+        policy=OrchestrationPolicy.default(),
+        complete_task_ids=complete_task_ids or set(),
+        now=now or _utc("2026-05-13T00:00:00Z"),
+        run_history_issues=run_history_issues,
+    )
 
 
 def test_parse_orchestration_returns_none_when_metadata_missing():
@@ -347,3 +366,155 @@ def test_summarize_orchestration_counts_effective_statuses(tmp_path):
     assert summary.eligible_count == 1
     assert summary.active_claim_count == 0
     assert summary.stale_lease_count == 0
+
+
+@pytest.mark.parametrize(
+    ("frontmatter", "complete_task_ids", "run_history_issues", "expected_category"),
+    [
+        (
+            {"id": "TASK-1", "title": "Invalid", "status": "To Do"},
+            set(),
+            (
+                ValidationIssue(
+                    code="run_history_entry_unterminated",
+                    message="RUN_HISTORY entry has no matching end marker",
+                    path="SECTION:RUN_HISTORY",
+                ),
+            ),
+            "invalid",
+        ),
+        (
+            {
+                "id": "TASK-2",
+                "title": "Terminal",
+                "status": "To Do",
+                "orchestration": {"status_key": "complete", "version": 4},
+            },
+            set(),
+            (),
+            "terminal",
+        ),
+        (
+            {
+                "id": "TASK-3",
+                "title": "Claimed",
+                "status": "To Do",
+                "orchestration": {
+                    "status_key": "todo",
+                    "lease_owner": "agent-a",
+                    "lease_expires_at": "2026-05-13T01:00:00Z",
+                },
+            },
+            set(),
+            (),
+            "claimed",
+        ),
+        (
+            {
+                "id": "TASK-4",
+                "title": "Stale",
+                "status": "To Do",
+                "orchestration": {
+                    "status_key": "todo",
+                    "lease_owner": "agent-a",
+                    "lease_expires_at": "2026-05-12T23:00:00Z",
+                },
+            },
+            set(),
+            (),
+            "stale_claim",
+        ),
+        (
+            {
+                "id": "TASK-5",
+                "title": "Blocked",
+                "status": "To Do",
+                "dependencies": ["TASK-99"],
+            },
+            set(),
+            (),
+            "blocked_by_dependencies",
+        ),
+        (
+            {"id": "TASK-6", "title": "Eligible", "status": "To Do"},
+            set(),
+            (),
+            "eligible",
+        ),
+        (
+            {
+                "id": "TASK-7",
+                "title": "Workflow",
+                "status": "In Progress",
+                "orchestration": {"status_key": "inprogress"},
+            },
+            set(),
+            (),
+            "in_workflow",
+        ),
+    ],
+)
+def test_categorize_task_assigns_every_queue_category(
+    frontmatter,
+    complete_task_ids,
+    run_history_issues,
+    expected_category,
+):
+    item = _queue_item(
+        frontmatter,
+        complete_task_ids=complete_task_ids,
+        run_history_issues=run_history_issues,
+    )
+
+    assert item.category == expected_category
+    assert item.task_id == frontmatter["id"]
+    assert item.title == frontmatter["title"]
+
+
+def test_categorize_task_prefers_invalid_over_expired_lease():
+    item = _queue_item(
+        {
+            "id": "TASK-1",
+            "title": "Invalid stale claim",
+            "status": "To Do",
+            "orchestration": {
+                "status_key": "missing",
+                "lease_owner": "agent-a",
+                "lease_expires_at": "2026-05-12T23:00:00Z",
+            },
+        }
+    )
+
+    assert item.category == "invalid"
+    assert {issue.code for issue in item.validation_issues} >= {"unknown_status_key"}
+
+
+def test_categorize_task_prefers_terminal_over_active_lease():
+    item = _queue_item(
+        {
+            "id": "TASK-1",
+            "title": "Terminal active claim",
+            "status": "To Do",
+            "orchestration": {
+                "status_key": "complete",
+                "lease_owner": "agent-a",
+                "lease_expires_at": "2026-05-13T01:00:00Z",
+            },
+        }
+    )
+
+    assert item.category == "terminal"
+
+
+def test_categorize_task_blocks_claimable_tasks_with_incomplete_dependencies():
+    item = _queue_item(
+        {
+            "id": "TASK-1",
+            "title": "Blocked eligible task",
+            "status": "To Do",
+            "dependencies": ["TASK-2"],
+        }
+    )
+
+    assert item.category == "blocked_by_dependencies"
+    assert item.dependency_ids == ["TASK-2"]

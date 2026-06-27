@@ -13,12 +13,13 @@ from typing import Any
 import yaml
 
 from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
-from backlog_py.core.repository import MutableRepository, TaskRecord
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.orchestration.history import append_run_history_entry, find_idempotency_match, parse_run_history
 from backlog_py.orchestration.models import (
     OrchestrationActorContext,
     OrchestrationMutationResult,
+    OrchestrationQueueReport,
     OrchestrationRecordRunRequest,
     OrchestrationRunEvent,
     OrchestrationStateUpdate,
@@ -28,6 +29,7 @@ from backlog_py.orchestration.models import (
     parse_orchestration,
 )
 from backlog_py.orchestration.policy import load_orchestration_policy
+from backlog_py.orchestration.reports import queue_report
 from backlog_py.runtime.locks import with_project_write_lock
 
 
@@ -67,6 +69,15 @@ class OrchestrationService:
             return self._record_run_locked(request)
 
         return with_project_write_lock(self.project, "orchestration_record_run", mutate)
+
+    def queue(self, *, include_completed: bool = False) -> OrchestrationQueueReport:
+        repository = ReadOnlyRepository(self.project, refresh_remote_refs=False)
+        return queue_report(
+            repository,
+            policy=load_orchestration_policy(self.project),
+            now=self._now(),
+            include_completed=include_completed,
+        )
 
     def _record_run_locked(self, request: OrchestrationRecordRunRequest) -> OrchestrationMutationResult:
         repository = MutableRepository(self.project, refresh_remote_refs=False)

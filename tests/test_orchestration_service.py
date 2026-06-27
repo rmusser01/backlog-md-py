@@ -39,6 +39,22 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _write_task(directory: Path, task_id: str, title: str, *, status: str = "To Do") -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{task_id.lower()} - {title.replace(' ', '-')}.md"
+    path.write_text(
+        "---\n"
+        f"id: {task_id}\n"
+        f"title: {title}\n"
+        f"status: {status}\n"
+        "---\n\n"
+        "## Description\n\n"
+        "Body\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _service(repo: Path) -> OrchestrationService:
     return OrchestrationService(
         discover_project(repo),
@@ -236,3 +252,73 @@ def test_resolve_orchestration_actor_falls_back_to_user_and_host(monkeypatch):
     monkeypatch.setattr("backlog_py.orchestration.service.socket.gethostname", lambda: "host")
 
     assert resolve_orchestration_actor() == "dev@host"
+
+
+def test_queue_defaults_to_active_tasks_and_excludes_completed_and_archive(tmp_path):
+    repo = _repo(tmp_path)
+    _write_task(repo / "backlog" / "completed", "TASK-2", "Completed", status="Done")
+    _write_task(repo / "backlog" / "archive" / "tasks", "TASK-3", "Archived")
+
+    report = _service(repo).queue()
+
+    assert [item.task_id for item in report.items] == ["TASK-1"]
+    assert report.items[0].path == "backlog/tasks/task-1 - Example.md"
+
+
+def test_queue_include_completed_adds_completed_tasks_as_terminal(tmp_path):
+    repo = _repo(tmp_path)
+    _write_task(repo / "backlog" / "completed", "TASK-2", "Completed", status="Done")
+
+    report = _service(repo).queue(include_completed=True)
+
+    categories = {item.task_id: item.category for item in report.items}
+    assert categories == {"TASK-1": "eligible", "TASK-2": "terminal"}
+    assert report.by_category == {"eligible": 1, "terminal": 1}
+
+
+def test_queue_active_plain_done_status_maps_to_terminal(tmp_path):
+    repo = _repo(tmp_path)
+    task = MutableRepository.from_path(repo).get_task("TASK-1")
+    task.path.write_text(task.raw_source.replace("status: To Do", "status: Done"), encoding="utf-8")
+
+    report = _service(repo).queue()
+
+    assert report.items[0].category == "terminal"
+
+
+def test_queue_include_completed_returns_stable_global_order(tmp_path):
+    repo = _repo(tmp_path)
+    _write_task(repo / "backlog" / "completed", "TASK-0", "Earlier completed", status="Done")
+
+    report = _service(repo).queue(include_completed=True)
+
+    assert [item.task_id for item in report.items] == ["TASK-0", "TASK-1"]
+
+
+def test_queue_orders_dotted_task_ids_naturally(tmp_path):
+    repo = _repo(tmp_path)
+    _write_task(repo / "backlog" / "tasks", "TASK-1.10", "Later child")
+    _write_task(repo / "backlog" / "tasks", "TASK-1.2", "Earlier child")
+
+    report = _service(repo).queue()
+
+    assert [item.task_id for item in report.items] == ["TASK-1", "TASK-1.2", "TASK-1.10"]
+
+
+def test_queue_reports_malformed_run_history_as_invalid_without_mutating(tmp_path):
+    repo = _repo(tmp_path)
+    task = MutableRepository.from_path(repo).get_task("TASK-1")
+    malformed = (
+        task.raw_source
+        + "\n<!-- SECTION:RUN_HISTORY:BEGIN -->\n"
+        + "<!-- RUN_HISTORY_ENTRY:BEGIN -->\n"
+        + "<!-- SECTION:RUN_HISTORY:END -->\n"
+    )
+    task.path.write_text(malformed, encoding="utf-8")
+
+    report = _service(repo).queue()
+
+    assert report.by_category == {"invalid": 1}
+    assert report.items[0].category == "invalid"
+    assert [issue.code for issue in report.items[0].run_history_issues] == ["run_history_entry_unterminated"]
+    assert task.path.read_text(encoding="utf-8") == malformed
