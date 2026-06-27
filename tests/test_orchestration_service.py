@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -9,8 +10,10 @@ from backlog_py.core.repository import MutableRepository
 from backlog_py.orchestration import (
     OrchestrationActorContext,
     OrchestrationIdempotencyConflict,
+    OrchestrationLeaseConflict,
     OrchestrationService,
     OrchestrationStateUpdate,
+    OrchestrationTransitionError,
     OrchestrationValidationError,
     OrchestrationVersionConflict,
     RunHistoryParseError,
@@ -64,6 +67,22 @@ def _service(repo: Path) -> OrchestrationService:
 
 def _task_source(repo: Path) -> str:
     return MutableRepository.from_path(repo).get_task("TASK-1").raw_source
+
+
+def _task_path(repo: Path) -> Path:
+    return repo / "backlog" / "tasks" / "task-1 - Example.md"
+
+
+def _set_task_orchestration(repo: Path, orchestration_yaml: str) -> None:
+    path = _task_path(repo)
+    indented = "".join(f"  {line}\n" for line in dedent(orchestration_yaml).strip().splitlines())
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "status: To Do\n",
+            f"status: To Do\norchestration:\n{indented}",
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_record_run_appends_run_history_to_task(tmp_path):
@@ -271,6 +290,429 @@ def test_record_run_stale_expected_version_raises(tmp_path):
 
     assert error.value.details["expected_version"] == 2
     assert error.value.details["actual_version"] == 0
+
+
+def test_claim_task_creates_inprogress_lease_from_missing_version(tmp_path):
+    repo = _repo(tmp_path)
+
+    result = _service(repo).claim_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="claim-task-1",
+        lease_ttl_seconds=60,
+        reason="Starting implementation.",
+    )
+
+    task = MutableRepository.from_path(repo).get_task("TASK-1")
+    orchestration = parse_orchestration(task)
+    assert orchestration is not None
+    assert orchestration.version == 1
+    assert orchestration.status_key == "inprogress"
+    assert orchestration.lease_owner == "codex"
+    assert orchestration.lease_expires_at == "2026-06-26T18:05:00Z"
+    assert orchestration.idempotency_key == "claim-task-1"
+    history = parse_run_history(task.raw_source)
+    assert history.issues == []
+    assert len(history.events) == 1
+    assert history.events[0].type == "claim_task"
+    assert history.events[0].actor == "codex"
+    assert history.events[0].timestamp == "2026-06-26T18:04:00Z"
+    assert history.events[0].result == "succeeded"
+    assert history.events[0].from_status == "todo"
+    assert history.events[0].to_status == "inprogress"
+    assert history.events[0].summary == "Starting implementation."
+    assert result.version == 1
+    assert result.event == history.events[0]
+
+
+def test_claim_task_stale_expected_version_raises(tmp_path):
+    repo = _repo(tmp_path)
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationVersionConflict) as error:
+        _service(repo).claim_task("TASK-1", actor="codex", expected_version=2)
+
+    assert error.value.details["expected_version"] == 2
+    assert error.value.details["actual_version"] == 0
+    assert _task_source(repo) == before
+
+
+def test_claim_task_rejects_active_lease_owned_by_another_actor(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: todo
+        version: 3
+        lease_owner: agent-a
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        """,
+    )
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationLeaseConflict) as error:
+        _service(repo).claim_task("TASK-1", actor="codex", expected_version=3)
+
+    assert error.value.details["lease_owner"] == "agent-a"
+    assert error.value.details["lease_expires_at"] == "2026-06-26T18:10:00Z"
+    assert error.value.details["actual_version"] == 3
+    assert _task_source(repo) == before
+
+
+def test_claim_task_allows_stale_lease_reclaim(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: todo
+        version: 4
+        lease_owner: agent-a
+        lease_expires_at: '2026-06-26T18:03:00Z'
+        """,
+    )
+
+    result = _service(repo).claim_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=4,
+        idempotency_key="reclaim-task-1",
+        lease_ttl_seconds=120,
+        reason="Expired lease.",
+    )
+
+    orchestration = parse_orchestration(MutableRepository.from_path(repo).get_task("TASK-1"))
+    assert orchestration is not None
+    assert orchestration.version == 5
+    assert orchestration.status_key == "inprogress"
+    assert orchestration.lease_owner == "codex"
+    assert orchestration.lease_expires_at == "2026-06-26T18:06:00Z"
+    assert orchestration.idempotency_key == "reclaim-task-1"
+    assert result.version == 5
+
+
+def test_release_task_clears_lease_and_increments_version(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 1
+        lease_owner: codex
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        idempotency_key: claim-task-1
+        """,
+    )
+
+    result = _service(repo).release_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=1,
+        idempotency_key="release-task-1",
+        reason="Handing off.",
+    )
+
+    task = MutableRepository.from_path(repo).get_task("TASK-1")
+    orchestration = parse_orchestration(task)
+    assert orchestration is not None
+    assert orchestration.version == 2
+    assert orchestration.status_key == "inprogress"
+    assert orchestration.lease_owner is None
+    assert orchestration.lease_expires_at is None
+    assert orchestration.idempotency_key == "release-task-1"
+    history = parse_run_history(task.raw_source)
+    assert history.events[0].type == "release_task"
+    assert history.events[0].summary == "Handing off."
+    assert result.version == 2
+
+
+def test_transition_task_enforces_policy_and_increments_version(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 2
+        lease_owner: codex
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        """,
+    )
+
+    result = _service(repo).transition_task(
+        "TASK-1",
+        "review",
+        actor="codex",
+        expected_version=2,
+        idempotency_key="transition-task-1",
+        reason="Ready for review.",
+    )
+
+    task = MutableRepository.from_path(repo).get_task("TASK-1")
+    orchestration = parse_orchestration(task)
+    assert orchestration is not None
+    assert orchestration.version == 3
+    assert orchestration.status_key == "review"
+    assert orchestration.idempotency_key == "transition-task-1"
+    history = parse_run_history(task.raw_source)
+    assert history.events[0].type == "transition_task"
+    assert history.events[0].from_status == "inprogress"
+    assert history.events[0].to_status == "review"
+    assert history.events[0].summary == "Ready for review."
+    assert result.version == 3
+
+    with pytest.raises(OrchestrationTransitionError):
+        _service(repo).transition_task("TASK-1", "todo", actor="codex", expected_version=3)
+
+
+def test_mutation_idempotency_replay_precedes_expected_version_check(tmp_path):
+    repo = _repo(tmp_path)
+    service = _service(repo)
+    first = service.claim_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="claim-replay",
+        lease_ttl_seconds=60,
+        reason="Starting implementation.",
+    )
+    before = _task_source(repo)
+
+    second = service.claim_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=999,
+        idempotency_key="claim-replay",
+        lease_ttl_seconds=60,
+        reason="Starting implementation.",
+    )
+
+    assert second.idempotent_replay
+    assert second.event == first.event
+    assert second.version == first.version
+    assert _task_source(repo) == before
+
+
+def test_transition_task_idempotency_replay_precedes_policy_validation(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 2
+        lease_owner: codex
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        """,
+    )
+    service = _service(repo)
+    first = service.transition_task(
+        "TASK-1",
+        "review",
+        actor="codex",
+        expected_version=2,
+        idempotency_key="transition-replay",
+        reason="Ready for review.",
+    )
+    before = _task_source(repo)
+
+    second = service.transition_task(
+        "TASK-1",
+        "review",
+        actor="codex",
+        expected_version=999,
+        idempotency_key="transition-replay",
+        reason="Ready for review.",
+    )
+
+    assert second.idempotent_replay
+    assert second.event == first.event
+    assert _task_source(repo) == before
+
+
+def test_release_task_idempotency_replay_precedes_expected_version_check(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 1
+        lease_owner: codex
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        """,
+    )
+    service = _service(repo)
+    first = service.release_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=1,
+        idempotency_key="release-replay",
+        reason="Handing off.",
+    )
+    before = _task_source(repo)
+
+    second = service.release_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=999,
+        idempotency_key="release-replay",
+        reason="Handing off.",
+    )
+
+    assert second.idempotent_replay
+    assert second.event == first.event
+    assert _task_source(repo) == before
+
+
+def test_claim_task_idempotency_replay_does_not_depend_on_generated_lease_expiry(tmp_path):
+    repo = _repo(tmp_path)
+    times = [
+        datetime(2026, 6, 26, 18, 4, tzinfo=timezone.utc),
+        datetime(2026, 6, 26, 18, 4, tzinfo=timezone.utc),
+        datetime(2026, 6, 26, 18, 4, tzinfo=timezone.utc),
+        datetime(2026, 6, 26, 18, 5, tzinfo=timezone.utc),
+        datetime(2026, 6, 26, 18, 5, tzinfo=timezone.utc),
+        datetime(2026, 6, 26, 18, 5, tzinfo=timezone.utc),
+    ]
+
+    def now() -> datetime:
+        return times.pop(0) if times else datetime(2026, 6, 26, 18, 5, tzinfo=timezone.utc)
+
+    service = OrchestrationService(discover_project(repo), now=now)
+    first = service.claim_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="claim-replay-moving-clock",
+        lease_ttl_seconds=60,
+        reason="Starting implementation.",
+    )
+    before = _task_source(repo)
+
+    second = service.claim_task(
+        "TASK-1",
+        actor="codex",
+        expected_version=999,
+        idempotency_key="claim-replay-moving-clock",
+        lease_ttl_seconds=60,
+        reason="Starting implementation.",
+    )
+
+    assert second.idempotent_replay
+    assert second.event == first.event
+    assert _task_source(repo) == before
+
+
+def test_release_task_rejects_active_lease_owned_by_another_actor(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 1
+        lease_owner: agent-a
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        """,
+    )
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationLeaseConflict) as error:
+        _service(repo).release_task("TASK-1", actor="agent-b", expected_version=1)
+
+    assert error.value.details["lease_owner"] == "agent-a"
+    assert error.value.details["actual_version"] == 1
+    assert _task_source(repo) == before
+
+
+def test_transition_task_rejects_active_lease_owned_by_another_actor(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 1
+        lease_owner: agent-a
+        lease_expires_at: '2026-06-26T18:10:00Z'
+        """,
+    )
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationLeaseConflict) as error:
+        _service(repo).transition_task("TASK-1", "review", actor="agent-b", expected_version=1)
+
+    assert error.value.details["lease_owner"] == "agent-a"
+    assert error.value.details["actual_version"] == 1
+    assert _task_source(repo) == before
+
+
+def test_claim_task_rejects_terminal_state(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: complete
+        version: 1
+        """,
+    )
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationTransitionError) as error:
+        _service(repo).claim_task("TASK-1", actor="codex", expected_version=1)
+
+    assert error.value.details["from_status"] == "complete"
+    assert error.value.details["to_status"] == "inprogress"
+    assert _task_source(repo) == before
+
+
+def test_release_and_transition_reject_invalid_orchestration_metadata(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: inprogress
+        version: 1
+        lease_owner: codex
+        """,
+    )
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationValidationError) as release_error:
+        _service(repo).release_task("TASK-1", actor="codex", expected_version=1)
+    with pytest.raises(OrchestrationValidationError) as transition_error:
+        _service(repo).transition_task("TASK-1", "review", actor="codex", expected_version=1)
+
+    assert [issue["code"] for issue in release_error.value.details["issues"]] == ["missing_lease_expires_at"]
+    assert [issue["code"] for issue in transition_error.value.details["issues"]] == ["missing_lease_expires_at"]
+    assert _task_source(repo) == before
+
+
+def test_claim_task_rejects_zero_lease_ttl(tmp_path):
+    repo = _repo(tmp_path)
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationValidationError) as error:
+        _service(repo).claim_task("TASK-1", actor="codex", expected_version=0, lease_ttl_seconds=0)
+
+    assert error.value.details == {"field": "lease_ttl_seconds"}
+    assert _task_source(repo) == before
+
+
+def test_claim_task_rejects_invalid_orchestration_metadata(tmp_path):
+    repo = _repo(tmp_path)
+    _set_task_orchestration(
+        repo,
+        """
+        status_key: todo
+        version: 1
+        lease_owner: agent-a
+        """,
+    )
+    before = _task_source(repo)
+
+    with pytest.raises(OrchestrationValidationError) as error:
+        _service(repo).claim_task("TASK-1", actor="codex", expected_version=1)
+
+    issue_codes = [issue["code"] for issue in error.value.details["issues"]]
+    assert issue_codes == ["missing_lease_expires_at"]
+    assert _task_source(repo) == before
 
 
 def test_resolve_orchestration_actor_falls_back_to_environment(monkeypatch):

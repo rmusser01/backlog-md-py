@@ -149,6 +149,50 @@ def _orchestration_record_run_schema() -> dict[str, Any]:
     return schema
 
 
+def _orchestration_report_schema() -> dict[str, Any]:
+    return _project_schema(
+        {
+            "includeCompleted": {"type": "boolean", "description": "Include completed tasks."},
+            "include_completed": {"type": "boolean", "description": "Alias for includeCompleted."},
+        }
+    )
+
+
+def _orchestration_workflow_mutation_schema(*, transition: bool = False, claim: bool = False) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "task_id": {"type": "string", "description": "Task ID to mutate."},
+        "taskId": {"type": "string", "description": "Alias for task_id."},
+        "actor": {"type": "string", "description": "Agent or user performing the mutation."},
+        "expectedVersion": {"type": "integer", "description": "Expected orchestration state version."},
+        "expected_version": {"type": "integer", "description": "Alias for expectedVersion."},
+        "idempotencyKey": {"type": "string", "description": "Client-supplied idempotency key."},
+        "idempotency_key": {"type": "string", "description": "Alias for idempotencyKey."},
+        "reason": {"type": "string", "description": "Reason stored in run history."},
+    }
+    if transition:
+        properties.update(
+            {
+                "toStatus": {"type": "string", "description": "Target orchestration status."},
+                "to_status": {"type": "string", "description": "Alias for toStatus."},
+            }
+        )
+    if claim:
+        properties.update(
+            {
+                "leaseTtlSeconds": {"type": "integer", "description": "Lease TTL in seconds."},
+                "lease_ttl_seconds": {"type": "integer", "description": "Alias for leaseTtlSeconds."},
+            }
+        )
+    schema = _project_schema(properties, required=("project", "actor"))
+    schema["anyOf"] = [{"required": ["task_id"]}, {"required": ["taskId"]}]
+    schema["allOf"] = [
+        {"anyOf": [{"required": ["expectedVersion"]}, {"required": ["expected_version"]}]},
+    ]
+    if transition:
+        schema["allOf"].append({"anyOf": [{"required": ["toStatus"]}, {"required": ["to_status"]}]})
+    return schema
+
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "project_status",
@@ -363,6 +407,54 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "Append a task run-history event and optionally update orchestration state.",
         _orchestration_record_run_schema(),
         tool_registry.orchestration_record_run,
+    ),
+    ToolDefinition(
+        "orchestration_status",
+        "Return orchestration queue status counts and items.",
+        _orchestration_report_schema(),
+        tool_registry.orchestration_status,
+    ),
+    ToolDefinition(
+        "orchestration_queue",
+        "Return orchestration queue items.",
+        _orchestration_report_schema(),
+        tool_registry.orchestration_queue,
+    ),
+    ToolDefinition(
+        "orchestration_eligible",
+        "Return claimable orchestration queue items.",
+        _project_schema(),
+        tool_registry.orchestration_eligible,
+    ),
+    ToolDefinition(
+        "orchestration_claims",
+        "Return active orchestration claims.",
+        _project_schema(),
+        tool_registry.orchestration_claims,
+    ),
+    ToolDefinition(
+        "orchestration_stale_leases",
+        "Return stale orchestration leases.",
+        _project_schema(),
+        tool_registry.orchestration_stale_leases,
+    ),
+    ToolDefinition(
+        "orchestration_claim_task",
+        "Claim a task for orchestration work.",
+        _orchestration_workflow_mutation_schema(claim=True),
+        tool_registry.orchestration_claim_task,
+    ),
+    ToolDefinition(
+        "orchestration_release_task",
+        "Release a task orchestration claim.",
+        _orchestration_workflow_mutation_schema(),
+        tool_registry.orchestration_release_task,
+    ),
+    ToolDefinition(
+        "orchestration_transition_task",
+        "Transition task orchestration status.",
+        _orchestration_workflow_mutation_schema(transition=True),
+        tool_registry.orchestration_transition_task,
     ),
     ToolDefinition(
         "document_list",

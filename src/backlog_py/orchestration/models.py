@@ -129,6 +129,35 @@ class OrchestrationRecordRunRequest:
 
 
 @dataclass(frozen=True)
+class OrchestrationClaimTaskRequest:
+    task_id: str
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    lease_ttl_seconds: int | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationReleaseTaskRequest:
+    task_id: str
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationTransitionTaskRequest:
+    task_id: str
+    to_status: str
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class OrchestrationMutationResult:
     task_id: str
     path: str

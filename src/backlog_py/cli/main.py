@@ -979,6 +979,207 @@ def orchestration_record_run_command(
     click.echo(f"{payload['taskId']} recorded run {payload['eventId']}")
 
 
+@orchestration_group.command("status")
+@click.option("--include-completed", is_flag=True, help="Include completed tasks in the orchestration report.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def orchestration_status_command(ctx: click.Context, include_completed: bool, as_json: bool, plain: bool) -> None:
+    """Print orchestration queue status."""
+    report = OrchestrationService(_project(ctx)).queue(include_completed=include_completed)
+    payload = _orchestration_queue_report_payload(report)
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    _echo_orchestration_counts(payload)
+
+
+@orchestration_group.command("queue")
+@click.option("--include-completed", is_flag=True, help="Include completed tasks in the queue report.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def orchestration_queue_command(ctx: click.Context, include_completed: bool, as_json: bool, plain: bool) -> None:
+    """Print orchestration queue items."""
+    report = OrchestrationService(_project(ctx)).queue(include_completed=include_completed)
+    payload = _orchestration_queue_report_payload(report)
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    _echo_orchestration_items(payload["items"])
+
+
+@orchestration_group.command("eligible")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def orchestration_eligible_command(ctx: click.Context, as_json: bool, plain: bool) -> None:
+    """Print claimable orchestration tasks."""
+    items = _orchestration_items_by_category(_project(ctx), "eligible")
+    payload = {"items": items}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    _echo_orchestration_items(items)
+
+
+@orchestration_group.command("claims")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def orchestration_claims_command(ctx: click.Context, as_json: bool, plain: bool) -> None:
+    """Print active orchestration claims."""
+    items = _orchestration_items_by_category(_project(ctx), "claimed")
+    payload = {"items": items}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    _echo_orchestration_items(items)
+
+
+@orchestration_group.command("stale-leases")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print plain text output.")
+@click.pass_context
+def orchestration_stale_leases_command(ctx: click.Context, as_json: bool, plain: bool) -> None:
+    """Print stale orchestration leases."""
+    items = _orchestration_items_by_category(_project(ctx), "stale_claim")
+    payload = {"items": items}
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    _echo_orchestration_items(items)
+
+
+@orchestration_group.command("claim")
+@click.argument("task_id")
+@click.option("--actor", required=True, help="Agent or user claiming the task.")
+@click.option("--expected-version", type=int, required=True, help="Expected orchestration state version.")
+@click.option("--idempotency-key", default=None, help="Client-supplied idempotency key.")
+@click.option("--lease-ttl-seconds", type=int, default=None, help="Lease TTL in seconds.")
+@click.option("--reason", default=None, help="Claim reason to store in run history.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print concise plain text output.")
+@click.pass_context
+def orchestration_claim_command(
+    ctx: click.Context,
+    task_id: str,
+    actor: str,
+    expected_version: int,
+    idempotency_key: str | None,
+    lease_ttl_seconds: int | None,
+    reason: str | None,
+    as_json: bool,
+    plain: bool,
+) -> None:
+    """Claim a task for orchestration work."""
+    project = _project(ctx)
+    try:
+        result = OrchestrationService(project).claim_task(
+            task_id,
+            actor=actor,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            lease_ttl_seconds=lease_ttl_seconds,
+            reason=reason,
+        )
+        payload = _orchestration_record_run_payload(project, task_id, result)
+    except OrchestrationIdempotencyConflict as exc:
+        raise click.ClickException(
+            f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original mutation metadata."
+        ) from exc
+    except OrchestrationError as exc:
+        raise click.ClickException(_format_orchestration_error(task_id, exc)) from exc
+    except RunHistoryParseError as exc:
+        raise click.ClickException(_format_run_history_error(task_id, exc)) from exc
+    _echo_orchestration_mutation(payload, as_json=as_json, plain=plain, verb="claimed")
+
+
+@orchestration_group.command("release")
+@click.argument("task_id")
+@click.option("--actor", required=True, help="Agent or user releasing the task.")
+@click.option("--expected-version", type=int, required=True, help="Expected orchestration state version.")
+@click.option("--idempotency-key", default=None, help="Client-supplied idempotency key.")
+@click.option("--reason", default=None, help="Release reason to store in run history.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print concise plain text output.")
+@click.pass_context
+def orchestration_release_command(
+    ctx: click.Context,
+    task_id: str,
+    actor: str,
+    expected_version: int,
+    idempotency_key: str | None,
+    reason: str | None,
+    as_json: bool,
+    plain: bool,
+) -> None:
+    """Release a task orchestration claim."""
+    project = _project(ctx)
+    try:
+        result = OrchestrationService(project).release_task(
+            task_id,
+            actor=actor,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            reason=reason,
+        )
+        payload = _orchestration_record_run_payload(project, task_id, result)
+    except OrchestrationIdempotencyConflict as exc:
+        raise click.ClickException(
+            f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original mutation metadata."
+        ) from exc
+    except OrchestrationError as exc:
+        raise click.ClickException(_format_orchestration_error(task_id, exc)) from exc
+    except RunHistoryParseError as exc:
+        raise click.ClickException(_format_run_history_error(task_id, exc)) from exc
+    _echo_orchestration_mutation(payload, as_json=as_json, plain=plain, verb="released")
+
+
+@orchestration_group.command("transition")
+@click.argument("task_id")
+@click.argument("to_status")
+@click.option("--actor", required=True, help="Agent or user transitioning the task.")
+@click.option("--expected-version", type=int, required=True, help="Expected orchestration state version.")
+@click.option("--idempotency-key", default=None, help="Client-supplied idempotency key.")
+@click.option("--reason", default=None, help="Transition reason to store in run history.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print concise plain text output.")
+@click.pass_context
+def orchestration_transition_command(
+    ctx: click.Context,
+    task_id: str,
+    to_status: str,
+    actor: str,
+    expected_version: int,
+    idempotency_key: str | None,
+    reason: str | None,
+    as_json: bool,
+    plain: bool,
+) -> None:
+    """Transition orchestration state."""
+    project = _project(ctx)
+    try:
+        result = OrchestrationService(project).transition_task(
+            task_id,
+            to_status,
+            actor=actor,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            reason=reason,
+        )
+        payload = _orchestration_record_run_payload(project, task_id, result)
+    except OrchestrationIdempotencyConflict as exc:
+        raise click.ClickException(
+            f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original mutation metadata."
+        ) from exc
+    except OrchestrationError as exc:
+        raise click.ClickException(_format_orchestration_error(task_id, exc)) from exc
+    except RunHistoryParseError as exc:
+        raise click.ClickException(_format_run_history_error(task_id, exc)) from exc
+    _echo_orchestration_mutation(payload, as_json=as_json, plain=plain, verb="transitioned")
+
+
 @main.group("daemon")
 def daemon_group() -> None:
     """Manage the local singleton daemon."""
@@ -2016,6 +2217,35 @@ def _orchestration_record_run_payload(
     }
 
 
+def _orchestration_queue_report_payload(report: object) -> dict[str, object]:
+    items = getattr(report, "items")
+    by_category = getattr(report, "by_category")
+    return {
+        "byCategory": dict(by_category),
+        "items": [_orchestration_queue_item_payload(item) for item in items],
+    }
+
+
+def _orchestration_queue_item_payload(item: OrchestrationQueueItem) -> dict[str, object]:
+    return {
+        "taskId": item.task_id,
+        "path": item.path,
+        "title": item.title,
+        "version": item.version,
+        "effectiveStatus": item.effective_status,
+        "queueCategory": item.category,
+        "validationIssues": _orchestration_validation_issues_payload(item.validation_issues),
+        "dependencyIds": list(item.dependency_ids),
+        "leaseOwner": item.lease_owner,
+        "leaseExpiresAt": item.lease_expires_at,
+    }
+
+
+def _orchestration_items_by_category(project: BacklogProject, category: str) -> list[dict[str, object]]:
+    report = OrchestrationService(project).queue(include_completed=True)
+    return [_orchestration_queue_item_payload(item) for item in report.items if item.category == category]
+
+
 def _orchestration_queue_item(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
     report = OrchestrationService(project).queue(include_completed=True)
     normalized = task_id.casefold()
@@ -2050,6 +2280,45 @@ def _format_orchestration_error(task_id: str, error: OrchestrationError) -> str:
         details = ", ".join(f"{key}={value}" for key, value in sorted(error.details.items()))
         message = f"{message} ({details})"
     return message
+
+
+def _format_run_history_error(task_id: str, error: RunHistoryParseError) -> str:
+    location = error.location or "run_history"
+    return (
+        f"{task_id}: malformed run history at {location} ({error.code}). "
+        f"Fix the run history section before recording a new run: {error.message}"
+    )
+
+
+def _echo_orchestration_mutation(
+    payload: dict[str, object],
+    *,
+    as_json: bool,
+    plain: bool,
+    verb: str,
+) -> None:
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    click.echo(f"{payload['taskId']} {verb} via {payload['eventId']}")
+
+
+def _echo_orchestration_counts(payload: dict[str, object]) -> None:
+    by_category = payload["byCategory"]
+    if isinstance(by_category, dict):
+        for category, count in sorted(by_category.items()):
+            click.echo(f"{category}: {count}")
+
+
+def _echo_orchestration_items(items: object) -> None:
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if isinstance(item, dict):
+            click.echo(
+                f"{item['taskId']} [{item['queueCategory']}] v{item['version']} "
+                f"{item['title']} ({item['path']})"
+            )
 
 
 def _echo_daemon_status(record: RuntimeRecord, *, as_json: bool) -> None:

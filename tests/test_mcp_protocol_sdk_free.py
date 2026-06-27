@@ -46,6 +46,31 @@ def _task_path(repo: Path) -> Path:
     return repo / "backlog" / "tasks" / "task-1 - Example.md"
 
 
+def _call_tool(name: str, arguments: dict[str, object]):
+    return handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": "call",
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+    )
+
+
+def _tool_payload(response: dict[str, object]) -> dict[str, object]:
+    return json.loads(response["result"]["content"][0]["text"])
+
+
+def _assert_orchestration_contract(payload: dict[str, object], *, version: int, category: str) -> None:
+    assert payload["taskId"] == "TASK-1"
+    assert payload["path"] == "backlog/tasks/task-1 - Example.md"
+    assert payload["version"] == version
+    assert payload["eventId"].startswith("run-")
+    assert payload["runHistoryEventIds"][-1] == payload["eventId"]
+    assert payload["queueCategory"] == category
+    assert payload["validationIssues"] == []
+
+
 def _handler_accepted_arguments():
     source = Path("src/backlog_py/mcp/tools.py").read_text()
     module = ast.parse(source)
@@ -268,6 +293,36 @@ def test_tools_list_advertises_orchestration_record_run_fields():
     assert "expected_version" in conditional_contract
 
 
+def test_tools_list_advertises_orchestration_workflow_tools():
+    tools = {tool["name"]: tool for tool in list_tools()}
+
+    expected_names = {
+        "orchestration_status",
+        "orchestration_queue",
+        "orchestration_eligible",
+        "orchestration_claims",
+        "orchestration_stale_leases",
+        "orchestration_claim_task",
+        "orchestration_release_task",
+        "orchestration_transition_task",
+    }
+    assert expected_names.issubset(tools)
+    for name in expected_names:
+        assert "project" in tools[name]["inputSchema"]["properties"]
+    claim_properties = tools["orchestration_claim_task"]["inputSchema"]["properties"]
+    release_properties = tools["orchestration_release_task"]["inputSchema"]["properties"]
+    transition_properties = tools["orchestration_transition_task"]["inputSchema"]["properties"]
+    assert {"task_id", "taskId", "actor", "expectedVersion", "expected_version", "idempotencyKey"}.issubset(
+        claim_properties
+    )
+    assert {"task_id", "taskId", "actor", "expectedVersion", "expected_version", "reason"}.issubset(
+        release_properties
+    )
+    assert {"task_id", "taskId", "toStatus", "to_status", "actor", "expectedVersion", "expected_version"}.issubset(
+        transition_properties
+    )
+
+
 def test_tools_list_advertises_all_handler_accepted_argument_names():
     properties_by_tool = {tool["name"]: set(tool["inputSchema"]["properties"]) for tool in list_tools()}
 
@@ -389,6 +444,139 @@ def test_tools_call_orchestration_record_run_appends_history(tmp_path):
 
     parsed = parse_run_history(_task_path(repo).read_text(encoding="utf-8"))
     assert [event.event_id for event in parsed.events] == [payload["eventId"]]
+
+
+def test_tools_call_orchestration_claim_release_transition_happy_path(tmp_path):
+    repo = _repo(tmp_path)
+
+    claim = _tool_payload(
+        _call_tool(
+            "orchestration_claim_task",
+            {
+                "project": str(repo),
+                "taskId": "TASK-1",
+                "actor": "codex",
+                "expectedVersion": 0,
+                "idempotencyKey": "claim-task-1",
+            },
+        )
+    )
+    assert claim["taskId"] == "TASK-1"
+    _assert_orchestration_contract(claim, version=1, category="claimed")
+
+    release = _tool_payload(
+        _call_tool(
+            "orchestration_release_task",
+            {
+                "project": str(repo),
+                "task_id": "TASK-1",
+                "actor": "codex",
+                "expected_version": 1,
+                "reason": "handoff",
+            },
+        )
+    )
+    _assert_orchestration_contract(release, version=2, category="in_workflow")
+    assert len(release["runHistoryEventIds"]) == 2
+
+    transition = _tool_payload(
+        _call_tool(
+            "orchestration_transition_task",
+            {
+                "project": str(repo),
+                "task_id": "TASK-1",
+                "toStatus": "review",
+                "actor": "codex",
+                "expectedVersion": 2,
+            },
+        )
+    )
+    _assert_orchestration_contract(transition, version=3, category="in_workflow")
+    assert len(transition["runHistoryEventIds"]) == 3
+
+
+def test_tools_call_orchestration_claim_conflict_reports_current_state(tmp_path):
+    repo = _repo(tmp_path)
+    first = _call_tool(
+        "orchestration_claim_task",
+        {
+            "project": str(repo),
+            "task_id": "TASK-1",
+            "actor": "agent-a",
+            "expectedVersion": 0,
+        },
+    )
+    assert "result" in first, first
+
+    response = _call_tool(
+        "orchestration_claim_task",
+        {
+            "project": str(repo),
+            "task_id": "TASK-1",
+            "actor": "agent-b",
+            "expectedVersion": 1,
+        },
+    )
+
+    payload = _tool_payload(response)
+    assert payload["taskId"] == "TASK-1"
+    assert payload["version"] == 1
+    assert payload["path"] == "backlog/tasks/task-1 - Example.md"
+    assert payload["eventId"] is None
+    assert payload["queueCategory"] == "claimed"
+    assert payload["validationIssues"] == []
+    assert payload["conflict"]["type"] == "OrchestrationLeaseConflict"
+    assert payload["conflict"]["details"]["actual_version"] == 1
+    assert payload["conflict"]["details"]["lease_owner"] == "agent-a"
+
+
+def test_tools_call_orchestration_release_and_transition_conflicts_report_current_state(tmp_path):
+    repo = _repo(tmp_path)
+    first = _call_tool(
+        "orchestration_claim_task",
+        {
+            "project": str(repo),
+            "task_id": "TASK-1",
+            "actor": "agent-a",
+            "expectedVersion": 0,
+        },
+    )
+    assert "result" in first, first
+
+    release = _tool_payload(
+        _call_tool(
+            "orchestration_release_task",
+            {
+                "project": str(repo),
+                "task_id": "TASK-1",
+                "actor": "agent-b",
+                "expectedVersion": 1,
+            },
+        )
+    )
+    transition = _tool_payload(
+        _call_tool(
+            "orchestration_transition_task",
+            {
+                "project": str(repo),
+                "task_id": "TASK-1",
+                "toStatus": "review",
+                "actor": "agent-b",
+                "expectedVersion": 1,
+            },
+        )
+    )
+
+    for payload in (release, transition):
+        assert payload["taskId"] == "TASK-1"
+        assert payload["path"] == "backlog/tasks/task-1 - Example.md"
+        assert payload["version"] == 1
+        assert payload["eventId"] is None
+        assert payload["queueCategory"] == "claimed"
+        assert payload["validationIssues"] == []
+        assert payload["conflict"]["type"] == "OrchestrationLeaseConflict"
+        assert payload["conflict"]["details"]["actual_version"] == 1
+        assert payload["conflict"]["details"]["lease_owner"] == "agent-a"
 
 
 def test_tools_call_orchestration_record_run_reports_version_conflict(tmp_path):
