@@ -92,6 +92,8 @@ class TaskInspector(Static, can_focus=True):
 def _task_card_text(task: TaskView, dependency_state: DependencyState | None = None) -> str:
     priority = f" [{task.priority}]" if task.priority else ""
     lines = [f"{task.id}{priority}", task.title]
+    if task.queue_category:
+        lines.append(f"Queue: {task.queue_category}")
     if dependency_state is not None and dependency_state.total:
         lines.append(f"Deps: {_dependency_summary_text(dependency_state)}")
     return "\n".join(lines)
@@ -103,6 +105,12 @@ def _inspector_text(task: TaskView, dependency_state: DependencyState | None = N
         f"Status: {task.status}",
         f"Path: {task.path.as_posix()}",
     ]
+    if task.queue_category:
+        lines.append(f"Queue: {task.queue_category}")
+    if task.effective_status:
+        lines.append(f"Effective Status: {task.effective_status}")
+    if task.orchestration_version is not None:
+        lines.append(f"Orchestration Version: {task.orchestration_version}")
     if task.priority:
         lines.append(f"Priority: {task.priority}")
     if task.assignees:
@@ -127,6 +135,15 @@ def _inspector_text(task: TaskView, dependency_state: DependencyState | None = N
     if task.definition_of_done:
         lines.extend(["", "Definition of Done:"])
         lines.extend(_checklist_lines(task.definition_of_done))
+    if task.run_history_issues:
+        lines.extend(["", "Run History Issues:"])
+        lines.extend(f"- {issue}" for issue in task.run_history_issues)
+    if task.run_history_events:
+        lines.extend(["", "Run History:"])
+        lines.extend(
+            f"- {event.timestamp} {event.type} {event.result} by {event.actor}".rstrip()
+            for event in task.run_history_events[-5:]
+        )
     return "\n".join(lines)
 
 
@@ -160,6 +177,8 @@ def _filter_summary(filters: FilterState) -> str:
         parts.append(f"assignee={filters.assignee}")
     if filters.label:
         parts.append(f"label={filters.label}")
+    if filters.queue_category:
+        parts.append(f"queue={filters.queue_category}")
     return ", ".join(parts)
 
 

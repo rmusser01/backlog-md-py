@@ -23,6 +23,7 @@
       <button class="primary-button" type="button" id="task-create-open">New task</button>
     </div>
   </header>
+  {queue_filter}
   <main class="board" data-board-revision="{board_revision}">
 {column_markup}
   </main>
@@ -290,6 +291,9 @@
     <div class="dialog-body">
       <dl class="dialog-meta">
         <div><dt>Status</dt><dd id="task-dialog-status"></dd></div>
+        <div><dt>Queue</dt><dd id="task-dialog-queue-category"></dd></div>
+        <div><dt>Effective status</dt><dd id="task-dialog-effective-status"></dd></div>
+        <div><dt>Orchestration version</dt><dd id="task-dialog-orchestration-version"></dd></div>
         <div><dt>File</dt><dd id="task-dialog-path"></dd></div>
         <div><dt>Created</dt><dd id="task-dialog-created"></dd></div>
         <div><dt>Updated</dt><dd id="task-dialog-updated"></dd></div>
@@ -317,6 +321,10 @@
       <section class="dialog-section">
         <h3>Definition of Done</h3>
         <ul id="task-dialog-dod" data-checklist-section="definitionOfDone"></ul>
+      </section>
+      <section class="dialog-section">
+        <h3>Run History</h3>
+        <ul class="readonly-list run-history-list" id="task-dialog-run-history"></ul>
       </section>
     </div>
   </dialog>

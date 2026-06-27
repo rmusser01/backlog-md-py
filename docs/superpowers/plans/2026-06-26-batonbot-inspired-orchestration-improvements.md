@@ -1061,6 +1061,27 @@ git add src/backlog_py/core/agents.py tests/test_agent_instructions.py docs/inte
 git commit -m "docs: document orchestration coordination workflow"
 ```
 
+## Follow-Up Backlog
+
+### TUI Filter Controls For Orchestration Queues
+
+Add first-class TUI controls for filtering by queue category and other common
+task metadata instead of relying only on the text filter and programmatic
+`FilterState`.
+
+Acceptance criteria:
+
+- The TUI exposes keyboard-accessible controls for queue category, status,
+  priority, assignee, and label filters.
+- Filter state is visible in the board header and can be cleared without
+  restarting the app.
+- Queue category options are derived from the current board snapshot so the UI
+  does not show dead choices.
+- Existing text filtering continues to work and composes with the new filter
+  controls.
+- Tests cover filter selection, clearing, and selection preservation when the
+  filtered task set changes.
+
 ## Execution Notes
 
 - If the implementation becomes too large, stop after a complete phase with passing tests and ask whether to split the remaining phases into a follow-up branch.
