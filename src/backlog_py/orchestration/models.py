@@ -6,6 +6,56 @@ from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
+class OrchestrationRunEvent:
+    event_id: str
+    type: str
+    actor: str
+    timestamp: str
+    result: str
+    summary: str = ""
+    idempotency_key: str = ""
+    task_id: str = ""
+    from_status: str = ""
+    to_status: str = ""
+    split_mode: str = ""
+    files: list[str] = field(default_factory=list)
+    verification: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RunHistoryParseIssue:
+    code: str
+    message: str
+    location: str = ""
+
+
+@dataclass(frozen=True)
+class RunHistoryParseResult:
+    events: list[OrchestrationRunEvent]
+    issues: list[RunHistoryParseIssue]
+
+
+@dataclass(frozen=True)
+class OrchestrationIdempotencyConflict(ValueError):
+    idempotency_key: str
+    message: str
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
+class RunHistoryParseError(ValueError):
+    code: str
+    message: str
+    location: str = ""
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
 class OrchestrationWorkspace:
     path: str | None = None
     branch: str | None = None
