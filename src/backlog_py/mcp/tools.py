@@ -7,6 +7,18 @@ from backlog_py.core.models import BacklogProject
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.orchestration import (
+    OrchestrationIdempotencyConflict,
+    OrchestrationMutationResult,
+    OrchestrationQueueItem,
+    OrchestrationService,
+    OrchestrationStateUpdate,
+    OrchestrationValidationError,
+    RunHistoryParseError,
+    ValidationIssue,
+    parse_run_history,
+)
+from backlog_py.orchestration.models import OrchestrationError
 from backlog_py.runtime.locks import list_runtime_locks, with_project_write_lock
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
 
@@ -242,6 +254,65 @@ def task_complete(project: BacklogProject, task_id: str) -> dict[str, Any]:
     )
 
 
+def orchestration_record_run(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    actor: str | None = None,
+    result: str | None = None,
+    summary: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Append a run-history event through the orchestration service."""
+    task_identifier = task_id if task_id is not None else taskId
+    task_identifier_value = _required_mcp_string(task_identifier, "task_id")
+    result_value = _required_mcp_string(result, "result")
+    actor_value = _optional_mcp_string(actor, "actor")
+    summary_value = _optional_mcp_string(summary, "summary") or ""
+
+    idempotency_key = _optional_string(_get_alias(kwargs, "idempotencyKey", "idempotency_key"))
+    expected_version = _optional_int_value(_get_alias(kwargs, "expectedVersion", "expected_version"), "expectedVersion")
+    state_update = _orchestration_state_update_from_mapping(_get_alias(kwargs, "stateUpdate", "state_update"))
+    try:
+        mutation = OrchestrationService(project).record_run(
+            task_identifier_value,
+            actor=actor_value,
+            result=result_value,
+            summary=summary_value,
+            files=_string_list(kwargs.get("files")),
+            verification=_string_list(kwargs.get("verification")),
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            state_update=state_update,
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier_value,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationValidationError as exc:
+        raise TypeError(str(exc)) from exc
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier_value,
+            validation_issue=ValidationIssue(
+                code=exc.code,
+                message=exc.message,
+                path=exc.location or "run_history",
+            ),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier_value,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+
+    return _orchestration_record_run_response(project, task_identifier_value, result=mutation)
+
+
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """List or search documents through the safe document service."""
     if limit <= 0:
@@ -350,6 +421,111 @@ def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]
         return {"items": list(config.definition_of_done or [])}
 
     return _locked(project, "mcp_definition_of_done_defaults_upsert", mutate)
+
+
+def _orchestration_record_run_response(
+    project: BacklogProject,
+    task_id: str,
+    *,
+    result: OrchestrationMutationResult | None = None,
+    conflict: dict[str, Any] | None = None,
+    validation_issue: ValidationIssue | None = None,
+) -> dict[str, Any]:
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    task = repository.get_task(task_id)
+    history = parse_run_history(task.raw_source)
+    queue_item = _orchestration_queue_item(project, task.id)
+    issues = list(queue_item.validation_issues if queue_item is not None else [])
+    if validation_issue is not None:
+        _append_unique_validation_issue(issues, validation_issue)
+    elif queue_item is None:
+        issues.extend(
+            ValidationIssue(
+                code=issue.code,
+                message=issue.message,
+                path=issue.location or "run_history",
+            )
+            for issue in history.issues
+        )
+
+    payload: dict[str, Any] = {
+        "taskId": task.id,
+        "path": queue_item.path if queue_item is not None else _relative_task_path(project, task),
+        "version": queue_item.version if queue_item is not None else (result.version if result is not None else 0),
+        "eventId": result.event.event_id if result is not None else None,
+        "runHistoryEventIds": [event.event_id for event in history.events],
+        "queueCategory": queue_item.category if queue_item is not None else None,
+        "validationIssues": _validation_issue_payloads(issues),
+    }
+    if conflict is not None:
+        payload["conflict"] = conflict
+    return payload
+
+
+def _orchestration_queue_item(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
+    report = OrchestrationService(project).queue(include_completed=True)
+    normalized = task_id.casefold()
+    for item in report.items:
+        if item.task_id.casefold() == normalized:
+            return item
+    return None
+
+
+def _orchestration_state_update_from_mapping(value: Any) -> OrchestrationStateUpdate | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("stateUpdate must be an object")
+    fields = {
+        "status_key": _optional_string(_get_alias(value, "statusKey", "status_key")),
+        "lease_owner": _optional_string(_get_alias(value, "leaseOwner", "lease_owner")),
+        "lease_expires_at": _optional_string(_get_alias(value, "leaseExpiresAt", "lease_expires_at")),
+        "correlation_id": _optional_string(_get_alias(value, "correlationId", "correlation_id")),
+        "review_state": _optional_string(_get_alias(value, "reviewState", "review_state")),
+        "reviewer": _optional_string(_get_alias(value, "reviewer")),
+        "review_attempts": _optional_int_value(_get_alias(value, "reviewAttempts", "review_attempts"), "reviewAttempts"),
+        "review_max_attempts": _optional_int_value(
+            _get_alias(value, "reviewMaxAttempts", "review_max_attempts"),
+            "reviewMaxAttempts",
+        ),
+    }
+    if all(field is None for field in fields.values()):
+        return None
+    return OrchestrationStateUpdate(**fields)
+
+
+def _orchestration_error_conflict_payload(error: OrchestrationError) -> dict[str, Any]:
+    return {
+        "type": error.__class__.__name__,
+        "message": str(error),
+        "details": dict(error.details),
+    }
+
+
+def _orchestration_idempotency_conflict_payload(error: OrchestrationIdempotencyConflict) -> dict[str, Any]:
+    return {
+        "type": error.__class__.__name__,
+        "message": str(error),
+        "details": {"idempotencyKey": error.idempotency_key},
+    }
+
+
+def _validation_issue_payloads(issues: list[ValidationIssue]) -> list[dict[str, str]]:
+    return [
+        {
+            "code": issue.code,
+            "message": issue.message,
+            "path": issue.path,
+            "severity": issue.severity,
+        }
+        for issue in issues
+    ]
+
+
+def _append_unique_validation_issue(issues: list[ValidationIssue], issue: ValidationIssue) -> None:
+    key = (issue.code, issue.message, issue.path, issue.severity)
+    if all((existing.code, existing.message, existing.path, existing.severity) != key for existing in issues):
+        issues.append(issue)
 
 
 def _locked(project: BacklogProject, operation: str, fn: Callable[[], T]) -> T:
@@ -474,6 +650,21 @@ def _optional_string(value: Any) -> str | None:
     return str(value)
 
 
+def _required_mcp_string(value: Any, field: str) -> str:
+    text = _optional_mcp_string(value, field)
+    if text is None or not text.strip():
+        raise TypeError(f"{field} must be a non-empty string")
+    return text
+
+
+def _optional_mcp_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string")
+    return value
+
+
 def _optional_bool(value: Any) -> bool | None:
     return _coerce_bool(value)
 
@@ -524,6 +715,17 @@ def _int_list(value: Any) -> list[int]:
     if isinstance(value, int):
         return [value]
     return [int(item) for item in value]
+
+
+def _optional_int_value(value: Any, field: str = "value") -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise TypeError(f"{field} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{field} must be an integer") from exc
 
 
 def _dict_value(value: Any) -> dict[str, Any] | None:

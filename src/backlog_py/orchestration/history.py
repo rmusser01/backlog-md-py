@@ -99,7 +99,6 @@ def canonical_event_fingerprint(event: OrchestrationRunEvent) -> str:
         "actor": _as_string(event.actor),
         "result": _as_string(event.result),
         "task_id": _as_string(event.task_id),
-        "from_status": _as_string(event.from_status),
         "to_status": _as_string(event.to_status),
         "split_mode": _as_string(event.split_mode),
         "summary": _cap_text(_normalize_summary(event.summary), MAX_RUN_HISTORY_SUMMARY_CHARS),

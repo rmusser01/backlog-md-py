@@ -132,6 +132,37 @@ def test_mcp_read_tools_do_not_acquire_project_lock(repo, monkeypatch):
     assert seen == []
 
 
+def test_mcp_orchestration_record_run_uses_service_lock_not_tool_wrapper(repo, monkeypatch):
+    seen = []
+
+    def fake_with_project_lock(project, op, fn):
+        seen.append(op)
+        return fn()
+
+    monkeypatch.setattr("backlog_py.mcp.tools.with_project_write_lock", fake_with_project_lock)
+
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_record_run",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "actor": "codex",
+                    "result": "succeeded",
+                    "summary": "recorded",
+                },
+            },
+        }
+    )
+
+    assert "result" in response, response
+    assert seen == []
+
+
 @pytest.mark.parametrize("field_name", ["acceptanceCriteria", "acceptance_criteria"])
 def test_mcp_task_edit_acceptance_criteria_alias_adds_items(repo, field_name):
     response = handle_jsonrpc_message(

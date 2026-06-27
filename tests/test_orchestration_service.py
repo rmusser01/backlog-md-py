@@ -146,6 +146,47 @@ def test_record_run_idempotency_replay_returns_prior_event_without_rewrite(tmp_p
     assert _task_source(repo) == before
 
 
+def test_record_run_idempotency_replay_survives_state_update_retry(tmp_path):
+    repo = _repo(tmp_path)
+    task_path = repo / "backlog" / "tasks" / "task-1 - Example.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            "status: To Do\n",
+            "status: To Do\n"
+            "orchestration:\n"
+            "  status_key: todo\n"
+            "  version: 0\n",
+        ),
+        encoding="utf-8",
+    )
+    service = _service(repo)
+
+    first = service.record_run(
+        "TASK-1",
+        actor="codex",
+        result="succeeded",
+        summary="Claimed task.",
+        idempotency_key="claim-task-1",
+        expected_version=0,
+        state_update=OrchestrationStateUpdate(status_key="inprogress"),
+    )
+    before = _task_source(repo)
+
+    second = service.record_run(
+        "TASK-1",
+        actor="codex",
+        result="succeeded",
+        summary="Claimed task.",
+        idempotency_key="claim-task-1",
+        expected_version=0,
+        state_update=OrchestrationStateUpdate(status_key="inprogress"),
+    )
+
+    assert second.idempotent_replay
+    assert second.event == first.event
+    assert _task_source(repo) == before
+
+
 def test_record_run_idempotency_conflict_raises(tmp_path):
     repo = _repo(tmp_path)
     service = _service(repo)

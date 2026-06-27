@@ -41,6 +41,17 @@ from backlog_py.daemon.lifecycle import (
     daemon_stop,
 )
 from backlog_py.integration.legacy_shim import install_legacy_mcp_shim
+from backlog_py.orchestration import (
+    OrchestrationIdempotencyConflict,
+    OrchestrationMutationResult,
+    OrchestrationQueueItem,
+    OrchestrationService,
+    OrchestrationStateUpdate,
+    RunHistoryParseError,
+    ValidationIssue,
+    parse_run_history,
+)
+from backlog_py.orchestration.models import OrchestrationError
 from backlog_py.storage.config import (
     get_config_value,
     get_definition_of_done_defaults,
@@ -870,6 +881,102 @@ def install_legacy_mcp_shim_command(target: Path, mcp_command: Path | None, back
     click.echo(f"Installed legacy MCP shim at {result.target}")
     click.echo(f"Original command backup: {result.backup}")
     click.echo(f"backlog mcp start now routes to: {result.mcp_command}")
+
+
+@main.group("orchestration")
+def orchestration_group() -> None:
+    """Manage task orchestration metadata."""
+
+
+@orchestration_group.command("record-run")
+@click.argument("task_id")
+@click.option("--actor", default=None, help="Agent or user recording this run.")
+@click.option("--result", "run_result", required=True, help="Run result, such as succeeded or failed.")
+@click.option("--summary", default="", help="Short run summary.")
+@click.option("--file", "--files", "files", multiple=True, help="Project-relative file changed by the run.")
+@click.option("--verification", multiple=True, help="Verification command or check executed by the run.")
+@click.option("--idempotency-key", default=None, help="Client-supplied idempotency key.")
+@click.option("--expected-version", type=int, default=None, help="Expected orchestration state version.")
+@click.option("--status-key", default=None, help="New orchestration status key.")
+@click.option("--lease-owner", default=None, help="New orchestration lease owner.")
+@click.option("--lease-expires-at", default=None, help="New orchestration lease expiry timestamp.")
+@click.option("--correlation-id", default=None, help="New orchestration correlation id.")
+@click.option("--review-state", default=None, help="New review state.")
+@click.option("--reviewer", default=None, help="New reviewer.")
+@click.option("--review-attempts", type=int, default=None, help="New review attempt count.")
+@click.option("--review-max-attempts", type=int, default=None, help="New maximum review attempts.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print concise plain text output.")
+@click.pass_context
+def orchestration_record_run_command(
+    ctx: click.Context,
+    task_id: str,
+    actor: str | None,
+    run_result: str,
+    summary: str,
+    files: tuple[str, ...],
+    verification: tuple[str, ...],
+    idempotency_key: str | None,
+    expected_version: int | None,
+    status_key: str | None,
+    lease_owner: str | None,
+    lease_expires_at: str | None,
+    correlation_id: str | None,
+    review_state: str | None,
+    reviewer: str | None,
+    review_attempts: int | None,
+    review_max_attempts: int | None,
+    as_json: bool,
+    plain: bool,
+) -> None:
+    """Append a run-history event and optional orchestration state update."""
+    project = _project(ctx)
+    service = OrchestrationService(project)
+    state_update = _orchestration_state_update_or_none(
+        status_key=status_key,
+        lease_owner=lease_owner,
+        lease_expires_at=lease_expires_at,
+        correlation_id=correlation_id,
+        review_state=review_state,
+        reviewer=reviewer,
+        review_attempts=review_attempts,
+        review_max_attempts=review_max_attempts,
+    )
+    try:
+        result = service.record_run(
+            task_id,
+            actor=actor,
+            result=run_result,
+            summary=summary,
+            files=files,
+            verification=verification,
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            state_update=state_update,
+        )
+        payload = _orchestration_record_run_payload(project, task_id, result)
+    except RunHistoryParseError as exc:
+        location = exc.location or "run_history"
+        raise click.ClickException(
+            f"{task_id}: malformed run history at {location} ({exc.code}). "
+            f"Fix the run history section before recording a new run: {exc.message}"
+        ) from exc
+    except OrchestrationIdempotencyConflict as exc:
+        raise click.ClickException(
+            f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original run metadata."
+        ) from exc
+    except OrchestrationError as exc:
+        raise click.ClickException(_format_orchestration_error(task_id, exc)) from exc
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if as_json:
+        click.echo(json.dumps(payload, sort_keys=True))
+        return
+    if plain:
+        click.echo(f"{payload['taskId']} recorded run {payload['eventId']}")
+        return
+    click.echo(f"{payload['taskId']} recorded run {payload['eventId']}")
 
 
 @main.group("daemon")
@@ -1859,6 +1966,90 @@ def _format_config_value(value: object) -> str:
     if value is None:
         return "null"
     return str(value)
+
+
+def _orchestration_state_update_or_none(
+    *,
+    status_key: str | None,
+    lease_owner: str | None,
+    lease_expires_at: str | None,
+    correlation_id: str | None,
+    review_state: str | None,
+    reviewer: str | None,
+    review_attempts: int | None,
+    review_max_attempts: int | None,
+) -> OrchestrationStateUpdate | None:
+    values = {
+        "status_key": status_key,
+        "lease_owner": lease_owner,
+        "lease_expires_at": lease_expires_at,
+        "correlation_id": correlation_id,
+        "review_state": review_state,
+        "reviewer": reviewer,
+        "review_attempts": review_attempts,
+        "review_max_attempts": review_max_attempts,
+    }
+    if all(value is None for value in values.values()):
+        return None
+    return OrchestrationStateUpdate(**values)
+
+
+def _orchestration_record_run_payload(
+    project: BacklogProject,
+    task_id: str,
+    result: OrchestrationMutationResult,
+) -> dict[str, object]:
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    task = repository.get_task(task_id)
+    history = parse_run_history(task.raw_source)
+    queue_item = _orchestration_queue_item(project, task.id)
+    return {
+        "taskId": task.id,
+        "path": queue_item.path if queue_item is not None else _project_relative_path(project, task.path),
+        "version": queue_item.version if queue_item is not None else result.version,
+        "eventId": result.event.event_id,
+        "runHistoryEventIds": [event.event_id for event in history.events],
+        "queueCategory": queue_item.category if queue_item is not None else None,
+        "validationIssues": _orchestration_validation_issues_payload(
+            queue_item.validation_issues if queue_item is not None else []
+        ),
+    }
+
+
+def _orchestration_queue_item(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
+    report = OrchestrationService(project).queue(include_completed=True)
+    normalized = task_id.casefold()
+    for item in report.items:
+        if item.task_id.casefold() == normalized:
+            return item
+    return None
+
+
+def _orchestration_validation_issues_payload(issues: list[ValidationIssue]) -> list[dict[str, str]]:
+    return [
+        {
+            "code": issue.code,
+            "message": issue.message,
+            "path": issue.path,
+            "severity": issue.severity,
+        }
+        for issue in issues
+    ]
+
+
+def _project_relative_path(project: BacklogProject, path: Path) -> str:
+    try:
+        return path.relative_to(project.root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _format_orchestration_error(task_id: str, error: OrchestrationError) -> str:
+    message = f"{task_id}: {error}"
+    if error.details:
+        details = ", ".join(f"{key}={value}" for key, value in sorted(error.details.items()))
+        message = f"{message} ({details})"
+    return message
 
 
 def _echo_daemon_status(record: RuntimeRecord, *, as_json: bool) -> None:

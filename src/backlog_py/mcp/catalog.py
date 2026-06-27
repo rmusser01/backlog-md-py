@@ -88,6 +88,67 @@ def _metadata_schema(description: str) -> dict[str, Any]:
     return {"type": "object", "description": description, "additionalProperties": True}
 
 
+def _orchestration_state_update_schema(description: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {
+            "statusKey": {"type": "string"},
+            "status_key": {"type": "string", "description": "Alias for statusKey."},
+            "leaseOwner": {"type": "string"},
+            "lease_owner": {"type": "string", "description": "Alias for leaseOwner."},
+            "leaseExpiresAt": {"type": "string"},
+            "lease_expires_at": {"type": "string", "description": "Alias for leaseExpiresAt."},
+            "correlationId": {"type": "string"},
+            "correlation_id": {"type": "string", "description": "Alias for correlationId."},
+            "reviewState": {"type": "string"},
+            "review_state": {"type": "string", "description": "Alias for reviewState."},
+            "reviewer": {"type": "string"},
+            "reviewAttempts": {"type": "integer"},
+            "review_attempts": {"type": "integer", "description": "Alias for reviewAttempts."},
+            "reviewMaxAttempts": {"type": "integer"},
+            "review_max_attempts": {"type": "integer", "description": "Alias for reviewMaxAttempts."},
+        },
+        "additionalProperties": True,
+    }
+
+
+def _orchestration_record_run_schema() -> dict[str, Any]:
+    schema = _project_schema(
+        {
+            "task_id": {"type": "string", "description": "Task ID to record against."},
+            "taskId": {"type": "string", "description": "Alias for task_id."},
+            "actor": {"type": "string", "description": "Agent or user recording this run."},
+            "result": {"type": "string", "description": "Run result, such as succeeded or failed."},
+            "summary": {"type": "string", "description": "Short run summary."},
+            "files": _string_or_string_array_schema("Project-relative files changed by the run."),
+            "verification": _string_or_string_array_schema("Verification commands or checks executed by the run."),
+            "idempotencyKey": {"type": "string", "description": "Client-supplied idempotency key."},
+            "idempotency_key": {"type": "string", "description": "Alias for idempotencyKey."},
+            "expectedVersion": {"type": "integer", "description": "Expected orchestration state version."},
+            "expected_version": {"type": "integer", "description": "Alias for expectedVersion."},
+            "stateUpdate": _orchestration_state_update_schema("Optional orchestration state update."),
+            "state_update": _orchestration_state_update_schema("Alias for stateUpdate."),
+        },
+        required=("project", "result"),
+    )
+    expected_version_requirement = {
+        "anyOf": [
+            {"required": ["expectedVersion"]},
+            {"required": ["expected_version"]},
+        ]
+    }
+    schema["anyOf"] = [
+        {"required": ["task_id"]},
+        {"required": ["taskId"]},
+    ]
+    schema["allOf"] = [
+        {"anyOf": [{"not": {"required": ["stateUpdate"]}}, expected_version_requirement]},
+        {"anyOf": [{"not": {"required": ["state_update"]}}, expected_version_requirement]},
+    ]
+    return schema
+
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "project_status",
@@ -296,6 +357,12 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "Move one Done task to completed storage.",
         _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
         tool_registry.task_complete,
+    ),
+    ToolDefinition(
+        "orchestration_record_run",
+        "Append a task run-history event and optionally update orchestration state.",
+        _orchestration_record_run_schema(),
+        tool_registry.orchestration_record_run,
     ),
     ToolDefinition(
         "document_list",

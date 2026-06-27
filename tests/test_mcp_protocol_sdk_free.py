@@ -3,18 +3,47 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from backlog_py.mcp.catalog import list_tools
 from backlog_py.mcp.protocol import (
     McpRequestContext,
     handle_jsonrpc_message,
     handle_jsonrpc_text,
 )
+from backlog_py.orchestration import parse_run_history
 
 
 def _tool_properties(name):
+    return _tool_schema(name)["properties"]
+
+
+def _tool_schema(name):
     response = handle_jsonrpc_message({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"})
     tool = next(tool for tool in response["result"]["tools"] if tool["name"] == name)
-    return tool["inputSchema"]["properties"]
+    return tool["inputSchema"]
+
+
+def _repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    task_dir = repo / "backlog" / "tasks"
+    task_dir.mkdir(parents=True)
+    (repo / "backlog" / "config.yml").write_text("projectName: mcp-orchestration-test\n", encoding="utf-8")
+    _task_path(repo).write_text(
+        "---\n"
+        "id: TASK-1\n"
+        "title: Example\n"
+        "status: To Do\n"
+        "---\n\n"
+        "## Description\n\n"
+        "Body\n",
+        encoding="utf-8",
+    )
+    return repo
+
+
+def _task_path(repo: Path) -> Path:
+    return repo / "backlog" / "tasks" / "task-1 - Example.md"
 
 
 def _handler_accepted_arguments():
@@ -208,6 +237,37 @@ def test_tools_list_advertises_document_and_milestone_optional_fields():
     assert "clear_tasks" in _tool_properties("milestone_remove")
 
 
+def test_tools_list_advertises_orchestration_record_run_fields():
+    schema = _tool_schema("orchestration_record_run")
+    properties = schema["properties"]
+
+    assert {
+        "task_id",
+        "taskId",
+        "actor",
+        "result",
+        "summary",
+        "files",
+        "verification",
+        "idempotencyKey",
+        "idempotency_key",
+        "expectedVersion",
+        "expected_version",
+        "stateUpdate",
+        "state_update",
+    }.issubset(properties)
+    assert "result" in schema["required"]
+    assert "task_id" not in schema["required"]
+    required_sets = [set(item.get("required", [])) for item in schema["anyOf"]]
+    assert {"task_id"} in required_sets
+    assert {"taskId"} in required_sets
+    conditional_contract = json.dumps(schema["allOf"], sort_keys=True)
+    assert "stateUpdate" in conditional_contract
+    assert "state_update" in conditional_contract
+    assert "expectedVersion" in conditional_contract
+    assert "expected_version" in conditional_contract
+
+
 def test_tools_list_advertises_all_handler_accepted_argument_names():
     properties_by_tool = {tool["name"]: set(tool["inputSchema"]["properties"]) for tool in list_tools()}
 
@@ -290,6 +350,114 @@ def test_tools_call_explicit_project_overrides_project_hint(tmp_path):
 
     content = response["result"]["content"]
     assert json.loads(content[0]["text"])["title"] == "Explicit project task"
+
+
+def test_tools_call_orchestration_record_run_appends_history(tmp_path):
+    repo = _repo(tmp_path)
+
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": "call",
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_record_run",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "actor": "codex",
+                    "result": "succeeded",
+                    "summary": "done",
+                    "files": ["src/backlog_py/mcp/tools.py"],
+                    "verification": ["pytest tests/test_mcp_protocol_sdk_free.py"],
+                    "expectedVersion": 0,
+                    "stateUpdate": {"statusKey": "inprogress", "reviewState": "pending"},
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["taskId"] == "TASK-1"
+    assert payload["path"] == "backlog/tasks/task-1 - Example.md"
+    assert payload["version"] == 1
+    assert payload["eventId"].startswith("run-")
+    assert payload["runHistoryEventIds"] == [payload["eventId"]]
+    assert payload["queueCategory"] == "in_workflow"
+    assert payload["validationIssues"] == []
+
+    parsed = parse_run_history(_task_path(repo).read_text(encoding="utf-8"))
+    assert [event.event_id for event in parsed.events] == [payload["eventId"]]
+
+
+def test_tools_call_orchestration_record_run_reports_version_conflict(tmp_path):
+    repo = _repo(tmp_path)
+
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": "call",
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_record_run",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "actor": "codex",
+                    "result": "succeeded",
+                    "expectedVersion": 2,
+                    "stateUpdate": {"statusKey": "inprogress"},
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["taskId"] == "TASK-1"
+    assert payload["version"] == 0
+    assert payload["eventId"] is None
+    assert payload["runHistoryEventIds"] == []
+    assert payload["queueCategory"] == "eligible"
+    assert payload["conflict"]["type"] == "OrchestrationVersionConflict"
+    assert payload["conflict"]["details"]["expected_version"] == 2
+    assert payload["conflict"]["details"]["actual_version"] == 0
+
+
+@pytest.mark.parametrize(
+    ("arguments", "field"),
+    [
+        (
+            {"task_id": "TASK-1", "actor": 123, "result": "succeeded"},
+            "actor",
+        ),
+        (
+            {
+                "task_id": "TASK-1",
+                "result": "succeeded",
+                "expectedVersion": "abc",
+                "stateUpdate": {"statusKey": "inprogress"},
+            },
+            "expectedVersion",
+        ),
+    ],
+)
+def test_tools_call_orchestration_record_run_rejects_invalid_argument_types(tmp_path, arguments, field):
+    repo = _repo(tmp_path)
+    arguments = {"project": str(repo), **arguments}
+
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": "call",
+            "method": "tools/call",
+            "params": {"name": "orchestration_record_run", "arguments": arguments},
+        }
+    )
+
+    assert response["error"]["code"] == -32602
+    assert field in response["error"]["message"]
 
 
 def test_invalid_jsonrpc_version_returns_invalid_request_error():
