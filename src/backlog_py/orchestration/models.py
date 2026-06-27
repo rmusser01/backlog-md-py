@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Mapping
 
 QueueCategory = str
+TaskSplitMode = str
 
 
 @dataclass(frozen=True)
@@ -158,11 +159,44 @@ class OrchestrationTransitionTaskRequest:
 
 
 @dataclass(frozen=True)
+class TaskSplitItem:
+    title: str
+    description: str = ""
+    plan: str = ""
+
+
+@dataclass(frozen=True)
+class TaskSplitRequest:
+    task_id: str
+    mode: TaskSplitMode
+    items: tuple[TaskSplitItem, ...]
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    inherit_dependencies: bool = True
+    link_sequence: bool = True
+    transition_to_status: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class OrchestrationMutationResult:
     task_id: str
     path: str
     version: int
     event: OrchestrationRunEvent
+    idempotent_replay: bool = False
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskSplitResult:
+    task_id: str
+    path: str
+    version: int
+    event: OrchestrationRunEvent
+    created_task_ids: list[str] = field(default_factory=list)
+    parent_event_id: str = ""
     idempotent_replay: bool = False
     details: dict[str, object] = field(default_factory=dict)
 

@@ -6,7 +6,7 @@ from textwrap import dedent
 
 import pytest
 
-from backlog_py.core.repository import MutableRepository
+from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.orchestration import (
     OrchestrationActorContext,
     OrchestrationIdempotencyConflict,
@@ -17,6 +17,8 @@ from backlog_py.orchestration import (
     OrchestrationValidationError,
     OrchestrationVersionConflict,
     RunHistoryParseError,
+    TaskSplitError,
+    TaskSplitItem,
     parse_run_history,
     parse_orchestration,
     resolve_orchestration_actor,
@@ -805,3 +807,281 @@ def test_queue_reports_malformed_run_history_as_invalid_without_mutating(tmp_pat
     assert report.items[0].category == "invalid"
     assert [issue.code for issue in report.items[0].run_history_issues] == ["run_history_entry_unterminated"]
     assert task.path.read_text(encoding="utf-8") == malformed
+
+
+def test_split_task_child_mode_creates_children_and_parent_event(tmp_path):
+    repo = _repo(tmp_path)
+
+    result = _service(repo).split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="split-task-1",
+        items=[
+            TaskSplitItem(title="Add parser coverage", description="Cover parser cases."),
+            TaskSplitItem(title="Update docs", plan="- [ ] Document split workflow"),
+        ],
+        reason="Split into focused child tasks.",
+    )
+
+    repository = MutableRepository.from_path(repo)
+    parent = repository.get_task("TASK-1")
+    orchestration = parse_orchestration(parent)
+    assert orchestration is not None
+    assert orchestration.version == 1
+    assert orchestration.status_key is None
+    assert parent.parsed.frontmatter["status"] == "To Do"
+    assert result.version == 1
+    assert result.created_task_ids == ["TASK-1.1", "TASK-1.2"]
+    assert result.parent_event_id == result.event.event_id
+    first_child = repository.get_task("TASK-1.1")
+    second_child = repository.get_task("TASK-1.2")
+    assert first_child.parsed.frontmatter["parent_task_id"] == "TASK-1"
+    assert second_child.parsed.frontmatter["parent_task_id"] == "TASK-1"
+    assert first_child.title == "Add parser coverage"
+    assert "Cover parser cases." in first_child.raw_source
+    history = parse_run_history(parent.raw_source)
+    assert history.issues == []
+    assert len(history.events) == 1
+    assert history.events[0].type == "split_task"
+    assert history.events[0].split_mode == "child"
+    assert history.events[0].metadata["created_task_ids"] == '["TASK-1.1","TASK-1.2"]'
+
+
+def test_split_task_continuation_mode_creates_ordered_followups(tmp_path):
+    repo = _repo(tmp_path)
+
+    result = _service(repo).split_task(
+        "TASK-1",
+        mode="continuation",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="continue-task-1",
+        items=[
+            TaskSplitItem(title="Investigate edge case"),
+            TaskSplitItem(title="Implement follow-up"),
+        ],
+        inherit_dependencies=False,
+        link_sequence=True,
+    )
+
+    repository = MutableRepository.from_path(repo)
+    first = repository.get_task(result.created_task_ids[0])
+    second = repository.get_task(result.created_task_ids[1])
+    assert first.parsed.frontmatter.get("parent_task_id") is None
+    assert first.parsed.frontmatter["dependencies"] == ["TASK-1"]
+    assert first.parsed.frontmatter["ordinal"] == 1
+    assert second.parsed.frontmatter["dependencies"] == [first.id]
+    assert second.parsed.frontmatter["ordinal"] == 2
+    assert parse_run_history(repository.get_task("TASK-1").raw_source).events[0].split_mode == "continuation"
+
+
+def test_split_task_transition_updates_parent_status_when_requested(tmp_path):
+    repo = _repo(tmp_path)
+
+    result = _service(repo).split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="split-and-start",
+        items=[TaskSplitItem(title="Extract helper")],
+        transition_to_status="inprogress",
+    )
+
+    orchestration = parse_orchestration(MutableRepository.from_path(repo).get_task("TASK-1"))
+    assert orchestration is not None
+    assert orchestration.status_key == "inprogress"
+    assert orchestration.version == 1
+    assert result.event.to_status == "inprogress"
+
+
+def test_split_task_rejects_circular_inherited_dependency_without_writes(tmp_path):
+    repo = _repo(tmp_path)
+    task_path = _task_path(repo)
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            "status: To Do\n",
+            "status: To Do\n"
+            "dependencies:\n"
+            "  - TASK-1\n",
+        ),
+        encoding="utf-8",
+    )
+    before_tasks = [task.id for task in MutableRepository.from_path(repo).list_tasks()]
+    before_source = _task_source(repo)
+
+    with pytest.raises(TaskSplitError) as error:
+        _service(repo).split_task(
+            "TASK-1",
+            mode="child",
+            actor="codex",
+            expected_version=0,
+            idempotency_key="bad-split",
+            items=[TaskSplitItem(title="Would loop")],
+        )
+
+    assert error.value.details["task_id"] == "TASK-1"
+    assert [task.id for task in MutableRepository.from_path(repo).list_tasks()] == before_tasks
+    assert _task_source(repo) == before_source
+
+
+def test_split_task_idempotency_replay_returns_existing_children_without_duplicates(tmp_path):
+    repo = _repo(tmp_path)
+    service = _service(repo)
+    first = service.split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="split-replay",
+        items=[TaskSplitItem(title="Child one"), TaskSplitItem(title="Child two")],
+    )
+    before_tasks = [task.id for task in MutableRepository.from_path(repo).list_tasks()]
+    before_source = _task_source(repo)
+
+    second = service.split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=999,
+        idempotency_key="split-replay",
+        items=[TaskSplitItem(title="Child one"), TaskSplitItem(title="Child two")],
+    )
+
+    assert second.idempotent_replay
+    assert second.created_task_ids == first.created_task_ids
+    assert second.parent_event_id == first.parent_event_id
+    assert second.event == first.event
+    assert [task.id for task in MutableRepository.from_path(repo).list_tasks()] == before_tasks
+    assert _task_source(repo) == before_source
+
+
+def test_split_task_rolls_back_children_when_later_child_create_fails(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    original_create_task = MutableRepository.create_task
+    call_count = 0
+
+    def flaky_create_task(self, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise TaskMutationError("simulated child create failure")
+        return original_create_task(self, *args, **kwargs)
+
+    monkeypatch.setattr(MutableRepository, "create_task", flaky_create_task)
+
+    with pytest.raises(TaskSplitError):
+        _service(repo).split_task(
+            "TASK-1",
+            mode="child",
+            actor="codex",
+            expected_version=0,
+            idempotency_key="split-rollback",
+            items=[TaskSplitItem(title="Child one"), TaskSplitItem(title="Child two")],
+        )
+
+    assert [task.id for task in MutableRepository.from_path(repo).list_tasks()] == ["TASK-1"]
+    assert parse_run_history(_task_source(repo)).events == []
+
+
+def test_split_task_rolls_back_children_when_parent_update_fails(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+
+    def failing_replace_task_source(self, *args, **kwargs):
+        raise TaskMutationError("simulated parent update failure")
+
+    monkeypatch.setattr(MutableRepository, "replace_task_source", failing_replace_task_source)
+
+    with pytest.raises(TaskSplitError):
+        _service(repo).split_task(
+            "TASK-1",
+            mode="child",
+            actor="codex",
+            expected_version=0,
+            idempotency_key="split-parent-rollback",
+            items=[TaskSplitItem(title="Child one"), TaskSplitItem(title="Child two")],
+        )
+
+    assert [task.id for task in MutableRepository.from_path(repo).list_tasks()] == ["TASK-1"]
+    assert parse_run_history(_task_source(repo)).events == []
+
+
+def test_split_task_accepts_large_item_payload_by_hashing_idempotency_metadata(tmp_path):
+    repo = _repo(tmp_path)
+
+    result = _service(repo).split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="split-large-item",
+        items=[TaskSplitItem(title="Large child", description="x" * 1500, plan="- [ ] " + "y" * 1500)],
+    )
+
+    assert result.created_task_ids == ["TASK-1.1"]
+    assert "split_items_hash" in result.event.metadata
+    assert len(result.event.metadata["split_items_hash"]) == 64
+    assert "split_items" not in result.event.metadata
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"items": [TaskSplitItem(title="Different child")]},
+        {"mode": "continuation"},
+        {"inherit_dependencies": False},
+        {"link_sequence": False},
+    ],
+)
+def test_split_task_idempotency_conflict_when_payload_changes(tmp_path, kwargs):
+    repo = _repo(tmp_path)
+    service = _service(repo)
+    service.split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="split-conflict",
+        items=[TaskSplitItem(title="Child one")],
+        inherit_dependencies=True,
+        link_sequence=True,
+    )
+
+    request = {
+        "mode": "child",
+        "actor": "codex",
+        "expected_version": 999,
+        "idempotency_key": "split-conflict",
+        "items": [TaskSplitItem(title="Child one")],
+        "inherit_dependencies": True,
+        "link_sequence": True,
+    }
+    request.update(kwargs)
+    with pytest.raises(OrchestrationIdempotencyConflict):
+        service.split_task("TASK-1", **request)
+
+
+def test_split_task_idempotency_conflict_when_parent_task_changes(tmp_path):
+    repo = _repo(tmp_path)
+    _write_task(repo / "backlog" / "tasks", "TASK-2", "Second task")
+    service = _service(repo)
+    service.split_task(
+        "TASK-1",
+        mode="child",
+        actor="codex",
+        expected_version=0,
+        idempotency_key="split-parent-conflict",
+        items=[TaskSplitItem(title="Child one")],
+    )
+
+    with pytest.raises(OrchestrationIdempotencyConflict):
+        service.split_task(
+            "TASK-2",
+            mode="child",
+            actor="codex",
+            expected_version=0,
+            idempotency_key="split-parent-conflict",
+            items=[TaskSplitItem(title="Child one")],
+        )

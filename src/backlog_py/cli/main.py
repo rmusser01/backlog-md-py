@@ -48,6 +48,7 @@ from backlog_py.orchestration import (
     OrchestrationService,
     OrchestrationStateUpdate,
     RunHistoryParseError,
+    TaskSplitItem,
     ValidationIssue,
     parse_run_history,
 )
@@ -1049,6 +1050,71 @@ def orchestration_stale_leases_command(ctx: click.Context, as_json: bool, plain:
         click.echo(json.dumps(payload, sort_keys=True))
         return
     _echo_orchestration_items(items)
+
+
+@orchestration_group.command("split")
+@click.argument("task_id")
+@click.option("--mode", required=True, type=click.Choice(["child", "continuation"]), help="Split mode.")
+@click.option("--actor", required=True, help="Agent or user splitting the task.")
+@click.option("--expected-version", type=int, required=True, help="Expected orchestration state version.")
+@click.option("--idempotency-key", default=None, help="Client-supplied idempotency key.")
+@click.option("--item", "items", multiple=True, required=True, help="Title for a generated split task.")
+@click.option(
+    "--inherit-dependencies/--no-inherit-dependencies",
+    default=True,
+    help="Copy parent dependencies to generated tasks.",
+)
+@click.option(
+    "--link-sequence/--no-link-sequence",
+    default=True,
+    help="Link continuation tasks in dependency order.",
+)
+@click.option("--transition-to-status", default=None, help="Optional parent orchestration status after split.")
+@click.option("--reason", default=None, help="Split reason to store in run history.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.option("--plain", is_flag=True, help="Print concise plain text output.")
+@click.pass_context
+def orchestration_split_command(
+    ctx: click.Context,
+    task_id: str,
+    mode: str,
+    actor: str,
+    expected_version: int,
+    idempotency_key: str | None,
+    items: tuple[str, ...],
+    inherit_dependencies: bool,
+    link_sequence: bool,
+    transition_to_status: str | None,
+    reason: str | None,
+    as_json: bool,
+    plain: bool,
+) -> None:
+    """Split a task into child or continuation tasks."""
+    project = _project(ctx)
+    split_items = tuple(TaskSplitItem(title=item) for item in items)
+    try:
+        result = OrchestrationService(project).split_task(
+            task_id,
+            mode=mode,
+            actor=actor,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            items=split_items,
+            inherit_dependencies=inherit_dependencies,
+            link_sequence=link_sequence,
+            transition_to_status=transition_to_status,
+            reason=reason,
+        )
+        payload = _orchestration_record_run_payload(project, task_id, result)
+    except OrchestrationIdempotencyConflict as exc:
+        raise click.ClickException(
+            f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original split metadata."
+        ) from exc
+    except OrchestrationError as exc:
+        raise click.ClickException(_format_orchestration_error(task_id, exc)) from exc
+    except RunHistoryParseError as exc:
+        raise click.ClickException(_format_run_history_error(task_id, exc)) from exc
+    _echo_orchestration_mutation(payload, as_json=as_json, plain=plain, verb="split")
 
 
 @orchestration_group.command("claim")
@@ -2204,7 +2270,7 @@ def _orchestration_record_run_payload(
     task = repository.get_task(task_id)
     history = parse_run_history(task.raw_source)
     queue_item = _orchestration_queue_item(project, task.id)
-    return {
+    payload: dict[str, object] = {
         "taskId": task.id,
         "path": queue_item.path if queue_item is not None else _project_relative_path(project, task.path),
         "version": queue_item.version if queue_item is not None else result.version,
@@ -2215,6 +2281,12 @@ def _orchestration_record_run_payload(
             queue_item.validation_issues if queue_item is not None else []
         ),
     }
+    created_task_ids = getattr(result, "created_task_ids", None)
+    if created_task_ids is not None:
+        payload["createdTaskIds"] = list(created_task_ids)
+        payload["parentEventId"] = getattr(result, "parent_event_id", result.event.event_id)
+        payload["splitMode"] = result.event.split_mode
+    return payload
 
 
 def _orchestration_queue_report_payload(report: object) -> dict[str, object]:

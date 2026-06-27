@@ -193,6 +193,55 @@ def _orchestration_workflow_mutation_schema(*, transition: bool = False, claim: 
     return schema
 
 
+def _orchestration_split_schema() -> dict[str, Any]:
+    schema = _project_schema(
+        {
+            "task_id": {"type": "string", "description": "Task ID to split."},
+            "taskId": {"type": "string", "description": "Alias for task_id."},
+            "mode": {"type": "string", "enum": ["child", "continuation"], "description": "Split mode."},
+            "items": {
+                "type": "array",
+                "description": "Generated task definitions.",
+                "items": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "description": {"type": "string"},
+                                "plan": {"type": "string"},
+                                "implementationPlan": {"type": "string"},
+                                "implementation_plan": {"type": "string"},
+                            },
+                            "required": ["title"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                },
+            },
+            "actor": {"type": "string", "description": "Agent or user performing the split."},
+            "expectedVersion": {"type": "integer", "description": "Expected orchestration state version."},
+            "expected_version": {"type": "integer", "description": "Alias for expectedVersion."},
+            "idempotencyKey": {"type": "string", "description": "Client-supplied idempotency key."},
+            "idempotency_key": {"type": "string", "description": "Alias for idempotencyKey."},
+            "inheritDependencies": {"type": "boolean", "description": "Copy parent dependencies to generated tasks."},
+            "inherit_dependencies": {"type": "boolean", "description": "Alias for inheritDependencies."},
+            "linkSequence": {"type": "boolean", "description": "Link continuation tasks in dependency order."},
+            "link_sequence": {"type": "boolean", "description": "Alias for linkSequence."},
+            "transitionToStatus": {"type": "string", "description": "Optional parent status after split."},
+            "transition_to_status": {"type": "string", "description": "Alias for transitionToStatus."},
+            "reason": {"type": "string", "description": "Reason stored in run history."},
+        },
+        required=("project", "mode", "items", "actor"),
+    )
+    schema["anyOf"] = [{"required": ["task_id"]}, {"required": ["taskId"]}]
+    schema["allOf"] = [
+        {"anyOf": [{"required": ["expectedVersion"]}, {"required": ["expected_version"]}]},
+    ]
+    return schema
+
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "project_status",
@@ -455,6 +504,12 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "Transition task orchestration status.",
         _orchestration_workflow_mutation_schema(transition=True),
         tool_registry.orchestration_transition_task,
+    ),
+    ToolDefinition(
+        "orchestration_split_task",
+        "Split a task into child or continuation tasks.",
+        _orchestration_split_schema(),
+        tool_registry.orchestration_split_task,
     ),
     ToolDefinition(
         "document_list",

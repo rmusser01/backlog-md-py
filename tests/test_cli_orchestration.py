@@ -243,6 +243,42 @@ def test_orchestration_transition_json_moves_state(tmp_path):
     assert orchestration.version == 1
 
 
+def test_orchestration_split_json_creates_child_tasks(tmp_path):
+    repo = _repo(tmp_path)
+
+    result = _invoke(
+        repo,
+        "orchestration",
+        "split",
+        "TASK-1",
+        "--mode",
+        "child",
+        "--actor",
+        "codex",
+        "--expected-version",
+        "0",
+        "--idempotency-key",
+        "split-task-1",
+        "--item",
+        "Add parser coverage",
+        "--item",
+        "Update docs",
+        "--json",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["taskId"] == "TASK-1"
+    assert payload["version"] == 1
+    assert payload["eventId"].startswith("run-")
+    assert payload["parentEventId"] == payload["eventId"]
+    assert payload["createdTaskIds"] == ["TASK-1.1", "TASK-1.2"]
+    assert payload["queueCategory"] == "eligible"
+    repository = MutableRepository.from_path(repo)
+    assert repository.get_task("TASK-1.1").parsed.frontmatter["parent_task_id"] == "TASK-1"
+    assert repository.get_task("TASK-1.2").parsed.frontmatter["parent_task_id"] == "TASK-1"
+
+
 def test_orchestration_read_commands_json_report_queue_slices(tmp_path):
     repo = _repo(tmp_path)
 

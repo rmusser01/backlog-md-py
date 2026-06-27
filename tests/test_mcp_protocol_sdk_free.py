@@ -305,6 +305,7 @@ def test_tools_list_advertises_orchestration_workflow_tools():
         "orchestration_claim_task",
         "orchestration_release_task",
         "orchestration_transition_task",
+        "orchestration_split_task",
     }
     assert expected_names.issubset(tools)
     for name in expected_names:
@@ -321,6 +322,25 @@ def test_tools_list_advertises_orchestration_workflow_tools():
     assert {"task_id", "taskId", "toStatus", "to_status", "actor", "expectedVersion", "expected_version"}.issubset(
         transition_properties
     )
+    split_properties = tools["orchestration_split_task"]["inputSchema"]["properties"]
+    assert {
+        "task_id",
+        "taskId",
+        "mode",
+        "items",
+        "actor",
+        "expectedVersion",
+        "expected_version",
+        "idempotencyKey",
+        "idempotency_key",
+        "inheritDependencies",
+        "inherit_dependencies",
+        "linkSequence",
+        "link_sequence",
+        "transitionToStatus",
+        "transition_to_status",
+        "reason",
+    }.issubset(split_properties)
 
 
 def test_tools_list_advertises_all_handler_accepted_argument_names():
@@ -493,6 +513,32 @@ def test_tools_call_orchestration_claim_release_transition_happy_path(tmp_path):
     )
     _assert_orchestration_contract(transition, version=3, category="in_workflow")
     assert len(transition["runHistoryEventIds"]) == 3
+
+
+def test_tools_call_orchestration_split_task_creates_children(tmp_path):
+    repo = _repo(tmp_path)
+
+    payload = _tool_payload(
+        _call_tool(
+            "orchestration_split_task",
+            {
+                "project": str(repo),
+                "taskId": "TASK-1",
+                "mode": "child",
+                "items": [{"title": "Add parser coverage"}, {"title": "Update docs"}],
+                "actor": "codex",
+                "expectedVersion": 0,
+                "idempotencyKey": "split-task-1",
+            },
+        )
+    )
+
+    _assert_orchestration_contract(payload, version=1, category="eligible")
+    assert payload["createdTaskIds"] == ["TASK-1.1", "TASK-1.2"]
+    assert payload["parentEventId"] == payload["eventId"]
+    parsed = parse_run_history(_task_path(repo).read_text(encoding="utf-8"))
+    assert parsed.events[0].type == "split_task"
+    assert parsed.events[0].split_mode == "child"
 
 
 def test_tools_call_orchestration_claim_conflict_reports_current_state(tmp_path):

@@ -286,6 +286,24 @@ def test_canonical_event_fingerprint_ignores_rendered_markdown_whitespace():
     assert canonical_event_fingerprint(parsed_event) == canonical_event_fingerprint(_event())
 
 
+def test_canonical_event_fingerprint_ignores_created_task_ids_only_for_split_events():
+    first_split = _event(
+        type="split_task",
+        split_mode="child",
+        metadata={"split_items_hash": "abc123", "created_task_ids": '["TASK-1.1"]'},
+    )
+    second_split = _event(
+        type="split_task",
+        split_mode="child",
+        metadata={"split_items_hash": "abc123", "created_task_ids": '["TASK-1.2"]'},
+    )
+    first_record = _event(metadata={"created_task_ids": '["TASK-1.1"]'})
+    second_record = _event(metadata={"created_task_ids": '["TASK-1.2"]'})
+
+    assert canonical_event_fingerprint(first_split) == canonical_event_fingerprint(second_split)
+    assert canonical_event_fingerprint(first_record) != canonical_event_fingerprint(second_record)
+
+
 def test_render_run_history_entry_uses_stable_type_key_not_event_type():
     rendered = render_run_history_entry(_event())
 

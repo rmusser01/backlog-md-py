@@ -42,6 +42,9 @@ _EVENT_METADATA_KEYS = {
     "verification",
     "metadata",
 }
+_IDEMPOTENCY_REPLAY_METADATA_KEYS = {
+    "created_task_ids",
+}
 
 
 def parse_run_history(source: str) -> RunHistoryParseResult:
@@ -104,7 +107,7 @@ def canonical_event_fingerprint(event: OrchestrationRunEvent) -> str:
         "summary": _cap_text(_normalize_summary(event.summary), MAX_RUN_HISTORY_SUMMARY_CHARS),
         "files": sorted(_as_string(value) for value in event.files),
         "verification": sorted(_as_string(value) for value in event.verification),
-        "metadata": _normalize_metadata(event.metadata),
+        "metadata": _normalize_idempotency_metadata(event),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -407,6 +410,13 @@ def _normalize_metadata(metadata: Mapping[Any, Any]) -> dict[str, str]:
         for key, value in sorted(metadata.items(), key=lambda item: _as_string(item[0]))
         if _as_string(key)
     }
+
+
+def _normalize_idempotency_metadata(event: OrchestrationRunEvent) -> dict[str, str]:
+    metadata = _normalize_metadata(event.metadata)
+    if event.type != "split_task":
+        return metadata
+    return {key: value for key, value in metadata.items() if key not in _IDEMPOTENCY_REPLAY_METADATA_KEYS}
 
 
 def _normalize_summary(summary: str) -> str:

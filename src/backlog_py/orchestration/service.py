@@ -1,24 +1,32 @@
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import socket
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from contextlib import suppress
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import yaml
 
 from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
-from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
-from backlog_py.orchestration.history import append_run_history_entry, find_idempotency_match, parse_run_history
+from backlog_py.orchestration.history import (
+    MAX_RUN_HISTORY_METADATA_CHARS,
+    append_run_history_entry,
+    find_idempotency_match,
+    parse_run_history,
+)
 from backlog_py.orchestration.models import (
     OrchestrationActorContext,
     OrchestrationClaimTaskRequest,
+    OrchestrationIdempotencyConflict,
     OrchestrationLeaseConflict,
     OrchestrationMutationResult,
     OrchestrationPolicy,
@@ -32,6 +40,10 @@ from backlog_py.orchestration.models import (
     OrchestrationValidationError,
     OrchestrationVersionConflict,
     RunHistoryParseError,
+    TaskSplitError,
+    TaskSplitItem,
+    TaskSplitRequest,
+    TaskSplitResult,
     parse_orchestration,
     validate_orchestration,
 )
@@ -147,6 +159,38 @@ class OrchestrationService:
 
         return with_project_write_lock(self.project, "orchestration_transition_task", mutate)
 
+    def split_task(
+        self,
+        task_id: str,
+        *,
+        mode: str,
+        items: Sequence[TaskSplitItem],
+        actor: str,
+        expected_version: int,
+        idempotency_key: str | None = None,
+        inherit_dependencies: bool = True,
+        link_sequence: bool = True,
+        transition_to_status: str | None = None,
+        reason: str | None = None,
+    ) -> TaskSplitResult:
+        request = TaskSplitRequest(
+            task_id=task_id,
+            mode=_normalize_split_mode(mode),
+            items=_normalize_split_items(items),
+            actor=_required_text(actor, field="actor"),
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            inherit_dependencies=inherit_dependencies,
+            link_sequence=link_sequence,
+            transition_to_status=_optional_text(transition_to_status),
+            reason=reason,
+        )
+
+        def mutate() -> TaskSplitResult:
+            return self._split_task_locked(request)
+
+        return with_project_write_lock(self.project, "orchestration_split_task", mutate)
+
     def queue(self, *, include_completed: bool = False) -> OrchestrationQueueReport:
         repository = ReadOnlyRepository(self.project, refresh_remote_refs=False)
         return queue_report(
@@ -213,6 +257,166 @@ class OrchestrationService:
             event=candidate,
             idempotent_replay=False,
         )
+
+    def _split_task_locked(self, request: TaskSplitRequest) -> TaskSplitResult:
+        repository = MutableRepository(self.project, refresh_remote_refs=False)
+        task = repository.get_task(request.task_id)
+        policy = load_orchestration_policy(self.project)
+        parsed_history = parse_run_history(task.raw_source)
+        if parsed_history.issues:
+            issue = parsed_history.issues[0]
+            raise RunHistoryParseError(issue.code, issue.message, issue.location)
+
+        state = parse_orchestration(task)
+        current_version = state.version if state is not None and state.version is not None else 0
+        current_status = _state_status_key(task, state)
+        candidate = self._split_task_event(task, request, current_status)
+        existing_event = _find_split_idempotency_match(repository, candidate)
+        if existing_event is not None:
+            created_task_ids = _created_task_ids_from_event(existing_event)
+            return TaskSplitResult(
+                task_id=task.id,
+                path=_project_relative_path(self.project, task.path),
+                version=current_version,
+                event=existing_event,
+                created_task_ids=created_task_ids,
+                parent_event_id=existing_event.event_id,
+                idempotent_replay=True,
+                details=_split_result_details(request.mode, created_task_ids, existing_event.event_id),
+            )
+
+        if request.expected_version != current_version:
+            raise OrchestrationVersionConflict(
+                "Orchestration version conflict",
+                details={
+                    "task_id": task.id,
+                    "expected_version": request.expected_version,
+                    "actual_version": current_version,
+                },
+            )
+
+        _validate_current_orchestration(task, policy)
+        if request.transition_to_status and not policy.can_transition(current_status, request.transition_to_status):
+            raise OrchestrationTransitionError(
+                "Orchestration split transition is not allowed",
+                details={
+                    "task_id": task.id,
+                    "from_status": current_status,
+                    "to_status": request.transition_to_status,
+                },
+            )
+        parent_dependencies = _task_dependency_ids(task)
+        _reject_split_dependency_cycle(task.id, parent_dependencies, request)
+
+        try:
+            created_tasks = self._create_split_tasks(repository, task, request, parent_dependencies)
+        except TaskMutationError as exc:
+            raise TaskSplitError(
+                str(exc),
+                details={"task_id": task.id, "mode": request.mode},
+            ) from exc
+
+        created_task_ids = [created.id for created in created_tasks]
+        event = replace(
+            candidate,
+            metadata={
+                **candidate.metadata,
+                "created_task_ids": json.dumps(created_task_ids, separators=(",", ":"), ensure_ascii=True),
+            },
+        )
+        next_version = current_version + 1
+        next_orchestration = dict(state.raw if state is not None else {})
+        if request.transition_to_status:
+            next_orchestration["status_key"] = request.transition_to_status
+        if request.idempotency_key:
+            next_orchestration["idempotency_key"] = request.idempotency_key
+        next_orchestration["version"] = next_version
+        try:
+            source = _replace_frontmatter_value(task.raw_source, task.parsed, "orchestration", next_orchestration)
+            source = append_run_history_entry(source, event)
+            updated = repository.replace_task_source(task.id, source)
+        except TaskMutationError as exc:
+            _rollback_created_tasks(created_tasks)
+            raise TaskSplitError(
+                str(exc),
+                details={"task_id": task.id, "mode": request.mode},
+            ) from exc
+        except Exception:
+            _rollback_created_tasks(created_tasks)
+            raise
+        return TaskSplitResult(
+            task_id=updated.id,
+            path=_project_relative_path(self.project, updated.path),
+            version=next_version,
+            event=event,
+            created_task_ids=created_task_ids,
+            parent_event_id=event.event_id,
+            idempotent_replay=False,
+            details=_split_result_details(request.mode, created_task_ids, event.event_id),
+        )
+
+    def _split_task_event(
+        self,
+        task: TaskRecord,
+        request: TaskSplitRequest,
+        current_status: str,
+    ) -> OrchestrationRunEvent:
+        metadata = _split_event_metadata(request)
+        return OrchestrationRunEvent(
+            event_id=f"run-{uuid.uuid4().hex}",
+            type="split_task",
+            actor=resolve_orchestration_actor(request.actor),
+            timestamp=_utc_timestamp(self._now()),
+            result="succeeded",
+            summary=request.reason or "",
+            idempotency_key=request.idempotency_key or "",
+            task_id=task.id,
+            from_status=current_status if request.transition_to_status else "",
+            to_status=request.transition_to_status or "",
+            split_mode=request.mode,
+            metadata=metadata,
+        )
+
+    def _create_split_tasks(
+        self,
+        repository: MutableRepository,
+        parent: TaskRecord,
+        request: TaskSplitRequest,
+        parent_dependencies: Sequence[str],
+    ) -> list[TaskRecord]:
+        created: list[TaskRecord] = []
+        try:
+            for index, item in enumerate(request.items, start=1):
+                description = _split_item_description(parent, item)
+                if request.mode == "child":
+                    dependencies = list(parent_dependencies) if request.inherit_dependencies else []
+                    created.append(
+                        repository.create_task(
+                            title=item.title,
+                            description=description,
+                            plan=item.plan,
+                            parent_task_id=parent.id,
+                            dependencies=dependencies,
+                        )
+                    )
+                    continue
+
+                dependencies = list(parent_dependencies) if request.inherit_dependencies else []
+                if request.link_sequence:
+                    dependencies.append(parent.id if not created else created[-1].id)
+                created.append(
+                    repository.create_task(
+                        title=item.title,
+                        description=description,
+                        plan=item.plan,
+                        dependencies=_dedupe_task_ids(dependencies),
+                        ordinal=index,
+                    )
+                )
+        except Exception:
+            _rollback_created_tasks(created)
+            raise
+        return created
 
     def _record_run_event(
         self,
@@ -457,6 +661,169 @@ class OrchestrationService:
         )
 
 
+_SPLIT_MODES = {"child", "continuation"}
+_MAX_SPLIT_ITEMS = 25
+
+
+def _normalize_split_mode(value: str) -> str:
+    normalized = value.strip().casefold().replace("_", "-")
+    if normalized not in _SPLIT_MODES:
+        raise TaskSplitError(
+            "Invalid split mode",
+            details={"mode": value, "allowed": sorted(_SPLIT_MODES)},
+        )
+    return normalized
+
+
+def _normalize_split_items(items: Sequence[TaskSplitItem]) -> tuple[TaskSplitItem, ...]:
+    normalized: list[TaskSplitItem] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, TaskSplitItem):
+            raise TaskSplitError(
+                "Split items must be TaskSplitItem values",
+                details={"index": index},
+            )
+        title = _required_text(item.title, field=f"items[{index}].title")
+        normalized.append(
+            TaskSplitItem(
+                title=title,
+                description=item.description.strip(),
+                plan=item.plan.strip(),
+            )
+        )
+    if not normalized:
+        raise TaskSplitError("Split requires at least one item", details={"field": "items"})
+    if len(normalized) > _MAX_SPLIT_ITEMS:
+        raise TaskSplitError(
+            "Split item limit exceeded",
+            details={"count": len(normalized), "limit": _MAX_SPLIT_ITEMS},
+        )
+    return tuple(normalized)
+
+
+def _split_event_metadata(request: TaskSplitRequest) -> dict[str, str]:
+    items_json = _split_items_json(request.items)
+    metadata = {
+        "split_items_hash": hashlib.sha256(items_json.encode("utf-8")).hexdigest(),
+        "split_items_count": str(len(request.items)),
+        "inherit_dependencies": _bool_text(request.inherit_dependencies),
+        "link_sequence": _bool_text(request.link_sequence),
+        "transition_to_status": request.transition_to_status or "",
+    }
+    too_large = {
+        key: len(value)
+        for key, value in metadata.items()
+        if len(value) > MAX_RUN_HISTORY_METADATA_CHARS
+    }
+    if too_large:
+        raise TaskSplitError(
+            "Split metadata is too large for run history",
+            details={"limits": too_large, "max_chars": MAX_RUN_HISTORY_METADATA_CHARS},
+        )
+    return metadata
+
+
+def _split_items_json(items: Sequence[TaskSplitItem]) -> str:
+    return json.dumps(
+        [
+            {
+                "title": item.title,
+                "description": item.description,
+                "plan": item.plan,
+            }
+            for item in items
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+
+
+def _find_split_idempotency_match(
+    repository: MutableRepository,
+    candidate: OrchestrationRunEvent,
+) -> OrchestrationRunEvent | None:
+    if not candidate.idempotency_key:
+        return None
+    for task in [*repository.list_tasks(), *repository.list_completed_tasks()]:
+        if candidate.idempotency_key not in task.raw_source:
+            continue
+        parsed_history = parse_run_history(task.raw_source)
+        if parsed_history.issues:
+            issue = parsed_history.issues[0]
+            raise RunHistoryParseError(issue.code, issue.message, issue.location)
+        match = find_idempotency_match(parsed_history.events, candidate)
+        if match is not None:
+            return match
+    return None
+
+
+def _created_task_ids_from_event(event: OrchestrationRunEvent) -> list[str]:
+    raw_value = event.metadata.get("created_task_ids", "[]")
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(value) for value in parsed]
+
+
+def _split_result_details(mode: str, created_task_ids: Sequence[str], parent_event_id: str) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "created_task_ids": list(created_task_ids),
+        "parent_event_id": parent_event_id,
+    }
+
+
+def _task_dependency_ids(task: TaskRecord) -> list[str]:
+    raw_dependencies = task.parsed.frontmatter.get("dependencies")
+    if not isinstance(raw_dependencies, Sequence) or isinstance(raw_dependencies, (str, bytes, bytearray)):
+        return []
+    return [str(dependency) for dependency in raw_dependencies]
+
+
+def _reject_split_dependency_cycle(
+    parent_task_id: str,
+    parent_dependencies: Sequence[str],
+    request: TaskSplitRequest,
+) -> None:
+    if not request.inherit_dependencies:
+        return
+    normalized_parent_id = parent_task_id.casefold()
+    if any(dependency.casefold() == normalized_parent_id for dependency in parent_dependencies):
+        raise TaskSplitError(
+            "Cannot inherit circular parent dependencies",
+            details={"task_id": parent_task_id, "dependency_ids": list(parent_dependencies)},
+        )
+
+
+def _split_item_description(parent: TaskRecord, item: TaskSplitItem) -> str:
+    lines = [f"Split from {parent.id}: {parent.title}."]
+    if item.description:
+        lines.extend(("", item.description))
+    return "\n".join(lines)
+
+
+def _dedupe_task_ids(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+
+def _rollback_created_tasks(tasks: Sequence[TaskRecord]) -> None:
+    for task in reversed(tasks):
+        with suppress(OSError):
+            task.path.unlink()
+
+
 def resolve_orchestration_actor(
     actor: str | None = None,
     context: OrchestrationActorContext | None = None,
@@ -633,6 +1000,17 @@ def _required_text(value: str, *, field: str) -> str:
             details={"field": field},
         )
     return cleaned
+
+
+def _optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _bool_text(value: bool) -> str:
+    return "true" if value else "false"
 
 
 def _string_or_empty(value: object) -> str:

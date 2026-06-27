@@ -15,6 +15,7 @@ from backlog_py.orchestration import (
     OrchestrationStateUpdate,
     OrchestrationValidationError,
     RunHistoryParseError,
+    TaskSplitItem,
     ValidationIssue,
     parse_run_history,
 )
@@ -499,6 +500,72 @@ def orchestration_transition_task(
     return _orchestration_record_run_response(project, task_identifier, result=mutation)
 
 
+def orchestration_split_task(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    mode: str | None = None,
+    items: Any = None,
+    actor: str | None = None,
+    expectedVersion: int | None = None,
+    expected_version: int | None = None,
+    idempotencyKey: str | None = None,
+    idempotency_key: str | None = None,
+    inheritDependencies: bool | None = None,
+    inherit_dependencies: bool | None = None,
+    linkSequence: bool | None = None,
+    link_sequence: bool | None = None,
+    transitionToStatus: str | None = None,
+    transition_to_status: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Split a task into child or continuation tasks through the orchestration service."""
+    task_identifier = _required_mcp_string(task_id if task_id is not None else taskId, "task_id")
+    mode_value = _required_mcp_string(mode, "mode")
+    actor_value = _required_mcp_string(actor, "actor")
+    expected = _required_int_value(
+        expectedVersion if expectedVersion is not None else expected_version,
+        "expectedVersion",
+    )
+    inherit = _optional_bool(inheritDependencies if inheritDependencies is not None else inherit_dependencies)
+    sequence = _optional_bool(linkSequence if linkSequence is not None else link_sequence)
+    try:
+        mutation = OrchestrationService(project).split_task(
+            task_identifier,
+            mode=mode_value,
+            actor=actor_value,
+            expected_version=expected,
+            idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
+            items=_task_split_items(items),
+            inherit_dependencies=True if inherit is None else inherit,
+            link_sequence=True if sequence is None else sequence,
+            transition_to_status=_optional_mcp_string(
+                transitionToStatus if transitionToStatus is not None else transition_to_status,
+                "transitionToStatus",
+            ),
+            reason=_optional_mcp_string(reason, "reason"),
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
+        )
+    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+
+
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """List or search documents through the safe document service."""
     if limit <= 0:
@@ -645,6 +712,11 @@ def _orchestration_record_run_response(
     }
     if conflict is not None:
         payload["conflict"] = conflict
+    created_task_ids = getattr(result, "created_task_ids", None)
+    if created_task_ids is not None and result is not None:
+        payload["createdTaskIds"] = list(created_task_ids)
+        payload["parentEventId"] = getattr(result, "parent_event_id", result.event.event_id)
+        payload["splitMode"] = result.event.split_mode
     return payload
 
 
@@ -707,6 +779,33 @@ def _orchestration_state_update_from_mapping(value: Any) -> OrchestrationStateUp
     if all(field is None for field in fields.values()):
         return None
     return OrchestrationStateUpdate(**fields)
+
+
+def _task_split_items(value: Any) -> tuple[TaskSplitItem, ...]:
+    if value is None:
+        raise TypeError("items must be an array")
+    if not isinstance(value, list):
+        raise TypeError("items must be an array")
+    items: list[TaskSplitItem] = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, str):
+            items.append(TaskSplitItem(title=item))
+            continue
+        if not isinstance(item, dict):
+            raise TypeError(f"items[{index}] must be a string or object")
+        title = _required_mcp_string(_get_alias(item, "title"), f"items[{index}].title")
+        items.append(
+            TaskSplitItem(
+                title=title,
+                description=_optional_mcp_string(_get_alias(item, "description"), f"items[{index}].description") or "",
+                plan=_optional_mcp_string(
+                    _get_alias(item, "plan", "implementationPlan", "implementation_plan"),
+                    f"items[{index}].plan",
+                )
+                or "",
+            )
+        )
+    return tuple(items)
 
 
 def _orchestration_error_conflict_payload(error: OrchestrationError) -> dict[str, Any]:
