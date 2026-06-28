@@ -11,11 +11,11 @@ or local agents without requiring a Node or Bun runtime.
 
 ## Status And Safety
 
-This project is in beta. The audited compatibility inventory reports the
-documented local-file CLI, Python helper, MCP, daemon, browser-board, and TUI
-surfaces as implemented for the current baseline. Beta means the supported
-contract is ready for real project integration after validation, but it is not
-yet a 1.0 API freeze.
+This project is stable starting with the 1.0 release line. The audited
+compatibility inventory reports the documented local-file CLI, Python helper,
+MCP, daemon, browser-board, and TUI surfaces as implemented for the current
+baseline. The supported 1.x contract is the behavior represented in the
+compatibility inventory, stability policy, and parity docs.
 
 The source of truth remains the `backlog/` Markdown directory in each project.
 Before live mutation in a consuming project, run copied-repository smoke tests

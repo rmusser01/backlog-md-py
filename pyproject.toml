@@ -15,7 +15,7 @@ authors = [
 ]
 keywords = ["backlog.md", "backlog", "markdown", "mcp", "task-management"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",

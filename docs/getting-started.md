@@ -205,8 +205,8 @@ backlog-py compat status --json
 Use it as a quick inventory check before deeper project validation. It reports
 agent cutover readiness separately from browser release readiness.
 
-See [stability-policy.md](stability-policy.md) for the beta supported contract
-and release gate.
+See [stability-policy.md](stability-policy.md) for the stable supported
+contract and release gate.
 
 ## Mutation Safety Checklist
 
@@ -224,7 +224,7 @@ and release gate.
 
 - [Integration guide](integration.md) for CLI, Python helper, and MCP details.
 - [Architecture guide](architecture.md) for the source layout and runtime model.
-- [Stability policy](stability-policy.md) for the beta support contract.
+- [Stability policy](stability-policy.md) for the stable support contract.
 - [Singleton daemon guide](singleton-daemon.md) for multi-agent process reuse.
 - [Cutover validation checklist](cutover-validation.md) for migration gates.
 - [Browser release validation](browser-release-validation.md) for browser

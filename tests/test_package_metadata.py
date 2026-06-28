@@ -32,22 +32,23 @@ def test_pyproject_derives_distribution_version_from_package_attribute():
     }
 
 
-def test_beta_release_metadata_and_docs_are_declared():
+def test_stable_release_metadata_and_docs_are_declared():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
 
-    assert __version__ == "0.3.0"
-    assert "Development Status :: 4 - Beta" in pyproject["project"]["classifiers"]
+    assert __version__ == "1.0.0"
+    assert "Development Status :: 5 - Production/Stable" in pyproject["project"]["classifiers"]
     assert "Development Status :: 3 - Alpha" not in pyproject["project"]["classifiers"]
+    assert "Development Status :: 4 - Beta" not in pyproject["project"]["classifiers"]
 
     stability_policy = Path("docs/stability-policy.md").read_text()
     changelog = Path("CHANGELOG.md").read_text()
     release_checklist = Path("docs/release-checklist.md").read_text()
 
     assert "Supported Contract" in stability_policy
-    assert "Beta Release Gate" in stability_policy
-    assert "## 0.3.0" in changelog
+    assert "Stable Release Gate" in stability_policy
+    assert "## 1.0.0" in changelog
     assert "## 0.2.0" in changelog
-    assert "Beta" in changelog
+    assert "Stable" in changelog
     assert "Do not push the tag until" in release_checklist
 
 

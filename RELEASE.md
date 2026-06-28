@@ -11,7 +11,7 @@ package.
 
 The release workflow runs for:
 
-- `v*` tag pushes, such as `v0.3.1`.
+- `v*` tag pushes, such as `v1.0.0`.
 - Manual workflow dispatches, but the release job still only runs when the ref
   is a `v*` tag.
 

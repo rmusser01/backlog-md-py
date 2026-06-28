@@ -1,0 +1,33 @@
+{
+  "command": {
+    "argv": [
+      "manual browser release validation"
+    ],
+    "cwd": "."
+  },
+  "freshness": {
+    "max_age_days": 14
+  },
+  "generated_at": "2026-06-27",
+  "release_gates": {
+    "browser:desktop-mobile-screenshot-release-check": {
+      "artifacts": [
+        "artifacts/browser-desktop.png",
+        "artifacts/browser-mobile.png"
+      ],
+      "status": "passed"
+    },
+    "browser:rich-edit-e2e-release-check": {
+      "artifacts": [
+        "artifacts/browser-rich-edit-e2e.txt"
+      ],
+      "status": "passed"
+    }
+  },
+  "schema_version": 1,
+  "upstream_baseline": {
+    "audit_date": "2026-05-31",
+    "package": "backlog.md",
+    "version": "1.45.2"
+  }
+}
