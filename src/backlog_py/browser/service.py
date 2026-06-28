@@ -13,12 +13,19 @@ from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
+from backlog_py.orchestration import (
+    OrchestrationQueueItem,
+    OrchestrationService,
+    OrchestrationRunEvent,
+    ValidationIssue,
+    parse_run_history,
+)
 from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.storage.config import (
     get_definition_of_done_defaults,
@@ -132,10 +139,20 @@ def run_browser_service_foreground(
         server.server_close()
 
 
-def build_board_payload(project: BacklogProject) -> dict[str, object]:
+def build_board_payload(project: BacklogProject, *, queue_category_filter: str | None = None) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service."""
     repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     board = repository.board()
+    queue_report = OrchestrationService(project).queue()
+    queue_items = {item.task_id.casefold(): item for item in queue_report.items}
+    category_filter = _normalize_queue_category_filter(queue_category_filter)
+    unfiltered_columns = {
+        status: [
+            _task_payload(task, project=project, queue_item=queue_items.get(task.id.casefold()))
+            for task in tasks
+        ]
+        for status, tasks in board.items()
+    }
     payload: dict[str, object] = {
         "project": {
             "name": project.config.project_name,
@@ -143,12 +160,14 @@ def build_board_payload(project: BacklogProject) -> dict[str, object]:
             "backlogDir": str(project.backlog_dir),
         },
         "statuses": list(board.keys()),
+        "queueCategories": sorted(queue_report.by_category),
+        "queueCategoryFilter": category_filter,
         "columns": {
-            status: [_task_payload(task, project=project) for task in tasks]
-            for status, tasks in board.items()
+            status: [task for task in tasks if _matches_queue_category_payload(task, category_filter)]
+            for status, tasks in unfiltered_columns.items()
         },
     }
-    payload["revision"] = _board_revision(payload)
+    payload["revision"] = _board_revision({**payload, "queueCategoryFilter": None, "columns": unfiltered_columns})
     return payload
 
 
@@ -231,7 +250,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
     server: BrowserThreadingHTTPServer
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/favicon.ico":
             self._send_empty(HTTPStatus.NO_CONTENT, content_type="image/x-icon")
             return
@@ -248,7 +268,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_board_event()
             return
         if path == "/api/board":
-            self._send_json(HTTPStatus.OK, build_board_payload(self.server.project))
+            self._send_json(
+                HTTPStatus.OK,
+                build_board_payload(
+                    self.server.project,
+                    queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                ),
+            )
             return
         if path == "/api/settings/config":
             self._send_json(
@@ -299,7 +325,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, _task_detail_payload(task, project=self.server.project))
             return
         if path in {"", "/", "/index.html"}:
-            self._send_html(HTTPStatus.OK, render_board_html(self.server.project))
+            self._send_html(
+                HTTPStatus.OK,
+                render_board_html(
+                    self.server.project,
+                    queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                ),
+            )
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
@@ -565,9 +597,9 @@ def _load_browser_text_resource(*path_parts: str) -> str:
     return files("backlog_py.browser").joinpath(*path_parts).read_text(encoding="utf-8")
 
 
-def render_board_html(project: BacklogProject) -> str:
+def render_board_html(project: BacklogProject, *, queue_category_filter: str | None = None) -> str:
     """Render a browser board with basic task creation, editing, and status movement."""
-    payload = build_board_payload(project)
+    payload = build_board_payload(project, queue_category_filter=queue_category_filter)
     project_name = escape(project.config.project_name)
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
@@ -602,6 +634,10 @@ def render_board_html(project: BacklogProject) -> str:
     )
     select_tag = "select"
     status_options = _render_status_options(project.config.statuses or [])
+    queue_filter = _render_queue_category_filter(
+        categories=list(payload.get("queueCategories") or []),
+        selected=_metadata_string(payload.get("queueCategoryFilter")),
+    )
     return _load_browser_text_resource("templates", "board.html").format_map(
         {
             "project_name": project_name,
@@ -613,6 +649,7 @@ def render_board_html(project: BacklogProject) -> str:
             "task_edit_final_summary_editor": task_edit_final_summary_editor,
             "select_tag": select_tag,
             "status_options": status_options,
+            "queue_filter": queue_filter,
             "board_css": _load_browser_text_resource("assets", "board.css").rstrip("\n"),
             "board_js": _load_browser_text_resource("assets", "board.js").rstrip("\n"),
         }
@@ -672,10 +709,12 @@ def _render_task(raw_task: object) -> str:
     priority = _metadata_string(task.get("priority"))
     assignees = task.get("assignees")
     labels = task.get("labels")
+    queue_category = _metadata_string(task.get("queueCategory"))
     meta = _render_task_meta(
         priority=priority,
         assignees=assignees if isinstance(assignees, list) else [],
         labels=labels if isinstance(labels, list) else [],
+        queue_category=queue_category,
     )
     return f"""      <article class="task" data-task-id="{task_id}" draggable="true">
         <div class="task-id">{task_id}</div>
@@ -702,6 +741,23 @@ def _board_shutdown_sse_event(shutdown_state: Mapping[str, object]) -> str:
 
 def _render_status_options(statuses: list[str]) -> str:
     return "".join(f'<option value="{escape(status)}">{escape(status)}</option>' for status in statuses)
+
+
+def _render_queue_category_filter(*, categories: list[object], selected: str | None) -> str:
+    option_markup = ['<option value="">All queue states</option>']
+    for category in categories:
+        category_text = str(category)
+        selected_attr = ' selected' if selected and selected == category_text else ""
+        option_markup.append(
+            f'<option value="{escape(category_text)}"{selected_attr}>{escape(_queue_category_label(category_text))}</option>'
+        )
+    return (
+        '<form class="queue-filter" method="get">'
+        '<label for="queue-category-filter">Queue</label>'
+        f'<select id="queue-category-filter" name="queueCategory">{"".join(option_markup)}</select>'
+        '<button class="secondary-button" type="submit">Filter</button>'
+        "</form>"
+    )
 
 
 def _document_list_payload(project: BacklogProject) -> list[dict[str, object]]:
@@ -760,9 +816,14 @@ def _decision_detail_payload(decision: DecisionRecord) -> dict[str, object]:
     return payload
 
 
-def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
+def _task_payload(
+    task: TaskRecord,
+    *,
+    project: BacklogProject,
+    queue_item: OrchestrationQueueItem | None = None,
+) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
-    return {
+    payload: dict[str, object] = {
         "id": task.id,
         "title": task.title,
         "status": task.status,
@@ -774,6 +835,11 @@ def _task_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, obj
         "createdDate": _metadata_string(frontmatter.get("created_date")),
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
     }
+    if queue_item is None:
+        queue_item = _queue_item_for_task(project, task.id)
+    if queue_item is not None:
+        payload.update(_queue_item_payload(queue_item))
+    return payload
 
 
 def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
@@ -781,6 +847,7 @@ def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[s
     description = task.description_or_legacy_body
     implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
     final_summary = _section_content(task, "FINAL_SUMMARY")
+    run_history = parse_run_history(task.raw_source)
     payload.update(
         {
             "description": description,
@@ -791,6 +858,11 @@ def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[s
             "finalSummaryHtml": _markdown_to_html(final_summary),
             "acceptanceCriteria": _checklist_payload(task, "AC"),
             "definitionOfDone": _checklist_payload(task, "DOD"),
+            "runHistoryEvents": [_run_history_event_payload(event) for event in run_history.events],
+            "runHistoryIssues": [
+                _validation_issue_payload(ValidationIssue(issue.code, issue.message, issue.location or "run_history"))
+                for issue in run_history.issues
+            ],
         }
     )
     return payload
@@ -952,8 +1024,19 @@ def _safe_markdown_href(href: str) -> str:
     return value
 
 
-def _render_task_meta(*, priority: str | None, assignees: list[object], labels: list[object]) -> str:
+def _render_task_meta(
+    *,
+    priority: str | None,
+    assignees: list[object],
+    labels: list[object],
+    queue_category: str | None = None,
+) -> str:
     badges: list[str] = []
+    if queue_category:
+        badges.append(
+            f'<span class="badge queue-badge" data-queue-category="{escape(queue_category)}">'
+            f'{escape(_queue_category_label(queue_category))}</span>'
+        )
     if priority:
         badges.append(f'<span class="badge">Priority: {escape(priority)}</span>')
     for assignee in assignees[:2]:
@@ -963,6 +1046,81 @@ def _render_task_meta(*, priority: str | None, assignees: list[object], labels: 
     if not badges:
         return ""
     return f'        <div class="task-meta">{"".join(badges)}</div>'
+
+
+def _queue_item_for_task(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
+    normalized = task_id.casefold()
+    for item in OrchestrationService(project).queue(include_completed=True).items:
+        if item.task_id.casefold() == normalized:
+            return item
+    return None
+
+
+def _queue_item_payload(item: OrchestrationQueueItem) -> dict[str, object]:
+    return {
+        "orchestrationVersion": item.version,
+        "effectiveStatus": item.effective_status,
+        "queueCategory": item.category,
+        "validationIssues": [_validation_issue_payload(issue) for issue in item.validation_issues],
+        "runHistoryIssues": [_validation_issue_payload(issue) for issue in item.run_history_issues],
+        "dependencyIds": list(item.dependency_ids),
+        "leaseOwner": item.lease_owner,
+        "leaseExpiresAt": item.lease_expires_at,
+    }
+
+
+def _validation_issue_payload(issue: ValidationIssue) -> dict[str, str]:
+    return {
+        "code": issue.code,
+        "message": issue.message,
+        "path": issue.path,
+        "severity": issue.severity,
+    }
+
+
+def _run_history_event_payload(event: OrchestrationRunEvent) -> dict[str, object]:
+    return {
+        "eventId": event.event_id,
+        "type": event.type,
+        "actor": event.actor,
+        "timestamp": event.timestamp,
+        "result": event.result,
+        "summary": event.summary,
+        "taskId": event.task_id,
+        "fromStatus": event.from_status,
+        "toStatus": event.to_status,
+        "splitMode": event.split_mode,
+        "files": list(event.files),
+        "verification": list(event.verification),
+        "metadata": dict(event.metadata),
+    }
+
+
+def _normalize_queue_category_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _matches_queue_category_payload(task: object, category: str | None) -> bool:
+    if category is None:
+        return True
+    if not isinstance(task, Mapping):
+        return False
+    task_category = _metadata_string(task.get("queueCategory"))
+    return task_category is not None and task_category.casefold() == category.casefold()
+
+
+def _queue_category_label(value: str) -> str:
+    return value.replace("_", " ").replace("-", " ").title()
+
+
+def _query_value(query: str, key: str) -> str | None:
+    values = parse_qs(query, keep_blank_values=True).get(key)
+    if not values:
+        return None
+    return values[-1]
 
 
 def _metadata_list(value: object) -> list[str]:

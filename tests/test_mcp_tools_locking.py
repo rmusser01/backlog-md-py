@@ -132,6 +132,102 @@ def test_mcp_read_tools_do_not_acquire_project_lock(repo, monkeypatch):
     assert seen == []
 
 
+def test_mcp_orchestration_record_run_uses_service_lock_not_tool_wrapper(repo, monkeypatch):
+    seen = []
+
+    def fake_with_project_lock(project, op, fn):
+        seen.append(op)
+        return fn()
+
+    monkeypatch.setattr("backlog_py.mcp.tools.with_project_write_lock", fake_with_project_lock)
+
+    response = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_record_run",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "actor": "codex",
+                    "result": "succeeded",
+                    "summary": "recorded",
+                },
+            },
+        }
+    )
+
+    assert "result" in response, response
+    assert seen == []
+
+
+def test_mcp_orchestration_workflow_mutations_use_service_lock_not_tool_wrapper(repo, monkeypatch):
+    seen = []
+
+    def fake_with_project_lock(project, op, fn):
+        seen.append(op)
+        return fn()
+
+    monkeypatch.setattr("backlog_py.mcp.tools.with_project_write_lock", fake_with_project_lock)
+
+    claim = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_claim_task",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "actor": "codex",
+                    "expectedVersion": 0,
+                },
+            },
+        }
+    )
+    release = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_release_task",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "actor": "codex",
+                    "expectedVersion": 1,
+                },
+            },
+        }
+    )
+    transition = handle_jsonrpc_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "orchestration_transition_task",
+                "arguments": {
+                    "project": str(repo),
+                    "task_id": "TASK-1",
+                    "toStatus": "review",
+                    "actor": "codex",
+                    "expectedVersion": 2,
+                },
+            },
+        }
+    )
+
+    assert "result" in claim, claim
+    assert "result" in release, release
+    assert "result" in transition, transition
+    assert seen == []
+
+
 @pytest.mark.parametrize("field_name", ["acceptanceCriteria", "acceptance_criteria"])
 def test_mcp_task_edit_acceptance_criteria_alias_adds_items(repo, field_name):
     response = handle_jsonrpc_message(

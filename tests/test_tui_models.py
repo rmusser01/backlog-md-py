@@ -46,6 +46,7 @@ def test_task_view_from_record_preserves_metadata_checklists_and_relative_path(t
     assert view.title == "Example task"
     assert view.status == "In Progress"
     assert view.path == Path("backlog/tasks/task-1 - Example-task.md")
+    assert view.queue_category == "in_workflow"
     assert view.priority == "high"
     assert view.assignees == ("alice",)
     assert view.labels == ("python", "compat")
@@ -60,6 +61,39 @@ def test_task_view_from_record_preserves_metadata_checklists_and_relative_path(t
         ("2", False, "Verification recorded"),
     ]
     assert view.raw_source == task.raw_source
+
+
+def test_task_view_from_record_hydrates_run_history_events(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    task_path = repo / "backlog" / "tasks" / "task-1 - Example-task.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8")
+        + "\n## Run History\n"
+        + "<!-- SECTION:RUN_HISTORY:BEGIN -->\n"
+        + "<!-- RUN_HISTORY_ENTRY:BEGIN -->\n"
+        + "```yaml\n"
+        + "event_id: run-1\n"
+        + "type: record_run\n"
+        + "actor: codex\n"
+        + "timestamp: 2026-06-26T18:04:00Z\n"
+        + "result: succeeded\n"
+        + "task_id: TASK-1\n"
+        + "```\n"
+        + "Done.\n"
+        + "<!-- RUN_HISTORY_ENTRY:END -->\n"
+        + "<!-- SECTION:RUN_HISTORY:END -->\n",
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    task = ReadOnlyRepository(project).get_task("TASK-1")
+
+    view = task_view_from_record(project, task)
+
+    assert view.run_history_issues == ()
+    assert [(event.event_id, event.type, event.actor, event.result, event.summary) for event in view.run_history_events] == [
+        ("run-1", "record_run", "codex", "succeeded", "Done.")
+    ]
 
 
 def test_checklist_items_from_parsed_preserves_item_ids_and_checked_state():
@@ -98,6 +132,8 @@ def test_task_view_from_mcp_payload_hydrates_missing_fields_and_overlays_summary
         "description": "Summary description",
         "path": task.path.relative_to(project.root).as_posix(),
         "raw_source": task.raw_source,
+        "queueCategory": "claimed",
+        "effectiveStatus": "inprogress",
     }
 
     view = task_view_from_mcp_payload(project, payload)
@@ -107,11 +143,47 @@ def test_task_view_from_mcp_payload_hydrates_missing_fields_and_overlays_summary
     assert view.status == "Done"
     assert view.description == "Summary description"
     assert view.path == Path("backlog/tasks/task-1 - Example-task.md")
+    assert view.queue_category == "claimed"
+    assert view.effective_status == "inprogress"
     assert view.priority == "high"
     assert view.assignees == ("alice",)
     assert view.labels == ("python", "compat")
     assert view.milestone == "Release 1"
     assert view.acceptance_criteria[0].checked is True
+
+
+def test_task_view_from_mcp_payload_hydrates_run_history_and_issues(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    task = ReadOnlyRepository(project).get_task("TASK-1")
+
+    view = task_view_from_mcp_payload(
+        project,
+        {
+            "id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "path": task.path.relative_to(project.root).as_posix(),
+            "runHistoryEvents": [
+                {
+                    "eventId": "run-1",
+                    "type": "claim_task",
+                    "actor": "codex",
+                    "timestamp": "2026-06-26T18:04:00Z",
+                    "result": "succeeded",
+                    "summary": "Claimed.",
+                }
+            ],
+            "runHistoryIssues": [
+                {"code": "run_history_entry_unterminated", "message": "Bad entry", "path": "RUN_HISTORY_ENTRY"}
+            ],
+        },
+    )
+
+    assert view.run_history_events[0].event_id == "run-1"
+    assert view.run_history_events[0].type == "claim_task"
+    assert view.run_history_issues[0] == "run_history_entry_unterminated: Bad entry"
 
 
 def test_task_view_from_mcp_payload_rejects_paths_outside_project(tmp_path):
@@ -154,6 +226,24 @@ def test_filter_snapshot_matches_normalized_fields_without_raw_markdown_body():
     assert filter_snapshot(snapshot, FilterState(text="release 1")).columns["In Progress"] == ()
     assert filter_snapshot(snapshot, FilterState(text="TASK-0")).columns["In Progress"] == ()
     assert filter_snapshot(snapshot, FilterState(text="raw-only-secret")).columns["In Progress"] == ()
+
+
+def test_filter_snapshot_matches_queue_category():
+    eligible = _task_view("TASK-1", "Eligible", "To Do", queue_category="eligible")
+    claimed = _task_view("TASK-2", "Claimed", "In Progress", queue_category="claimed")
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=Path("/tmp/demo"),
+        statuses=("To Do", "In Progress"),
+        columns={"To Do": (eligible,), "In Progress": (claimed,)},
+        source="local",
+        revision=None,
+    )
+
+    filtered = filter_snapshot(snapshot, FilterState(queue_category="claimed"))
+
+    assert filtered.columns["To Do"] == ()
+    assert filtered.columns["In Progress"] == (claimed,)
 
 
 def test_dependency_state_marks_complete_open_and_missing_dependencies():
@@ -320,6 +410,7 @@ def _task_view(
     acceptance_criteria_text: tuple[str, ...] = (),
     definition_of_done_text: tuple[str, ...] = (),
     raw_source: str | None = None,
+    queue_category: str | None = None,
 ) -> TaskView:
     from backlog_py.tui.models import ChecklistItemView
 
@@ -341,4 +432,5 @@ def _task_view(
             ChecklistItemView(item_id=None, text=text, checked=False) for text in definition_of_done_text
         ),
         raw_source=raw_source,
+        queue_category=queue_category,
     )

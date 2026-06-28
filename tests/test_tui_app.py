@@ -137,6 +137,33 @@ async def test_enter_focuses_task_inspector():
         assert pilot.app.focused is pilot.app.query_one("#task-inspector")
 
 
+async def test_queue_category_filter_updates_visible_board_and_header():
+    snapshot = BoardSnapshot(
+        project_name="Demo",
+        project_root=_project().root,
+        statuses=("To Do", "In Progress", "Done"),
+        columns={
+            "To Do": (_task_view("TASK-1", "Eligible", "To Do", queue_category="eligible"),),
+            "In Progress": (_task_view("TASK-2", "Claimed", "In Progress", queue_category="claimed"),),
+            "Done": (),
+        },
+        source="local",
+        revision=None,
+    )
+    app = BacklogTuiApp(project=_project(), data_source=_StaticSource(snapshot))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+
+        await pilot.app.set_filters(queue_category="claimed")
+        await pilot.pause()
+
+        assert pilot.app.selected_task_id == "TASK-2"
+        assert pilot.app.visible_snapshot.columns["To Do"] == ()
+        assert pilot.app.visible_snapshot.columns["In Progress"][0].id == "TASK-2"
+        assert "queue=claimed" in pilot.app.query_one("#board-meta", Static).visual.plain
+
+
 async def test_dependency_state_is_visible_on_card_and_inspector():
     done = _task_view("TASK-1", "Done dependency", "Done")
     open_task = _task_view("TASK-2", "Open dependency", "In Progress")
@@ -579,6 +606,7 @@ def _task_view(
     dependencies: tuple[str, ...] = (),
     acceptance_criteria: tuple[ChecklistItemView, ...] = (),
     definition_of_done: tuple[ChecklistItemView, ...] = (),
+    queue_category: str | None = None,
 ) -> TaskView:
     return TaskView(
         id=task_id,
@@ -591,6 +619,7 @@ def _task_view(
         dependencies=dependencies,
         acceptance_criteria=acceptance_criteria,
         definition_of_done=definition_of_done,
+        queue_category=queue_category,
     )
 
 

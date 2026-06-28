@@ -189,6 +189,40 @@
       });
     }
 
+    function renderRunHistoryEvents(events, issues) {
+      const list = document.getElementById("task-dialog-run-history");
+      if (!list) return;
+      list.replaceChildren();
+      const rows = [];
+      (issues || []).forEach((issue) => {
+        rows.push({
+          title: issue.code || "run_history_issue",
+          meta: issue.message || "",
+        });
+      });
+      (events || []).forEach((event) => {
+        rows.push({
+          title: `${event.type || "run"} - ${event.result || "unknown"}`,
+          meta: [event.timestamp, event.actor, event.summary].filter(Boolean).join(" - "),
+        });
+      });
+      if (rows.length === 0) {
+        renderEmptyReadonlyList(list, "No run history");
+        return;
+      }
+      rows.forEach((row) => {
+        const item = document.createElement("li");
+        const title = document.createElement("span");
+        title.className = "readonly-list-title";
+        title.textContent = row.title;
+        const meta = document.createElement("span");
+        meta.className = "readonly-list-meta";
+        meta.textContent = row.meta;
+        item.append(title, meta);
+        list.appendChild(item);
+      });
+    }
+
     function checklistText(items) {
       return (items || []).map((item) => item.text || "").filter(Boolean).join("\n");
     }
@@ -647,6 +681,9 @@
       if (taskDialog) taskDialog.dataset.taskId = task.id;
       setText("task-dialog-title", `${task.id} - ${task.title}`);
       setText("task-dialog-status", task.status);
+      setText("task-dialog-queue-category", task.queueCategory);
+      setText("task-dialog-effective-status", task.effectiveStatus);
+      setText("task-dialog-orchestration-version", String(task.orchestrationVersion ?? ""));
       setText("task-dialog-path", task.path);
       setText("task-dialog-created", task.createdDate);
       setText("task-dialog-updated", task.updatedDate);
@@ -660,6 +697,7 @@
       renderMermaidDiagrams(taskDialog || document);
       renderChecklist("task-dialog-acceptance", task.acceptanceCriteria, "acceptanceCriteria");
       renderChecklist("task-dialog-dod", task.definitionOfDone, "definitionOfDone");
+      renderRunHistoryEvents(task.runHistoryEvents, task.runHistoryIssues);
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
       else if (taskDialog) taskDialog.setAttribute("open", "open");
     }

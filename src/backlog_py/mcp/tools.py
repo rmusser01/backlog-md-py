@@ -7,6 +7,19 @@ from backlog_py.core.models import BacklogProject
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.orchestration import (
+    OrchestrationIdempotencyConflict,
+    OrchestrationMutationResult,
+    OrchestrationQueueItem,
+    OrchestrationService,
+    OrchestrationStateUpdate,
+    OrchestrationValidationError,
+    RunHistoryParseError,
+    TaskSplitItem,
+    ValidationIssue,
+    parse_run_history,
+)
+from backlog_py.orchestration.models import OrchestrationError
 from backlog_py.runtime.locks import list_runtime_locks, with_project_write_lock
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
 
@@ -242,6 +255,317 @@ def task_complete(project: BacklogProject, task_id: str) -> dict[str, Any]:
     )
 
 
+def orchestration_record_run(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    actor: str | None = None,
+    result: str | None = None,
+    summary: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Append a run-history event through the orchestration service."""
+    task_identifier = task_id if task_id is not None else taskId
+    task_identifier_value = _required_mcp_string(task_identifier, "task_id")
+    result_value = _required_mcp_string(result, "result")
+    actor_value = _optional_mcp_string(actor, "actor")
+    summary_value = _optional_mcp_string(summary, "summary") or ""
+
+    idempotency_key = _optional_string(_get_alias(kwargs, "idempotencyKey", "idempotency_key"))
+    expected_version = _optional_int_value(_get_alias(kwargs, "expectedVersion", "expected_version"), "expectedVersion")
+    state_update = _orchestration_state_update_from_mapping(_get_alias(kwargs, "stateUpdate", "state_update"))
+    try:
+        mutation = OrchestrationService(project).record_run(
+            task_identifier_value,
+            actor=actor_value,
+            result=result_value,
+            summary=summary_value,
+            files=_string_list(kwargs.get("files")),
+            verification=_string_list(kwargs.get("verification")),
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            state_update=state_update,
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier_value,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationValidationError as exc:
+        raise TypeError(str(exc)) from exc
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier_value,
+            validation_issue=ValidationIssue(
+                code=exc.code,
+                message=exc.message,
+                path=exc.location or "run_history",
+            ),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier_value,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+
+    return _orchestration_record_run_response(project, task_identifier_value, result=mutation)
+
+
+def orchestration_status(
+    project: BacklogProject,
+    include_completed: bool = False,
+    includeCompleted: bool | None = None,
+) -> dict[str, Any]:
+    """Return orchestration queue status counts and items."""
+    include = includeCompleted if includeCompleted is not None else include_completed
+    report = OrchestrationService(project).queue(include_completed=include)
+    return _orchestration_queue_report_payload(report)
+
+
+def orchestration_queue(
+    project: BacklogProject,
+    include_completed: bool = False,
+    includeCompleted: bool | None = None,
+) -> dict[str, Any]:
+    """Return orchestration queue items."""
+    include = includeCompleted if includeCompleted is not None else include_completed
+    report = OrchestrationService(project).queue(include_completed=include)
+    return _orchestration_queue_report_payload(report)
+
+
+def orchestration_eligible(project: BacklogProject) -> dict[str, Any]:
+    """Return claimable orchestration queue items."""
+    return _orchestration_items_payload(project, "eligible")
+
+
+def orchestration_claims(project: BacklogProject) -> dict[str, Any]:
+    """Return actively claimed orchestration queue items."""
+    return _orchestration_items_payload(project, "claimed")
+
+
+def orchestration_stale_leases(project: BacklogProject) -> dict[str, Any]:
+    """Return stale orchestration lease queue items."""
+    return _orchestration_items_payload(project, "stale_claim")
+
+
+def orchestration_claim_task(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    actor: str | None = None,
+    expectedVersion: int | None = None,
+    expected_version: int | None = None,
+    idempotencyKey: str | None = None,
+    idempotency_key: str | None = None,
+    leaseTtlSeconds: int | None = None,
+    lease_ttl_seconds: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Claim a task through the orchestration service."""
+    task_identifier = _required_mcp_string(task_id if task_id is not None else taskId, "task_id")
+    actor_value = _required_mcp_string(actor, "actor")
+    expected = _required_int_value(
+        expectedVersion if expectedVersion is not None else expected_version,
+        "expectedVersion",
+    )
+    ttl = _optional_int_value(leaseTtlSeconds if leaseTtlSeconds is not None else lease_ttl_seconds, "leaseTtlSeconds")
+    try:
+        mutation = OrchestrationService(project).claim_task(
+            task_identifier,
+            actor=actor_value,
+            expected_version=expected,
+            idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
+            lease_ttl_seconds=ttl,
+            reason=_optional_mcp_string(reason, "reason"),
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
+        )
+    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+
+
+def orchestration_release_task(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    actor: str | None = None,
+    expectedVersion: int | None = None,
+    expected_version: int | None = None,
+    idempotencyKey: str | None = None,
+    idempotency_key: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Release a task claim through the orchestration service."""
+    task_identifier = _required_mcp_string(task_id if task_id is not None else taskId, "task_id")
+    actor_value = _required_mcp_string(actor, "actor")
+    expected = _required_int_value(
+        expectedVersion if expectedVersion is not None else expected_version,
+        "expectedVersion",
+    )
+    try:
+        mutation = OrchestrationService(project).release_task(
+            task_identifier,
+            actor=actor_value,
+            expected_version=expected,
+            idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
+            reason=_optional_mcp_string(reason, "reason"),
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
+        )
+    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+
+
+def orchestration_transition_task(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    toStatus: str | None = None,
+    to_status: str | None = None,
+    actor: str | None = None,
+    expectedVersion: int | None = None,
+    expected_version: int | None = None,
+    idempotencyKey: str | None = None,
+    idempotency_key: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Transition a task through the orchestration service."""
+    task_identifier = _required_mcp_string(task_id if task_id is not None else taskId, "task_id")
+    to_status_value = _required_mcp_string(toStatus if toStatus is not None else to_status, "toStatus")
+    actor_value = _required_mcp_string(actor, "actor")
+    expected = _required_int_value(
+        expectedVersion if expectedVersion is not None else expected_version,
+        "expectedVersion",
+    )
+    try:
+        mutation = OrchestrationService(project).transition_task(
+            task_identifier,
+            to_status_value,
+            actor=actor_value,
+            expected_version=expected,
+            idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
+            reason=_optional_mcp_string(reason, "reason"),
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
+        )
+    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+
+
+def orchestration_split_task(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    mode: str | None = None,
+    items: Any = None,
+    actor: str | None = None,
+    expectedVersion: int | None = None,
+    expected_version: int | None = None,
+    idempotencyKey: str | None = None,
+    idempotency_key: str | None = None,
+    inheritDependencies: bool | None = None,
+    inherit_dependencies: bool | None = None,
+    linkSequence: bool | None = None,
+    link_sequence: bool | None = None,
+    transitionToStatus: str | None = None,
+    transition_to_status: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Split a task into child or continuation tasks through the orchestration service."""
+    task_identifier = _required_mcp_string(task_id if task_id is not None else taskId, "task_id")
+    mode_value = _required_mcp_string(mode, "mode")
+    actor_value = _required_mcp_string(actor, "actor")
+    expected = _required_int_value(
+        expectedVersion if expectedVersion is not None else expected_version,
+        "expectedVersion",
+    )
+    inherit = _optional_bool(inheritDependencies if inheritDependencies is not None else inherit_dependencies)
+    sequence = _optional_bool(linkSequence if linkSequence is not None else link_sequence)
+    try:
+        mutation = OrchestrationService(project).split_task(
+            task_identifier,
+            mode=mode_value,
+            actor=actor_value,
+            expected_version=expected,
+            idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
+            items=_task_split_items(items),
+            inherit_dependencies=True if inherit is None else inherit,
+            link_sequence=True if sequence is None else sequence,
+            transition_to_status=_optional_mcp_string(
+                transitionToStatus if transitionToStatus is not None else transition_to_status,
+                "transitionToStatus",
+            ),
+            reason=_optional_mcp_string(reason, "reason"),
+        )
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_identifier,
+            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
+        )
+    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+
+
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """List or search documents through the safe document service."""
     if limit <= 0:
@@ -350,6 +674,172 @@ def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]
         return {"items": list(config.definition_of_done or [])}
 
     return _locked(project, "mcp_definition_of_done_defaults_upsert", mutate)
+
+
+def _orchestration_record_run_response(
+    project: BacklogProject,
+    task_id: str,
+    *,
+    result: OrchestrationMutationResult | None = None,
+    conflict: dict[str, Any] | None = None,
+    validation_issue: ValidationIssue | None = None,
+) -> dict[str, Any]:
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    task = repository.get_task(task_id)
+    history = parse_run_history(task.raw_source)
+    queue_item = _orchestration_queue_item(project, task.id)
+    issues = list(queue_item.validation_issues if queue_item is not None else [])
+    if validation_issue is not None:
+        _append_unique_validation_issue(issues, validation_issue)
+    elif queue_item is None:
+        issues.extend(
+            ValidationIssue(
+                code=issue.code,
+                message=issue.message,
+                path=issue.location or "run_history",
+            )
+            for issue in history.issues
+        )
+
+    payload: dict[str, Any] = {
+        "taskId": task.id,
+        "path": queue_item.path if queue_item is not None else _relative_task_path(project, task),
+        "version": queue_item.version if queue_item is not None else (result.version if result is not None else 0),
+        "eventId": result.event.event_id if result is not None else None,
+        "runHistoryEventIds": [event.event_id for event in history.events],
+        "queueCategory": queue_item.category if queue_item is not None else None,
+        "validationIssues": _validation_issue_payloads(issues),
+    }
+    if conflict is not None:
+        payload["conflict"] = conflict
+    created_task_ids = getattr(result, "created_task_ids", None)
+    if created_task_ids is not None and result is not None:
+        payload["createdTaskIds"] = list(created_task_ids)
+        payload["parentEventId"] = getattr(result, "parent_event_id", result.event.event_id)
+        payload["splitMode"] = result.event.split_mode
+    return payload
+
+
+def _orchestration_queue_item(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
+    report = OrchestrationService(project).queue(include_completed=True)
+    normalized = task_id.casefold()
+    for item in report.items:
+        if item.task_id.casefold() == normalized:
+            return item
+    return None
+
+
+def _orchestration_queue_report_payload(report: Any) -> dict[str, Any]:
+    return {
+        "byCategory": dict(report.by_category),
+        "items": [_orchestration_queue_item_payload(item) for item in report.items],
+    }
+
+
+def _orchestration_items_payload(project: BacklogProject, category: str) -> dict[str, Any]:
+    report = OrchestrationService(project).queue(include_completed=True)
+    return {
+        "items": [_orchestration_queue_item_payload(item) for item in report.items if item.category == category],
+    }
+
+
+def _orchestration_queue_item_payload(item: OrchestrationQueueItem) -> dict[str, Any]:
+    return {
+        "taskId": item.task_id,
+        "path": item.path,
+        "title": item.title,
+        "version": item.version,
+        "effectiveStatus": item.effective_status,
+        "queueCategory": item.category,
+        "validationIssues": _validation_issue_payloads(item.validation_issues),
+        "dependencyIds": list(item.dependency_ids),
+        "leaseOwner": item.lease_owner,
+        "leaseExpiresAt": item.lease_expires_at,
+    }
+
+
+def _orchestration_state_update_from_mapping(value: Any) -> OrchestrationStateUpdate | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("stateUpdate must be an object")
+    fields = {
+        "status_key": _optional_string(_get_alias(value, "statusKey", "status_key")),
+        "lease_owner": _optional_string(_get_alias(value, "leaseOwner", "lease_owner")),
+        "lease_expires_at": _optional_string(_get_alias(value, "leaseExpiresAt", "lease_expires_at")),
+        "correlation_id": _optional_string(_get_alias(value, "correlationId", "correlation_id")),
+        "review_state": _optional_string(_get_alias(value, "reviewState", "review_state")),
+        "reviewer": _optional_string(_get_alias(value, "reviewer")),
+        "review_attempts": _optional_int_value(_get_alias(value, "reviewAttempts", "review_attempts"), "reviewAttempts"),
+        "review_max_attempts": _optional_int_value(
+            _get_alias(value, "reviewMaxAttempts", "review_max_attempts"),
+            "reviewMaxAttempts",
+        ),
+    }
+    if all(field is None for field in fields.values()):
+        return None
+    return OrchestrationStateUpdate(**fields)
+
+
+def _task_split_items(value: Any) -> tuple[TaskSplitItem, ...]:
+    if value is None:
+        raise TypeError("items must be an array")
+    if not isinstance(value, list):
+        raise TypeError("items must be an array")
+    items: list[TaskSplitItem] = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, str):
+            items.append(TaskSplitItem(title=item))
+            continue
+        if not isinstance(item, dict):
+            raise TypeError(f"items[{index}] must be a string or object")
+        title = _required_mcp_string(_get_alias(item, "title"), f"items[{index}].title")
+        items.append(
+            TaskSplitItem(
+                title=title,
+                description=_optional_mcp_string(_get_alias(item, "description"), f"items[{index}].description") or "",
+                plan=_optional_mcp_string(
+                    _get_alias(item, "plan", "implementationPlan", "implementation_plan"),
+                    f"items[{index}].plan",
+                )
+                or "",
+            )
+        )
+    return tuple(items)
+
+
+def _orchestration_error_conflict_payload(error: OrchestrationError) -> dict[str, Any]:
+    return {
+        "type": error.__class__.__name__,
+        "message": str(error),
+        "details": dict(error.details),
+    }
+
+
+def _orchestration_idempotency_conflict_payload(error: OrchestrationIdempotencyConflict) -> dict[str, Any]:
+    return {
+        "type": error.__class__.__name__,
+        "message": str(error),
+        "details": {"idempotencyKey": error.idempotency_key},
+    }
+
+
+def _validation_issue_payloads(issues: list[ValidationIssue]) -> list[dict[str, str]]:
+    return [
+        {
+            "code": issue.code,
+            "message": issue.message,
+            "path": issue.path,
+            "severity": issue.severity,
+        }
+        for issue in issues
+    ]
+
+
+def _append_unique_validation_issue(issues: list[ValidationIssue], issue: ValidationIssue) -> None:
+    key = (issue.code, issue.message, issue.path, issue.severity)
+    if all((existing.code, existing.message, existing.path, existing.severity) != key for existing in issues):
+        issues.append(issue)
 
 
 def _locked(project: BacklogProject, operation: str, fn: Callable[[], T]) -> T:
@@ -474,6 +964,21 @@ def _optional_string(value: Any) -> str | None:
     return str(value)
 
 
+def _required_mcp_string(value: Any, field: str) -> str:
+    text = _optional_mcp_string(value, field)
+    if text is None or not text.strip():
+        raise TypeError(f"{field} must be a non-empty string")
+    return text
+
+
+def _optional_mcp_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string")
+    return value
+
+
 def _optional_bool(value: Any) -> bool | None:
     return _coerce_bool(value)
 
@@ -524,6 +1029,24 @@ def _int_list(value: Any) -> list[int]:
     if isinstance(value, int):
         return [value]
     return [int(item) for item in value]
+
+
+def _optional_int_value(value: Any, field: str = "value") -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise TypeError(f"{field} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{field} must be an integer") from exc
+
+
+def _required_int_value(value: Any, field: str) -> int:
+    parsed = _optional_int_value(value, field)
+    if parsed is None:
+        raise TypeError(f"{field} must be an integer")
+    return parsed
 
 
 def _dict_value(value: Any) -> dict[str, Any] | None:

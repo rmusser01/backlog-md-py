@@ -88,6 +88,160 @@ def _metadata_schema(description: str) -> dict[str, Any]:
     return {"type": "object", "description": description, "additionalProperties": True}
 
 
+def _orchestration_state_update_schema(description: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {
+            "statusKey": {"type": "string"},
+            "status_key": {"type": "string", "description": "Alias for statusKey."},
+            "leaseOwner": {"type": "string"},
+            "lease_owner": {"type": "string", "description": "Alias for leaseOwner."},
+            "leaseExpiresAt": {"type": "string"},
+            "lease_expires_at": {"type": "string", "description": "Alias for leaseExpiresAt."},
+            "correlationId": {"type": "string"},
+            "correlation_id": {"type": "string", "description": "Alias for correlationId."},
+            "reviewState": {"type": "string"},
+            "review_state": {"type": "string", "description": "Alias for reviewState."},
+            "reviewer": {"type": "string"},
+            "reviewAttempts": {"type": "integer"},
+            "review_attempts": {"type": "integer", "description": "Alias for reviewAttempts."},
+            "reviewMaxAttempts": {"type": "integer"},
+            "review_max_attempts": {"type": "integer", "description": "Alias for reviewMaxAttempts."},
+        },
+        "additionalProperties": True,
+    }
+
+
+def _orchestration_record_run_schema() -> dict[str, Any]:
+    schema = _project_schema(
+        {
+            "task_id": {"type": "string", "description": "Task ID to record against."},
+            "taskId": {"type": "string", "description": "Alias for task_id."},
+            "actor": {"type": "string", "description": "Agent or user recording this run."},
+            "result": {"type": "string", "description": "Run result, such as succeeded or failed."},
+            "summary": {"type": "string", "description": "Short run summary."},
+            "files": _string_or_string_array_schema("Project-relative files changed by the run."),
+            "verification": _string_or_string_array_schema("Verification commands or checks executed by the run."),
+            "idempotencyKey": {"type": "string", "description": "Client-supplied idempotency key."},
+            "idempotency_key": {"type": "string", "description": "Alias for idempotencyKey."},
+            "expectedVersion": {"type": "integer", "description": "Expected orchestration state version."},
+            "expected_version": {"type": "integer", "description": "Alias for expectedVersion."},
+            "stateUpdate": _orchestration_state_update_schema("Optional orchestration state update."),
+            "state_update": _orchestration_state_update_schema("Alias for stateUpdate."),
+        },
+        required=("project", "result"),
+    )
+    expected_version_requirement = {
+        "anyOf": [
+            {"required": ["expectedVersion"]},
+            {"required": ["expected_version"]},
+        ]
+    }
+    schema["anyOf"] = [
+        {"required": ["task_id"]},
+        {"required": ["taskId"]},
+    ]
+    schema["allOf"] = [
+        {"anyOf": [{"not": {"required": ["stateUpdate"]}}, expected_version_requirement]},
+        {"anyOf": [{"not": {"required": ["state_update"]}}, expected_version_requirement]},
+    ]
+    return schema
+
+
+def _orchestration_report_schema() -> dict[str, Any]:
+    return _project_schema(
+        {
+            "includeCompleted": {"type": "boolean", "description": "Include completed tasks."},
+            "include_completed": {"type": "boolean", "description": "Alias for includeCompleted."},
+        }
+    )
+
+
+def _orchestration_workflow_mutation_schema(*, transition: bool = False, claim: bool = False) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "task_id": {"type": "string", "description": "Task ID to mutate."},
+        "taskId": {"type": "string", "description": "Alias for task_id."},
+        "actor": {"type": "string", "description": "Agent or user performing the mutation."},
+        "expectedVersion": {"type": "integer", "description": "Expected orchestration state version."},
+        "expected_version": {"type": "integer", "description": "Alias for expectedVersion."},
+        "idempotencyKey": {"type": "string", "description": "Client-supplied idempotency key."},
+        "idempotency_key": {"type": "string", "description": "Alias for idempotencyKey."},
+        "reason": {"type": "string", "description": "Reason stored in run history."},
+    }
+    if transition:
+        properties.update(
+            {
+                "toStatus": {"type": "string", "description": "Target orchestration status."},
+                "to_status": {"type": "string", "description": "Alias for toStatus."},
+            }
+        )
+    if claim:
+        properties.update(
+            {
+                "leaseTtlSeconds": {"type": "integer", "description": "Lease TTL in seconds."},
+                "lease_ttl_seconds": {"type": "integer", "description": "Alias for leaseTtlSeconds."},
+            }
+        )
+    schema = _project_schema(properties, required=("project", "actor"))
+    schema["anyOf"] = [{"required": ["task_id"]}, {"required": ["taskId"]}]
+    schema["allOf"] = [
+        {"anyOf": [{"required": ["expectedVersion"]}, {"required": ["expected_version"]}]},
+    ]
+    if transition:
+        schema["allOf"].append({"anyOf": [{"required": ["toStatus"]}, {"required": ["to_status"]}]})
+    return schema
+
+
+def _orchestration_split_schema() -> dict[str, Any]:
+    schema = _project_schema(
+        {
+            "task_id": {"type": "string", "description": "Task ID to split."},
+            "taskId": {"type": "string", "description": "Alias for task_id."},
+            "mode": {"type": "string", "enum": ["child", "continuation"], "description": "Split mode."},
+            "items": {
+                "type": "array",
+                "description": "Generated task definitions.",
+                "items": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "description": {"type": "string"},
+                                "plan": {"type": "string"},
+                                "implementationPlan": {"type": "string"},
+                                "implementation_plan": {"type": "string"},
+                            },
+                            "required": ["title"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                },
+            },
+            "actor": {"type": "string", "description": "Agent or user performing the split."},
+            "expectedVersion": {"type": "integer", "description": "Expected orchestration state version."},
+            "expected_version": {"type": "integer", "description": "Alias for expectedVersion."},
+            "idempotencyKey": {"type": "string", "description": "Client-supplied idempotency key."},
+            "idempotency_key": {"type": "string", "description": "Alias for idempotencyKey."},
+            "inheritDependencies": {"type": "boolean", "description": "Copy parent dependencies to generated tasks."},
+            "inherit_dependencies": {"type": "boolean", "description": "Alias for inheritDependencies."},
+            "linkSequence": {"type": "boolean", "description": "Link continuation tasks in dependency order."},
+            "link_sequence": {"type": "boolean", "description": "Alias for linkSequence."},
+            "transitionToStatus": {"type": "string", "description": "Optional parent status after split."},
+            "transition_to_status": {"type": "string", "description": "Alias for transitionToStatus."},
+            "reason": {"type": "string", "description": "Reason stored in run history."},
+        },
+        required=("project", "mode", "items", "actor"),
+    )
+    schema["anyOf"] = [{"required": ["task_id"]}, {"required": ["taskId"]}]
+    schema["allOf"] = [
+        {"anyOf": [{"required": ["expectedVersion"]}, {"required": ["expected_version"]}]},
+    ]
+    return schema
+
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "project_status",
@@ -296,6 +450,66 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "Move one Done task to completed storage.",
         _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
         tool_registry.task_complete,
+    ),
+    ToolDefinition(
+        "orchestration_record_run",
+        "Append a task run-history event and optionally update orchestration state.",
+        _orchestration_record_run_schema(),
+        tool_registry.orchestration_record_run,
+    ),
+    ToolDefinition(
+        "orchestration_status",
+        "Return orchestration queue status counts and items.",
+        _orchestration_report_schema(),
+        tool_registry.orchestration_status,
+    ),
+    ToolDefinition(
+        "orchestration_queue",
+        "Return orchestration queue items.",
+        _orchestration_report_schema(),
+        tool_registry.orchestration_queue,
+    ),
+    ToolDefinition(
+        "orchestration_eligible",
+        "Return claimable orchestration queue items.",
+        _project_schema(),
+        tool_registry.orchestration_eligible,
+    ),
+    ToolDefinition(
+        "orchestration_claims",
+        "Return active orchestration claims.",
+        _project_schema(),
+        tool_registry.orchestration_claims,
+    ),
+    ToolDefinition(
+        "orchestration_stale_leases",
+        "Return stale orchestration leases.",
+        _project_schema(),
+        tool_registry.orchestration_stale_leases,
+    ),
+    ToolDefinition(
+        "orchestration_claim_task",
+        "Claim a task for orchestration work.",
+        _orchestration_workflow_mutation_schema(claim=True),
+        tool_registry.orchestration_claim_task,
+    ),
+    ToolDefinition(
+        "orchestration_release_task",
+        "Release a task orchestration claim.",
+        _orchestration_workflow_mutation_schema(),
+        tool_registry.orchestration_release_task,
+    ),
+    ToolDefinition(
+        "orchestration_transition_task",
+        "Transition task orchestration status.",
+        _orchestration_workflow_mutation_schema(transition=True),
+        tool_registry.orchestration_transition_task,
+    ),
+    ToolDefinition(
+        "orchestration_split_task",
+        "Split a task into child or continuation tasks.",
+        _orchestration_split_schema(),
+        tool_registry.orchestration_split_task,
     ),
     ToolDefinition(
         "document_list",

@@ -49,6 +49,25 @@
       padding: 20px 24px 24px;
       align-items: start;
     }
+    .queue-filter {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px 0;
+      color: var(--muted);
+    }
+    .queue-filter label {
+      font-weight: 650;
+      color: var(--text);
+    }
+    .queue-filter select {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 5px 8px;
+    }
     .column {
       min-width: 0;
     }
@@ -99,6 +118,10 @@
       border-radius: 999px;
       padding: 1px 7px;
       background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+    }
+    .queue-badge {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      color: var(--accent);
     }
     .task-actions {
       display: flex;
@@ -229,6 +252,12 @@
       color: var(--muted);
       font-size: 12px;
       margin-top: 2px;
+    }
+    .run-history-list li {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--panel) 90%, var(--bg));
     }
     .markdown-body > :first-child {
       margin-top: 0;
@@ -422,4 +451,3 @@
       .form-actions { flex-direction: column-reverse; }
       .form-actions button { width: 100%; }
     }
-

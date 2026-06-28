@@ -4,6 +4,223 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
 
+QueueCategory = str
+TaskSplitMode = str
+
+
+@dataclass(frozen=True)
+class OrchestrationRunEvent:
+    event_id: str
+    type: str
+    actor: str
+    timestamp: str
+    result: str
+    summary: str = ""
+    idempotency_key: str = ""
+    task_id: str = ""
+    from_status: str = ""
+    to_status: str = ""
+    split_mode: str = ""
+    files: list[str] = field(default_factory=list)
+    verification: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RunHistoryParseIssue:
+    code: str
+    message: str
+    location: str = ""
+
+
+@dataclass(frozen=True)
+class RunHistoryParseResult:
+    events: list[OrchestrationRunEvent]
+    issues: list[RunHistoryParseIssue]
+
+
+@dataclass(frozen=True)
+class OrchestrationIdempotencyConflict(ValueError):
+    idempotency_key: str
+    message: str
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
+class RunHistoryParseError(ValueError):
+    code: str
+    message: str
+    location: str = ""
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
+class OrchestrationError(ValueError):
+    message: str
+    details: dict[str, object] = field(default_factory=dict)
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass(frozen=True)
+class OrchestrationPolicyError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationValidationError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationVersionConflict(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationLeaseConflict(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationTransitionError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class TaskSplitError(OrchestrationError):
+    pass
+
+
+@dataclass(frozen=True)
+class OrchestrationStateUpdate:
+    status_key: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: str | None = None
+    correlation_id: str | None = None
+    review_state: str | None = None
+    reviewer: str | None = None
+    review_attempts: int | None = None
+    review_max_attempts: int | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationActorContext:
+    adapter_identity: str | None = None
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OrchestrationRecordRunRequest:
+    task_id: str
+    actor: str | None
+    result: str
+    summary: str
+    files: tuple[str, ...] = ()
+    verification: tuple[str, ...] = ()
+    idempotency_key: str | None = None
+    expected_version: int | None = None
+    state_update: OrchestrationStateUpdate | None = None
+    actor_context: OrchestrationActorContext | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationClaimTaskRequest:
+    task_id: str
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    lease_ttl_seconds: int | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationReleaseTaskRequest:
+    task_id: str
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationTransitionTaskRequest:
+    task_id: str
+    to_status: str
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskSplitItem:
+    title: str
+    description: str = ""
+    plan: str = ""
+
+
+@dataclass(frozen=True)
+class TaskSplitRequest:
+    task_id: str
+    mode: TaskSplitMode
+    items: tuple[TaskSplitItem, ...]
+    actor: str
+    expected_version: int
+    idempotency_key: str | None = None
+    inherit_dependencies: bool = True
+    link_sequence: bool = True
+    transition_to_status: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OrchestrationMutationResult:
+    task_id: str
+    path: str
+    version: int
+    event: OrchestrationRunEvent
+    idempotent_replay: bool = False
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskSplitResult:
+    task_id: str
+    path: str
+    version: int
+    event: OrchestrationRunEvent
+    created_task_ids: list[str] = field(default_factory=list)
+    parent_event_id: str = ""
+    idempotent_replay: bool = False
+    details: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OrchestrationQueueItem:
+    task_id: str
+    path: str
+    title: str
+    version: int
+    effective_status: str
+    category: QueueCategory
+    validation_issues: list[ValidationIssue] = field(default_factory=list)
+    dependency_ids: list[str] = field(default_factory=list)
+    lease_owner: str | None = None
+    lease_expires_at: str | None = None
+    run_history_issues: list[ValidationIssue] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class OrchestrationQueueReport:
+    items: list[OrchestrationQueueItem]
+    by_category: dict[str, int]
+
 
 @dataclass(frozen=True)
 class OrchestrationWorkspace:

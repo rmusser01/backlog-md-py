@@ -27,6 +27,11 @@ def test_mutation_inventory_covers_known_write_surfaces():
         "agents_update_instructions",
         "board_export_file",
         "board_export_readme",
+        "orchestration_claim",
+        "orchestration_release",
+        "orchestration_transition",
+        "orchestration_record_run",
+        "orchestration_split",
     } <= names
 
 
@@ -36,6 +41,7 @@ def test_mutation_inventory_records_lock_scopes():
     assert surfaces["init_project"].lock_scope == "init-root"
     assert surfaces["task_create"].lock_scope == "project"
     assert surfaces["board_export_file"].lock_scope == "project"
+    assert surfaces["orchestration_record_run"].lock_scope == "project"
 
 
 def test_mutation_by_name_returns_named_surface():
@@ -65,6 +71,20 @@ def test_task_archive_mutation_records_browser_entrypoint():
 
     assert surface.lock_scope == "project"
     assert "backlog_py.browser.service" in surface.entrypoints
+
+
+def test_orchestration_mutations_record_cli_and_mcp_entrypoints():
+    for name in (
+        "orchestration_claim",
+        "orchestration_release",
+        "orchestration_transition",
+        "orchestration_record_run",
+        "orchestration_split",
+    ):
+        surface = mutation_by_name(name)
+
+        assert surface.lock_scope == "project"
+        assert surface.entrypoints == ("backlog_py.cli.main", "backlog_py.mcp.tools")
 
 
 def test_mutation_by_name_rejects_unknown_surface():

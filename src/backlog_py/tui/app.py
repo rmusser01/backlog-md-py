@@ -391,6 +391,7 @@ class BacklogTuiApp(App[None]):
         priority: str | None = None,
         assignee: str | None = None,
         label: str | None = None,
+        queue_category: str | None = None,
     ) -> None:
         self.filter_state = FilterState(
             text=self.filter_state.text if text is None else text,
@@ -398,6 +399,7 @@ class BacklogTuiApp(App[None]):
             priority=self.filter_state.priority if priority is None else priority,
             assignee=self.filter_state.assignee if assignee is None else assignee,
             label=self.filter_state.label if label is None else label,
+            queue_category=self.filter_state.queue_category if queue_category is None else queue_category,
         )
         if self.snapshot is None:
             return

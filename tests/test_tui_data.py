@@ -278,6 +278,18 @@ def test_daemon_data_source_loads_board_with_task_view_hydration():
                 "description": task.description,
                 "path": relative_path,
                 "raw_source": task.raw_source,
+                "queueCategory": "eligible",
+                "effectiveStatus": "inprogress",
+                "runHistoryEvents": [
+                    {
+                        "eventId": "run-1",
+                        "type": "record_run",
+                        "actor": "codex",
+                        "timestamp": "2026-06-26T18:04:00Z",
+                        "result": "succeeded",
+                        "summary": "Verified.",
+                    }
+                ],
             },
         }
     )
@@ -292,6 +304,9 @@ def test_daemon_data_source_loads_board_with_task_view_hydration():
     assert snapshot.columns["To Do"] == ()
     assert snapshot.columns["Done"] == ()
     assert snapshot.columns["In Progress"][0].acceptance_criteria[0].checked is True
+    assert snapshot.columns["In Progress"][0].queue_category == "eligible"
+    assert snapshot.columns["In Progress"][0].effective_status == "inprogress"
+    assert snapshot.columns["In Progress"][0].run_history_events[0].summary == "Verified."
     assert [(request["tool"], request["arguments"].get("task_id")) for request in daemon.tool_calls] == [
         ("task_board", None),
         ("task_view", "TASK-1"),

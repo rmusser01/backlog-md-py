@@ -59,6 +59,60 @@ def test_browser_service_serves_health_board_json_and_html(tmp_path):
     assert "Example task" in html
 
 
+def test_browser_board_payload_includes_orchestration_queue_state(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    task = board["columns"]["In Progress"][0]
+    assert board["queueCategories"] == ["in_workflow"]
+    assert board["queueCategoryFilter"] is None
+    assert task["queueCategory"] == "in_workflow"
+    assert task["effectiveStatus"] == "inprogress"
+    assert task["orchestrationVersion"] == 0
+    assert task["validationIssues"] == []
+    assert task["runHistoryIssues"] == []
+
+
+def test_browser_board_queue_category_filter_is_readonly(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append(operation)
+        return fn()
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        unfiltered = _get_json(f"{service.root_url}/api/board")
+        in_workflow = _get_json(f"{service.root_url}/api/board?queueCategory=in_workflow")
+        claimed = _get_json(f"{service.root_url}/api/board?queueCategory=claimed")
+    finally:
+        service.shutdown()
+
+    assert in_workflow["queueCategoryFilter"] == "in_workflow"
+    assert in_workflow["columns"]["In Progress"][0]["id"] == "TASK-1"
+    assert claimed["queueCategoryFilter"] == "claimed"
+    assert claimed["columns"]["In Progress"] == []
+    assert in_workflow["revision"] == unfiltered["revision"]
+    assert claimed["revision"] == unfiltered["revision"]
+    assert lock_operations == []
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
 def test_browser_board_html_embeds_one_complete_script_block(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -474,6 +528,24 @@ def test_browser_board_html_exposes_service_lifecycle_controls(tmp_path):
 
 def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
+    MutableRepository.from_path(repo).replace_task_source(
+        "TASK-1",
+        _task_file(repo).read_text(encoding="utf-8")
+        + "\n## Run History\n"
+        + "<!-- SECTION:RUN_HISTORY:BEGIN -->\n"
+        + "<!-- RUN_HISTORY_ENTRY:BEGIN -->\n"
+        + "```yaml\n"
+        + "event_id: run-1\n"
+        + "type: record_run\n"
+        + "actor: codex\n"
+        + "timestamp: '2026-06-26T18:04:00Z'\n"
+        + "result: succeeded\n"
+        + "task_id: TASK-1\n"
+        + "```\n"
+        + "Implemented and verified.\n"
+        + "<!-- RUN_HISTORY_ENTRY:END -->\n"
+        + "<!-- SECTION:RUN_HISTORY:END -->\n",
+    )
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
     from backlog_py.browser.service import start_browser_service
@@ -504,6 +576,53 @@ def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
         "itemId": "2",
         "text": "Verification recorded",
     }
+    assert task["queueCategory"] == "in_workflow"
+    assert task["runHistoryIssues"] == []
+    assert task["runHistoryEvents"] == [
+        {
+            "eventId": "run-1",
+            "type": "record_run",
+            "actor": "codex",
+            "timestamp": "2026-06-26T18:04:00Z",
+            "result": "succeeded",
+            "summary": "Implemented and verified.",
+            "taskId": "TASK-1",
+            "fromStatus": "",
+            "toStatus": "",
+            "splitMode": "",
+            "files": [],
+            "verification": [],
+            "metadata": {},
+        }
+    ]
+
+
+def test_browser_task_detail_reports_malformed_run_history_as_validation_issue(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    _task_file(repo).write_text(
+        _task_file(repo).read_text(encoding="utf-8")
+        + "\n## Run History\n"
+        + "<!-- SECTION:RUN_HISTORY:BEGIN -->\n"
+        + "<!-- RUN_HISTORY_ENTRY:BEGIN -->\n"
+        + "<!-- SECTION:RUN_HISTORY:END -->\n",
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        board = _get_json(f"{service.root_url}/api/board")
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    board_task = board["columns"]["In Progress"][0]
+    assert board_task["queueCategory"] == "invalid"
+    assert [issue["code"] for issue in board_task["runHistoryIssues"]] == ["run_history_entry_unterminated"]
+    assert task["runHistoryEvents"] == []
+    assert [issue["code"] for issue in task["runHistoryIssues"]] == ["run_history_entry_unterminated"]
 
 
 def test_browser_task_detail_endpoint_returns_markdown_html_sections(tmp_path):
@@ -762,6 +881,28 @@ def test_browser_board_html_exposes_readonly_task_detail_dialog(tmp_path):
     assert "openTaskDetails" in html
     assert "Acceptance Criteria" in html
     assert "/api/tasks/" in html
+
+
+def test_browser_board_html_exposes_orchestration_readonly_visibility(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert 'id="queue-category-filter"' in html
+    assert "queue-badge" in html
+    assert 'id="task-dialog-queue-category"' in html
+    assert 'id="task-dialog-run-history"' in html
+    assert "renderRunHistoryEvents" in html
+    assert "orchestration_claim" not in html
+    assert "orchestration_release" not in html
+    assert "orchestration_transition" not in html
 
 
 def test_browser_board_html_exposes_markdown_detail_sections(tmp_path):

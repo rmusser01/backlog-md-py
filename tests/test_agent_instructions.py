@@ -29,6 +29,32 @@ REQUIRED_WORKFLOW_FRAGMENTS = (
     "`backlog-py daemon status --json`",
     "`project_status`",
 )
+REQUIRED_ORCHESTRATION_FRAGMENTS = (
+    "When orchestration metadata exists",
+    "`orchestration_status`",
+    "`orchestration_eligible`",
+    "`orchestration_claim_task`",
+    "`orchestration_record_run`",
+    "`orchestration_transition_task`",
+    "`orchestration_release_task`",
+    "claim before editing",
+    "record files and verification commands",
+    "transition to `review` or `triage`",
+    "do not jump directly to terminal states",
+    "stale leases",
+    "version conflicts",
+    "malformed run history",
+    "MCP discovery",
+    "daemon health",
+    "`backlog-py --cwd <repo> orchestration status --plain`",
+    "`backlog-py --cwd <repo> orchestration eligible --plain`",
+    "`backlog-py --cwd <repo> orchestration claim <id> --actor <agent> "
+    "--expected-version <version> --plain`",
+    "`backlog-py --cwd <repo> orchestration record-run <id> --actor <agent> "
+    '--result succeeded --summary "..." --file <path> --verification "pytest ..." --plain`',
+    "`backlog-py --cwd <repo> orchestration transition <id> review --actor <agent> "
+    "--expected-version <version> --plain`",
+)
 
 
 def _copy_fixture(tmp_path: Path) -> Path:
@@ -69,6 +95,17 @@ def test_cli_agents_update_instructions_writes_full_agent_workflow(tmp_path):
     assert result.exit_code == 0
     content = (repo / "AGENTS.md").read_text(encoding="utf-8")
     for fragment in REQUIRED_WORKFLOW_FRAGMENTS:
+        assert fragment in content
+
+
+def test_cli_agents_update_instructions_writes_orchestration_guidance(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "agents", "--update-instructions"])
+
+    assert result.exit_code == 0
+    content = (repo / "AGENTS.md").read_text(encoding="utf-8")
+    for fragment in REQUIRED_ORCHESTRATION_FRAGMENTS:
         assert fragment in content
 
 

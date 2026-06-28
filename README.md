@@ -65,6 +65,7 @@ backlog-py --cwd /tmp/backlog-md-py-demo board
 - Python helpers: import from `backlog_py.mcp` and `backlog_py.storage.project`
 - MCP stdio: `backlog-py-mcp`
 - Multi-agent singleton daemon: `backlog-py daemon ensure`
+- Orchestration coordination: `backlog-py --cwd /path/to/project orchestration status`
 - Browser board: `backlog-py --cwd /path/to/project browser --port 6420`
 - Optional TUI: install `backlog-md-py[tui]`, then run
   `backlog-py --cwd /path/to/project tui`

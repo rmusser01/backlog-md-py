@@ -7,6 +7,7 @@ from typing import Literal, Mapping, Sequence
 from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
 from backlog_py.core.repository import TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.orchestration import OrchestrationQueueItem, OrchestrationService, parse_run_history
 from backlog_py.security.paths import assert_path_within_base
 
 
@@ -20,6 +21,16 @@ class ChecklistItemView:
     item_id: str | None
     text: str
     checked: bool
+
+
+@dataclass(frozen=True)
+class RunHistoryEventView:
+    event_id: str
+    type: str
+    actor: str
+    timestamp: str
+    result: str
+    summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,11 @@ class TaskView:
     acceptance_criteria: tuple[ChecklistItemView, ...] = ()
     definition_of_done: tuple[ChecklistItemView, ...] = ()
     raw_source: str | None = None
+    queue_category: str | None = None
+    effective_status: str | None = None
+    orchestration_version: int | None = None
+    run_history_events: tuple[RunHistoryEventView, ...] = ()
+    run_history_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -109,6 +125,7 @@ class FilterState:
     priority: str | None = None
     assignee: str | None = None
     label: str | None = None
+    queue_category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -173,8 +190,18 @@ def checklist_items_from_parsed(parsed: ParsedTaskMarkdown, name: str) -> tuple[
 
 
 def task_view_from_record(project: BacklogProject, task: TaskRecord) -> TaskView:
+    queue_item = _queue_item_for_task(project, task.id)
+    return _task_view_from_record(project, task, queue_item)
+
+
+def _task_view_from_record(
+    project: BacklogProject,
+    task: TaskRecord,
+    queue_item: OrchestrationQueueItem | None,
+) -> TaskView:
     parsed = task.parsed
     frontmatter = parsed.frontmatter
+    run_history = parse_run_history(task.raw_source)
     return TaskView(
         id=task.id,
         title=task.title,
@@ -189,6 +216,21 @@ def task_view_from_record(project: BacklogProject, task: TaskRecord) -> TaskView
         acceptance_criteria=checklist_items_from_parsed(parsed, "AC"),
         definition_of_done=checklist_items_from_parsed(parsed, "DOD"),
         raw_source=task.raw_source,
+        queue_category=queue_item.category if queue_item is not None else None,
+        effective_status=queue_item.effective_status if queue_item is not None else None,
+        orchestration_version=queue_item.version if queue_item is not None else None,
+        run_history_events=tuple(
+            RunHistoryEventView(
+                event_id=event.event_id,
+                type=event.type,
+                actor=event.actor,
+                timestamp=event.timestamp,
+                result=event.result,
+                summary=event.summary,
+            )
+            for event in run_history.events
+        ),
+        run_history_issues=tuple(f"{issue.code}: {issue.message}" for issue in run_history.issues),
     )
 
 
@@ -223,6 +265,11 @@ def task_view_from_mcp_payload(project: BacklogProject, payload: Mapping[str, ob
         or _payload_checklist(payload.get("definitionOfDone"))
         or (() if parsed is None else checklist_items_from_parsed(parsed, "DOD")),
         raw_source=raw_source,
+        queue_category=_optional_string(_first_present(payload, "queueCategory", "queue_category")),
+        effective_status=_optional_string(_first_present(payload, "effectiveStatus", "effective_status")),
+        orchestration_version=_optional_int(_first_present(payload, "orchestrationVersion", "orchestration_version")),
+        run_history_events=_run_history_events_from_payload(payload, parsed),
+        run_history_issues=_run_history_issues_from_payload(payload, parsed),
     )
 
 
@@ -231,8 +278,9 @@ def board_snapshot_from_local(
     board: Mapping[str, Sequence[TaskRecord]],
     source: BoardSourceName = "local",
 ) -> BoardSnapshot:
+    queue_items = _queue_items_by_id(project)
     columns = {
-        status: tuple(task_view_from_record(project, task) for task in tasks)
+        status: tuple(_task_view_from_record(project, task, queue_items.get(task.id.casefold())) for task in tasks)
         for status, tasks in board.items()
     }
     return BoardSnapshot(
@@ -364,6 +412,15 @@ def _optional_string(value: object) -> str | None:
     return text or None
 
 
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _is_complete_dependency_status(status: str) -> bool:
     return status.strip().casefold() in {"done", "complete", "completed", "archived"}
 
@@ -388,6 +445,76 @@ def _payload_checklist(value: object) -> tuple[ChecklistItemView, ...]:
     return tuple(items)
 
 
+def _queue_items_by_id(project: BacklogProject) -> dict[str, OrchestrationQueueItem]:
+    return {item.task_id.casefold(): item for item in OrchestrationService(project).queue(include_completed=True).items}
+
+
+def _queue_item_for_task(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
+    return _queue_items_by_id(project).get(task_id.casefold())
+
+
+def _run_history_events_from_payload(
+    payload: Mapping[str, object],
+    parsed: ParsedTaskMarkdown | None,
+) -> tuple[RunHistoryEventView, ...]:
+    raw_events = _first_present(payload, "runHistoryEvents", "run_history_events")
+    if isinstance(raw_events, Sequence) and not isinstance(raw_events, (str, bytes, bytearray)):
+        events = [_run_history_event_from_mapping(event) for event in raw_events if isinstance(event, Mapping)]
+        return tuple(event for event in events if event is not None)
+    if parsed is None:
+        return ()
+    return tuple(
+        RunHistoryEventView(
+            event_id=event.event_id,
+            type=event.type,
+            actor=event.actor,
+            timestamp=event.timestamp,
+            result=event.result,
+            summary=event.summary,
+        )
+        for event in parse_run_history(parsed.raw_source).events
+    )
+
+
+def _run_history_event_from_mapping(value: Mapping[str, object]) -> RunHistoryEventView | None:
+    event_id = _optional_string(_first_present(value, "eventId", "event_id"))
+    event_type = _optional_string(value.get("type"))
+    actor = _optional_string(value.get("actor"))
+    timestamp = _optional_string(value.get("timestamp"))
+    result = _optional_string(value.get("result"))
+    if not event_id or not event_type or not actor or not timestamp or not result:
+        return None
+    return RunHistoryEventView(
+        event_id=event_id,
+        type=event_type,
+        actor=actor,
+        timestamp=timestamp,
+        result=result,
+        summary=_optional_string(value.get("summary")) or "",
+    )
+
+
+def _run_history_issues_from_payload(
+    payload: Mapping[str, object],
+    parsed: ParsedTaskMarkdown | None,
+) -> tuple[str, ...]:
+    raw_issues = _first_present(payload, "runHistoryIssues", "run_history_issues")
+    if isinstance(raw_issues, Sequence) and not isinstance(raw_issues, (str, bytes, bytearray)):
+        issues = [_run_history_issue_from_mapping(issue) for issue in raw_issues if isinstance(issue, Mapping)]
+        return tuple(issue for issue in issues if issue is not None)
+    if parsed is None:
+        return ()
+    return tuple(f"{issue.code}: {issue.message}" for issue in parse_run_history(parsed.raw_source).issues)
+
+
+def _run_history_issue_from_mapping(value: Mapping[str, object]) -> str | None:
+    code = _optional_string(value.get("code"))
+    message = _optional_string(value.get("message"))
+    if not code:
+        return None
+    return f"{code}: {message or ''}".rstrip()
+
+
 def _matches_filters(task: TaskView, filters: FilterState) -> bool:
     return (
         _matches_text_filter(task, filters.text)
@@ -395,6 +522,7 @@ def _matches_filters(task: TaskView, filters: FilterState) -> bool:
         and _matches_exact(task.priority, filters.priority)
         and _matches_member(task.assignees, filters.assignee)
         and _matches_member(task.labels, filters.label)
+        and _matches_exact(task.queue_category, filters.queue_category)
     )
 
 

@@ -14,7 +14,8 @@ This index is organized by what you are trying to do with `backlog-md-py`.
 ## Agent And MCP Integrators
 
 - [Integration guide](integration.md): CLI entry points, Python helper examples,
-  SDK-free MCP stdio behavior, and consuming-project validation notes.
+  orchestration coordination, SDK-free MCP stdio behavior, and
+  consuming-project validation notes.
 - [Singleton daemon](singleton-daemon.md): process reuse for multi-agent setups,
   daemon lifecycle commands, Codex-style MCP configuration, runtime files, and
   rollback paths.

@@ -133,6 +133,82 @@ backlog-py daemon status --json
 Agents can also call the read-only MCP `project_status` tool before
 write-heavy work to inspect recent task activity and project lock metadata.
 
+## Orchestration Coordination
+
+Orchestration metadata is optional frontmatter used to coordinate multi-agent
+task ownership, run history, and workflow state. It does not run agents, proxy
+LLM calls, or replace the Markdown files as the source of truth.
+
+Use these read-only CLI reports before claiming work:
+
+```bash
+backlog-py --cwd /path/to/project orchestration status --plain
+backlog-py --cwd /path/to/project orchestration queue --plain
+backlog-py --cwd /path/to/project orchestration eligible --plain
+backlog-py --cwd /path/to/project orchestration claims --plain
+backlog-py --cwd /path/to/project orchestration stale-leases --plain
+```
+
+The equivalent MCP tools are `orchestration_status`, `orchestration_queue`,
+`orchestration_eligible`, `orchestration_claims`, and
+`orchestration_stale_leases`. Queue categories are:
+
+- `eligible`: claimable work with complete dependencies and no active lease.
+- `claimed`: work with an active, unexpired lease.
+- `stale_claim`: work whose lease has expired.
+- `blocked_by_dependencies`: work waiting on incomplete dependencies.
+- `in_workflow`: work already in a non-terminal orchestration state.
+- `terminal`: completed orchestration work.
+- `invalid`: malformed orchestration metadata or malformed run history.
+
+Use mutation commands with the latest `orchestration.version` from the queue
+payload. Supply an idempotency key when retrying client-side operations:
+
+```bash
+backlog-py --cwd /path/to/project orchestration claim TASK-1 --actor codex --expected-version 3 --idempotency-key claim-TASK-1-codex --plain
+backlog-py --cwd /path/to/project orchestration record-run TASK-1 --actor codex --result succeeded --summary "Implemented parser fix." --file src/parser.py --verification "uv run --extra dev python -m pytest tests/test_parser.py -q" --plain
+backlog-py --cwd /path/to/project orchestration transition TASK-1 review --actor codex --expected-version 4 --plain
+backlog-py --cwd /path/to/project orchestration release TASK-1 --actor codex --expected-version 5 --reason "Blocked on review." --plain
+backlog-py --cwd /path/to/project orchestration split TASK-1 --mode child --actor codex --expected-version 5 --item "Add parser regression tests" --plain
+```
+
+The equivalent MCP mutation tools are `orchestration_claim_task`,
+`orchestration_record_run`, `orchestration_transition_task`,
+`orchestration_release_task`, and `orchestration_split_task`.
+
+Run history is stored in the task Markdown under a generated `Run History`
+section. Each event has a YAML metadata block plus a human-readable summary:
+
+````markdown
+## Run History
+<!-- SECTION:RUN_HISTORY:BEGIN -->
+<!-- RUN_HISTORY_ENTRY:BEGIN -->
+```yaml
+event_id: run-1
+type: record_run
+actor: codex
+timestamp: 2026-06-26T18:04:00Z
+result: succeeded
+task_id: TASK-1
+files:
+  - src/parser.py
+verification:
+  - uv run --extra dev python -m pytest tests/test_parser.py -q
+```
+Implemented parser fix.
+<!-- RUN_HISTORY_ENTRY:END -->
+<!-- SECTION:RUN_HISTORY:END -->
+````
+
+Mutation conflicts are deliberate safety checks. On an expected-version
+conflict, refresh `orchestration queue` or `orchestration status`, inspect the
+new version and lease owner, then retry only if the work is still yours. On an
+idempotency conflict, repeat the original metadata or choose a new idempotency
+key for a genuinely new action. Fix malformed run history before recording new
+events, and resolve stale leases by checking `stale-leases`, contacting the
+lease owner when possible, then releasing or reclaiming according to project
+policy.
+
 ### TUI vs Automation Interfaces
 
 `backlog-py tui` is a human-facing Textual interface for keyboard board work.
