@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-06-27 (Stable)
+
+### Changed
+
+- Promote `backlog-md-py` to the stable 1.0 support contract for the audited
+  local-file CLI, Python helper, MCP, daemon, browser-board, and TUI surfaces.
+- Keep the disposable SQLite read index outside the stable API while preserving
+  Markdown files as the authoritative task source.
+- Clarify that full browser parity claims still require fresh browser release
+  evidence even when audited browser feature coverage is implemented.
+- Attach fresh browser release evidence for rich-edit round trip and
+  desktop/mobile screenshot coverage.
+
 ## 0.3.0 - 2026-06-20 (Beta)
 
 ### Added

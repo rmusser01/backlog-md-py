@@ -1,0 +1,8 @@
+opened browser board and verified TASK-1 is visible
+captured desktop screenshot: artifacts/browser-desktop.png
+captured mobile screenshot: artifacts/browser-mobile.png
+opened TASK-1 edit dialog
+entered release evidence text in Description Rich mode
+switched to Preview and verified rendered release evidence text
+saved edit and verified board reloaded with TASK-1
+opened task details and verified saved rich-edit text is rendered

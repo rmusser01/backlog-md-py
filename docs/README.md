@@ -8,8 +8,8 @@ This index is organized by what you are trying to do with `backlog-md-py`.
   project, run the first commands, and learn the mutation safety rules.
 - [Integration guide](integration.md): command examples for the CLI, Python
   helpers, MCP stdio, browser board, TUI, and compatibility report.
-- [Stability policy](stability-policy.md): what beta support means and what is
-  covered by the supported contract.
+- [Stability policy](stability-policy.md): what stable support means and what
+  is covered by the supported contract.
 
 ## Agent And MCP Integrators
 
@@ -46,8 +46,8 @@ This index is organized by what you are trying to do with `backlog-md-py`.
   rules for browser readiness claims.
 - [Cutover validation result](cutover-validation-results-2026-05-13.md): the
   first completed agent-critical validation record.
-- [Beta release readiness](release-readiness-beta-2026-05-23.md): the 0.2.0
-  beta promotion checklist and validation record.
+- [Beta release readiness](release-readiness-beta-2026-05-23.md): the
+  historical 0.2.0 beta promotion checklist and validation record.
 - [Post-TUI beta validation](release-readiness-post-tui-2026-05-29.md): the
   package, MCP/daemon, TUI-extra, compatibility, and copied-repository smoke
   refresh after optional TUI settings merged.

@@ -1,13 +1,13 @@
 # Stability Policy
 
-`backlog-md-py` is in beta starting with the 0.2.0 release line. Beta means the
-documented local-file CLI, MCP, daemon, browser-board, and Python helper
-workflows are ready for real consuming-project integration after validation.
-It does not mean the project has a 1.0 API freeze.
+`backlog-md-py` is stable starting with the 1.0.0 release line. Stable means
+the documented local-file CLI, MCP, daemon, browser-board, TUI, and Python
+helper workflows are covered by the 1.x compatibility contract after release
+validation.
 
 ## Supported Contract
 
-The beta support contract covers:
+The stable support contract covers:
 
 - Python 3.11, 3.12, and 3.13 package installation from released wheels and
   source distributions.
@@ -39,24 +39,29 @@ supported contract.
 
 ## Change Policy
 
-Before 1.0, minor releases may refine CLI, MCP, browser, or Python helper
-behavior when the parity inventory or safety model requires it. Patch releases
-should preserve the beta supported contract and focus on bug fixes,
-documentation, compatibility evidence, and release automation.
+Within the 1.x line, minor releases may add backward-compatible CLI, MCP,
+browser, TUI, daemon, or Python helper behavior when the parity inventory or
+safety model requires it. Patch releases should preserve the stable supported
+contract and focus on bug fixes, documentation, compatibility evidence, and
+release automation. Breaking changes require a new major version or an explicit
+deprecation path.
 
-Known behavior outside the beta contract must stay explicitly documented in the
+Known behavior outside the stable contract must stay explicitly documented in the
 parity docs instead of being implied by the README.
 
-## Beta Release Gate
+## Stable Release Gate
 
-A beta release candidate should pass:
+A stable release candidate should pass:
 
 - `uv run --extra dev python -m pytest tests -v`
+- `uv run --extra dev --extra tui python -m pytest tests -q`
 - `uv run --extra dev python -m bandit -r src`
 - `git diff --check`
 - `uv run --extra dev python -m build`
 - `uv run --extra dev python -m twine check dist/*`
-- `backlog-py compat status --release-evidence <manifest.json>`
+- `backlog-py compat status --json`
+- `backlog-py compat status --release-evidence <manifest.json>` when release
+  notes advertise full browser parity
 - copied-repository mutation smoke with diff review
 - direct `backlog-py-mcp` stdio smoke
 - singleton daemon smoke for multi-agent use
