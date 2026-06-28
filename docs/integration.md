@@ -4,10 +4,11 @@
 projects that need local-file Backlog.md compatibility without a Node or Bun
 runtime dependency.
 
-The project is in beta. The first agent-critical local-file cutover validation
-passed on 2026-05-13, and the supported release contract is documented in
-`docs/stability-policy.md`. Keep live-repository mutation behind
-copied-repository smoke tests and review for each consuming project.
+The project is stable starting with the 1.0 release line. The first
+agent-critical local-file cutover validation passed on 2026-05-13, and the
+supported release contract is documented in `docs/stability-policy.md`. Keep
+live-repository mutation behind copied-repository smoke tests and review for
+each consuming project.
 
 ## Install
 
