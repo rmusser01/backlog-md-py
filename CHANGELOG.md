@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- Add MCP `task_create(..., draft=False, ...)` support so task creation can
+  create draft tasks with the same rich sections as the CLI `task create --draft`
+  path.
+
 ## 1.0.0 - 2026-06-27 (Stable)
 
 ### Changed
