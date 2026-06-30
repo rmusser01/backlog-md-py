@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Callable, TypeVar
 
-from backlog_py.core.models import BacklogProject
 from backlog_py.core.documents import DocumentRecord, DocumentService
+from backlog_py.core.drafts import DraftService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
+from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
 from backlog_py.orchestration import (
     OrchestrationIdempotencyConflict,
@@ -139,36 +140,80 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
     """Create a task through the safe mutation repository."""
     def mutate() -> dict[str, Any]:
         task_id = _get_alias(kwargs, "task_id", "id")
-        repository = MutableRepository(_fresh_project(project))
-        task = repository.create_task(
-            title=str(kwargs.get("title") or ""),
-            task_id=None if task_id is None else str(task_id),
-            status=_optional_string(_get_alias(kwargs, "status")),
-            description=str(kwargs.get("description") or ""),
-            plan=str(_get_alias(kwargs, "implementationPlan", "implementation_plan", "plan") or ""),
-            notes=str(kwargs.get("notes") or ""),
-            final_summary=str(_get_alias(kwargs, "finalSummary", "final_summary") or ""),
-            acceptance_criteria=_optional_string_list(_get_alias(kwargs, "acceptanceCriteria", "acceptance_criteria")),
-            definition_of_done=_optional_string_list(_get_alias(kwargs, "definitionOfDone", "definition_of_done")),
-            definition_of_done_add=_optional_string_list(
-                _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
-            ),
-            disable_definition_of_done_defaults=_coerce_bool(
-                _get_alias(kwargs, "disableDefinitionOfDoneDefaults", "disable_definition_of_done_defaults")
-            )
-            or False,
-            dependencies=_optional_string_list(_get_alias(kwargs, "dependencies")),
-            assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
-            labels=_optional_string_list(_get_alias(kwargs, "labels")),
-            priority=_optional_string(_get_alias(kwargs, "priority")),
-            milestone=_optional_string(_get_alias(kwargs, "milestone")),
-            ordinal=_get_alias(kwargs, "ordinal"),
-            parent_task_id=_optional_string(_get_alias(kwargs, "parentTaskId", "parent_task_id", "parent")),
-            references=_optional_string_list(_get_alias(kwargs, "references")),
-            documentation=_optional_string_list(_get_alias(kwargs, "documentation")),
-            modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
-            on_status_change=_optional_status_callback(_get_alias(kwargs, "onStatusChange", "on_status_change")),
+        fresh_project = _fresh_project(project)
+        title = str(kwargs.get("title") or "")
+        description = str(kwargs.get("description") or "")
+        plan = str(_get_alias(kwargs, "implementationPlan", "implementation_plan", "plan") or "")
+        notes = str(kwargs.get("notes") or "")
+        final_summary = str(_get_alias(kwargs, "finalSummary", "final_summary") or "")
+        acceptance_criteria = _optional_string_list(_get_alias(kwargs, "acceptanceCriteria", "acceptance_criteria"))
+        definition_of_done = _optional_string_list(_get_alias(kwargs, "definitionOfDone", "definition_of_done"))
+        definition_of_done_add = _optional_string_list(
+            _get_alias(kwargs, "definitionOfDoneAdd", "definition_of_done_add")
         )
+        disable_definition_of_done_defaults = (
+            _coerce_bool(_get_alias(kwargs, "disableDefinitionOfDoneDefaults", "disable_definition_of_done_defaults"))
+            or False
+        )
+        dependencies = _optional_string_list(_get_alias(kwargs, "dependencies"))
+        assignees = _optional_string_list(_get_alias(kwargs, "assignee", "assignees"))
+        labels = _optional_string_list(_get_alias(kwargs, "labels"))
+        priority = _optional_string(_get_alias(kwargs, "priority"))
+        milestone = _optional_string(_get_alias(kwargs, "milestone"))
+        ordinal = _get_alias(kwargs, "ordinal")
+        parent_task_id = _optional_string(_get_alias(kwargs, "parentTaskId", "parent_task_id", "parent"))
+        references = _optional_string_list(_get_alias(kwargs, "references"))
+        documentation = _optional_string_list(_get_alias(kwargs, "documentation"))
+        modified_files = _optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files"))
+        if _coerce_bool(_get_alias(kwargs, "draft")):
+            task = DraftService(fresh_project).create_draft(
+                title=title,
+                draft_id=None if task_id is None else str(task_id),
+                description=description,
+                plan=plan,
+                notes=notes,
+                final_summary=final_summary,
+                acceptance_criteria=acceptance_criteria,
+                definition_of_done=definition_of_done,
+                definition_of_done_add=definition_of_done_add,
+                disable_definition_of_done_defaults=disable_definition_of_done_defaults,
+                dependencies=dependencies,
+                assignees=assignees,
+                labels=labels,
+                priority=priority,
+                milestone=milestone,
+                ordinal=ordinal,
+                parent_task_id=parent_task_id,
+                references=references,
+                documentation=documentation,
+                modified_files=modified_files,
+            )
+        else:
+            repository = MutableRepository(fresh_project)
+            task = repository.create_task(
+                title=title,
+                task_id=None if task_id is None else str(task_id),
+                status=_optional_string(_get_alias(kwargs, "status")),
+                description=description,
+                plan=plan,
+                notes=notes,
+                final_summary=final_summary,
+                acceptance_criteria=acceptance_criteria,
+                definition_of_done=definition_of_done,
+                definition_of_done_add=definition_of_done_add,
+                disable_definition_of_done_defaults=disable_definition_of_done_defaults,
+                dependencies=dependencies,
+                assignees=assignees,
+                labels=labels,
+                priority=priority,
+                milestone=milestone,
+                ordinal=ordinal,
+                parent_task_id=parent_task_id,
+                references=references,
+                documentation=documentation,
+                modified_files=modified_files,
+                on_status_change=_optional_status_callback(_get_alias(kwargs, "onStatusChange", "on_status_change")),
+            )
         return _task_detail(project, task)
 
     return _locked(project, "mcp_task_create", mutate)

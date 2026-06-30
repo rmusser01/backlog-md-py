@@ -211,6 +211,7 @@ def test_tools_list_advertises_task_mutation_metadata_fields():
     task_edit = _tool_properties("task_edit")
 
     assert {
+        "draft",
         "description",
         "notes",
         "acceptanceCriteria",
@@ -251,6 +252,72 @@ def test_tools_list_advertises_task_mutation_metadata_fields():
         "removeDocumentation",
         "modifiedFiles",
     }.issubset(task_edit)
+
+
+def test_task_create_protocol_can_create_draft_with_rich_sections(tmp_path):
+    repo = _repo(tmp_path)
+
+    response = _call_tool(
+        "task_create",
+        {
+            "project": str(repo),
+            "title": "MCP Draft",
+            "id": "draft-7",
+            "draft": True,
+            "description": "Draft description.",
+            "notes": "Draft notes.",
+            "acceptanceCriteria": ["Draft acceptance criterion"],
+            "implementationPlan": "Draft plan.",
+            "finalSummary": "Draft final summary.",
+        },
+    )
+
+    payload = _tool_payload(response)
+    assert payload["id"] == "draft-7"
+    assert payload["status"] == "Draft"
+    assert payload["path"].startswith("backlog/drafts/")
+    draft_source = next((repo / "backlog" / "drafts").glob("draft-7 - *.md")).read_text(encoding="utf-8")
+    assert "Draft description." in draft_source
+    assert "Draft notes." in draft_source
+    assert "Draft acceptance criterion" in draft_source
+    assert "Draft plan." in draft_source
+    assert "Draft final summary." in draft_source
+    assert not list((repo / "backlog" / "tasks").glob("draft-7 - *.md"))
+
+
+def test_task_edit_protocol_updates_notes_and_acceptance_criteria(tmp_path):
+    repo = _repo(tmp_path)
+    _task_path(repo).write_text(
+        _task_path(repo).read_text(encoding="utf-8")
+        + "\n"
+        "## Acceptance Criteria\n"
+        "<!-- AC:BEGIN -->\n"
+        "- [ ] #1 Existing criterion\n"
+        "<!-- AC:END -->\n\n"
+        "## Implementation Notes\n\n"
+        "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\n"
+        "Original notes.\n"
+        "<!-- SECTION:IMPLEMENTATION_NOTES:END -->\n",
+        encoding="utf-8",
+    )
+
+    response = _call_tool(
+        "task_edit",
+        {
+            "project": str(repo),
+            "task_id": "TASK-1",
+            "notes": "Replacement notes.",
+            "appendNotes": "Appended notes.",
+            "acceptanceCriteria": ["Protocol acceptance criterion"],
+        },
+    )
+
+    payload = _tool_payload(response)
+    assert payload["id"] == "TASK-1"
+    task_source = _task_path(repo).read_text(encoding="utf-8")
+    assert "Replacement notes." in task_source
+    assert "Appended notes." in task_source
+    assert "Protocol acceptance criterion" in task_source
 
 
 def test_tools_list_advertises_document_and_milestone_optional_fields():
