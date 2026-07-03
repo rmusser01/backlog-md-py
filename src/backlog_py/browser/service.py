@@ -4,6 +4,7 @@ from collections import deque
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import re
 import threading
 import webbrowser
@@ -36,6 +37,11 @@ from backlog_py.storage.config import (
 )
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+# Mermaid diagram support loads a third-party ESM module. It defaults to the
+# public CDN, but can be pointed at a self-hosted/vendored copy or disabled
+# entirely (set the env var to an empty string) to avoid the external fetch.
+_BROWSER_MERMAID_DEFAULT_URL = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs"
+_BROWSER_MERMAID_URL_ENV = "BACKLOG_PY_BROWSER_MERMAID_URL"
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
@@ -652,8 +658,17 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
             "queue_filter": queue_filter,
             "board_css": _load_browser_text_resource("assets", "board.css").rstrip("\n"),
             "board_js": _load_browser_text_resource("assets", "board.js").rstrip("\n"),
+            "mermaid_url": escape(_resolve_mermaid_url(), quote=True),
         }
     )
+
+
+def _resolve_mermaid_url() -> str:
+    """Resolve the Mermaid module URL; empty string disables diagram rendering."""
+    value = os.environ.get(_BROWSER_MERMAID_URL_ENV)
+    if value is None:
+        return _BROWSER_MERMAID_DEFAULT_URL
+    return value.strip()
 
 
 def _render_markdown_toolbar() -> str:

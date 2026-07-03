@@ -55,12 +55,18 @@
       list.appendChild(empty);
     }
 
-    const mermaidModuleUrl = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    const mermaidModuleUrl = (boardElement?.dataset.mermaidUrl || "").trim();
     let mermaidModulePromise = null;
 
     async function renderMermaidDiagrams(root = document) {
       const diagrams = Array.from(root.querySelectorAll("[data-mermaid-diagram] .mermaid"));
       if (diagrams.length === 0) return;
+      if (!mermaidModuleUrl) {
+        diagrams.forEach((diagram) => {
+          diagram.closest("[data-mermaid-diagram]")?.classList.add("mermaid-render-disabled");
+        });
+        return;
+      }
       try {
         mermaidModulePromise = mermaidModulePromise || import(mermaidModuleUrl);
         const module = await mermaidModulePromise;
