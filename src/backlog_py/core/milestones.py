@@ -138,7 +138,15 @@ class MilestoneService:
 
     def _task_reference_updates(self, old_name: str, new_name: str | None) -> list[_TaskReferenceUpdate]:
         updates: list[_TaskReferenceUpdate] = []
-        for task in ReadOnlyRepository(self.project).list_tasks():
+        # Read the local working tree only. Active-branch snapshots can return a
+        # record whose content is from another branch but whose path points at
+        # the local file, which would overwrite local content on write.
+        local_repository = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=False,
+        )
+        for task in local_repository.list_tasks():
             milestone = task.parsed.frontmatter.get("milestone")
             if not isinstance(milestone, str) or milestone.casefold() != old_name.casefold():
                 continue

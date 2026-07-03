@@ -68,7 +68,11 @@ class DraftService:
         normalized_id = _normalize_draft_id(draft_id) if draft_id is not None else self._next_draft_id()
         if self._draft_exists(normalized_id):
             raise TaskMutationError(f"Draft id already exists: {normalized_id}")
-        tasks = ReadOnlyRepository(self.project).list_tasks()
+        tasks = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=False,
+        ).list_tasks()
         current_config = load_config(self.project.config_path)
         normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
@@ -141,7 +145,14 @@ class DraftService:
         return _load_task(target)
 
     def demote_task(self, task_id: str) -> TaskRecord:
-        task = ReadOnlyRepository(self.project).get_task(task_id)
+        # Local working tree only: an active-branch snapshot could otherwise
+        # write another branch's content into the new draft (and unlink the
+        # local file), losing local edits.
+        task = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=False,
+        ).get_task(task_id)
         draft_id = self._next_draft_id()
         target = self._draft_path(draft_id, task.title)
         if target.exists():

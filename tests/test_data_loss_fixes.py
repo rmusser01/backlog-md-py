@@ -5,6 +5,7 @@ verified against the shipped 1.0.0 code before the fix.
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,65 @@ def _project(tmp_path: Path, **config_overrides: str) -> BacklogProject:
             config=load_config(project.config_path),
         )
     return project
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "PATH": _os_path(),
+        },
+    )
+    return result.stdout.strip()
+
+
+def _os_path() -> str:
+    import os
+
+    return os.environ.get("PATH", "/usr/bin:/bin")
+
+
+# --- #6: milestone/draft mutations pull other-branch content ----------------
+
+def test_rename_milestone_does_not_overwrite_local_with_branch_content(tmp_path):
+    from backlog_py.core.milestones import MilestoneService
+
+    # A real git repo with default remote-aware config so active-branch
+    # snapshots are merged into reads (the source of the contamination).
+    project = init_project(tmp_path, no_git=False).project
+    root = project.root
+    _git(root, "init")
+    repo = MutableRepository(project)
+    MilestoneService(project).add_milestone("M1")
+    task = repo.create_task(title="Item", milestone="M1", description="MAIN VERSION")
+    task_path = task.path
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "main version")
+    default_branch = _git(root, "branch", "--show-current")
+
+    _git(root, "checkout", "-b", "feature")
+    repo.edit_task(task.id, description="FEATURE VERSION")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "feature version")
+    _git(root, "checkout", default_branch)
+
+    assert "MAIN VERSION" in task_path.read_text(encoding="utf-8")
+
+    MilestoneService(project).rename_milestone("M1", "M1-renamed", update_tasks=True)
+
+    after = task_path.read_text(encoding="utf-8")
+    assert "FEATURE VERSION" not in after, "local task file was overwritten with feature-branch content"
+    assert "MAIN VERSION" in after
+    assert "milestone: M1-renamed" in after
 
 
 # --- #1: task IDs reused after completion -----------------------------------
