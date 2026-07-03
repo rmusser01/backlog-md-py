@@ -124,7 +124,7 @@ def _load_decision(base: Path, path: Path) -> DecisionRecord:
 
 
 def _render_decision(frontmatter: dict[str, Any]) -> str:
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     body = "\n## Context\n\n\n## Decision\n\n\n## Consequences\n"
     return f"---\n{yaml_text}\n---\n{body}"
 

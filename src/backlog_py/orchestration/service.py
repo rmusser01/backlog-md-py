@@ -920,7 +920,7 @@ def _replace_frontmatter_value(source: str, parsed: ParsedTaskMarkdown, key: str
     frontmatter = dict(parsed.frontmatter)
     frontmatter[key] = value
     newline = "\r\n" if "\r\n" in source else "\n"
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     yaml_text = yaml_text.replace("\n", newline)
     return f"---{newline}{yaml_text}{newline}---{newline}{parsed.body}"
 

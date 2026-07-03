@@ -91,6 +91,21 @@ def test_rename_milestone_does_not_overwrite_local_with_branch_content(tmp_path)
     assert "milestone: M1-renamed" in after
 
 
+# --- L2: non-ASCII frontmatter stored readably, not as \uXXXX escapes --------
+
+def test_non_ascii_title_stored_as_utf8(tmp_path):
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    task = repo.create_task(title="Café résumé", assignees=["José"])
+
+    raw = task.path.read_text(encoding="utf-8")
+    assert "Café résumé" in raw
+    assert "José" in raw
+    assert "\\u" not in raw and "\\x" not in raw, "non-ASCII was escaped instead of written as UTF-8"
+    # And it still round-trips through the parser.
+    assert repo.get_task(task.id).title == "Café résumé"
+
+
 # --- M4: atomic write must not translate newlines (Windows \r\r\n) ----------
 
 def test_atomic_write_preserves_crlf_bytes(tmp_path):

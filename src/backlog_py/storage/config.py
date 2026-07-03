@@ -96,7 +96,7 @@ def replace_definition_of_done_defaults(project: BacklogProject, items: object) 
     raw = _load_raw_config(project.config_path)
     key = "definition_of_done" if "definition_of_done" in raw else "definitionOfDone"
     raw[key] = normalized
-    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n")
     return load_config(project.config_path)
 
@@ -160,7 +160,7 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
     else:
         raw[raw_key] = parsed_value
         display_value = parsed_value
-    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n")
     return raw_key, display_value
 

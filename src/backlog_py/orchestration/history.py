@@ -71,7 +71,7 @@ def parse_run_history(source: str) -> RunHistoryParseResult:
 def render_run_history_entry(event: OrchestrationRunEvent) -> str:
     _validate_entry_limits(event)
     metadata = _render_metadata(event)
-    yaml_text = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True).strip()
     summary = _cap_text(_normalize_summary(event.summary), MAX_RUN_HISTORY_SUMMARY_CHARS)
     body = f"{summary}\n" if summary else ""
     return f"{ENTRY_BEGIN}\n```yaml\n{yaml_text}\n```\n{body}{ENTRY_END}\n"

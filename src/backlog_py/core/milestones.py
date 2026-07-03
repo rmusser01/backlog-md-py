@@ -155,7 +155,7 @@ class MilestoneService:
                 frontmatter.pop("milestone", None)
             else:
                 frontmatter["milestone"] = new_name
-            yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+            yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
             source = f"---\n{yaml_text}\n---\n{task.parsed.body}"
             parse_task_markdown(source)
             try:
@@ -217,7 +217,7 @@ def _unlink_best_effort(path: Path) -> None:
 
 
 def _render_milestone(frontmatter: dict[str, Any], content: str) -> str:
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     body = content.strip()
     return f"---\n{yaml_text}\n---\n\n{body}\n"
 

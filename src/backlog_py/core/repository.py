@@ -211,8 +211,8 @@ class ReadOnlyRepository:
             try:
                 self._visible_task_records = self._load_visible_task_records_from_sqlite_index()
                 return self._visible_task_records
-            except (OSError, SQLiteIndexError, ValueError):
-                pass
+            except (OSError, SQLiteIndexError, ValueError) as exc:
+                logger.warning("SQLite task index unavailable, falling back to markdown: {}", exc)
         self._visible_task_records = self._load_visible_task_records_from_markdown()
         return self._visible_task_records
 
@@ -902,7 +902,7 @@ def _new_task_source(
         frontmatter["modified_files"] = list(modified_files)
     if on_status_change:
         frontmatter["onStatusChange"] = on_status_change
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     return (
         f"---\n{yaml_text}\n---\n\n"
         "## Description\n\n"
@@ -1214,7 +1214,7 @@ def _replace_frontmatter_values(
         else:
             frontmatter[key] = value
     newline = "\r\n" if "\r\n" in source else "\n"
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     yaml_text = yaml_text.replace("\n", newline)
     body = parsed.body
     return f"---{newline}{yaml_text}{newline}---{newline}{body}"
