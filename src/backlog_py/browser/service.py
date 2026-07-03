@@ -37,10 +37,12 @@ from backlog_py.storage.config import (
 )
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
-# Mermaid diagram support loads a third-party ESM module. It defaults to the
-# public CDN, but can be pointed at a self-hosted/vendored copy or disabled
-# entirely (set the env var to an empty string) to avoid the external fetch.
-_BROWSER_MERMAID_DEFAULT_URL = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs"
+# Mermaid diagram support. By default the board loads a locally vendored,
+# self-contained UMD build served from this process, so no third-party request
+# is ever made (privacy-respecting). Override with a URL (e.g. a CDN or a newer
+# local copy) or set the env var to an empty string to disable rendering.
+_BROWSER_MERMAID_DEFAULT_URL = "assets/mermaid.min.js"
+_BROWSER_MERMAID_ASSET_PATH = "/assets/mermaid.min.js"
 _BROWSER_MERMAID_URL_ENV = "BACKLOG_PY_BROWSER_MERMAID_URL"
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
@@ -260,6 +262,12 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         path = parsed_url.path
         if path == "/favicon.ico":
             self._send_empty(HTTPStatus.NO_CONTENT, content_type="image/x-icon")
+            return
+        if path == _BROWSER_MERMAID_ASSET_PATH:
+            self._send_cached_asset(
+                _load_browser_text_resource("assets", "mermaid.min.js"),
+                content_type="application/javascript; charset=utf-8",
+            )
             return
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True, "projectName": self.server.project.config.project_name})
@@ -572,6 +580,23 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        _record_service_request(
+            self.server,
+            method=self.command,
+            raw_path=self.path,
+            status=HTTPStatus.OK,
+            content_type=content_type,
+        )
+
+    def _send_cached_asset(self, text: str, *, content_type: str) -> None:
+        data = text.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        # The vendored asset is version-pinned and immutable.
+        self.send_header("Cache-Control", "public, max-age=86400, immutable")
         self.end_headers()
         self.wfile.write(data)
         _record_service_request(
