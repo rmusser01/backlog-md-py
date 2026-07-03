@@ -40,3 +40,20 @@ def test_view_missing_task_reports_clean_error(tmp_path):
 def test_edit_unknown_status_reports_clean_error(tmp_path):
     result = _invoke(_repo(tmp_path), "task", "edit", "task-1", "-s", "Bogus Status")
     _assert_clean_error(result)
+
+
+def test_edit_with_parent_is_rejected_not_silently_ignored(tmp_path):
+    # edit_task cannot reparent, so --parent must error rather than report success.
+    result = _invoke(_repo(tmp_path), "task", "edit", "task-1", "--parent", "task-1")
+    _assert_clean_error(result)
+    assert "parent" in result.output.casefold()
+
+
+def test_create_with_edit_only_flag_is_rejected(tmp_path):
+    result = _invoke(_repo(tmp_path), "task", "create", "New task", "--check-ac", "1")
+    _assert_clean_error(result)
+
+
+def test_create_with_title_flag_is_rejected(tmp_path):
+    result = _invoke(_repo(tmp_path), "task", "create", "New task", "--title", "Other")
+    _assert_clean_error(result)

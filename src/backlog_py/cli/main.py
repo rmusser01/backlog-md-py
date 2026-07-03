@@ -166,6 +166,64 @@ def init_command(
         click.echo(f"Updated {update.path_relative}")
 
 
+def _reject_edit_only_create_flags(
+    *,
+    title: str | None,
+    append_plan: tuple[str, ...],
+    clear_plan: bool,
+    append_notes: str | None,
+    append_final_summary: tuple[str, ...],
+    clear_final_summary: bool,
+    check_ac: tuple[int, ...],
+    check_dod: tuple[int, ...],
+    uncheck_ac: tuple[int, ...],
+    uncheck_dod: tuple[int, ...],
+    remove_ac: tuple[int, ...],
+    remove_dod: tuple[int, ...],
+) -> None:
+    """Reject flags that only apply to 'task edit' so they never silently no-op on create."""
+    offenders: list[str] = []
+    if title is not None:
+        offenders.append("--title (use the TITLE argument)")
+    if append_notes is not None:
+        offenders.append("--append-notes")
+    if clear_plan:
+        offenders.append("--clear-plan")
+    if clear_final_summary:
+        offenders.append("--clear-final-summary")
+    for name, value in (
+        ("--append-plan", append_plan),
+        ("--append-final-summary", append_final_summary),
+        ("--check-ac", check_ac),
+        ("--check-dod", check_dod),
+        ("--uncheck-ac", uncheck_ac),
+        ("--uncheck-dod", uncheck_dod),
+        ("--remove-ac", remove_ac),
+        ("--remove-dod", remove_dod),
+    ):
+        if value:
+            offenders.append(name)
+    if offenders:
+        raise click.UsageError(
+            "These options apply to 'task edit', not 'task create': " + ", ".join(offenders)
+        )
+
+
+def _reject_unsupported_edit_flags(*, parent_task_id: str | None, task_id: str | None, draft: bool) -> None:
+    """Reject flags 'task edit' cannot honor so they never silently no-op."""
+    offenders: list[str] = []
+    if parent_task_id is not None:
+        offenders.append("--parent")
+    if task_id is not None:
+        offenders.append("--id")
+    if draft:
+        offenders.append("--draft")
+    if offenders:
+        raise click.UsageError(
+            "These options are not supported by 'task edit': " + ", ".join(offenders)
+        )
+
+
 @main.command("task")
 @click.argument("args", nargs=-1)
 @click.option("--plain", is_flag=True, help="Print plain text output.")
@@ -280,6 +338,22 @@ def task_command(
     if args and args[0] == "create":
         if len(args) != 2:
             raise click.UsageError("Usage: task create TITLE")
+        _reject_edit_only_create_flags(
+            title=title,
+            append_plan=append_plan,
+            clear_plan=clear_plan,
+            append_notes=append_notes,
+            append_final_summary=append_final_summary,
+            clear_final_summary=clear_final_summary,
+            check_ac=check_ac,
+            check_dod=check_dod,
+            uncheck_ac=uncheck_ac,
+            uncheck_dod=uncheck_dod,
+            remove_ac=remove_ac,
+            remove_dod=remove_dod,
+        )
+        if draft and status is not None:
+            raise click.UsageError("Drafts are always created with status 'Draft'; --status is not allowed with --draft.")
         if clear_milestone:
             raise click.UsageError("Cannot use --clear-milestone with task create.")
         if draft:
@@ -343,6 +417,7 @@ def task_command(
     if args and args[0] == "edit":
         if len(args) != 2:
             raise click.UsageError("Usage: task edit TASK_ID")
+        _reject_unsupported_edit_flags(parent_task_id=parent_task_id, task_id=task_id, draft=draft)
         if milestone is not None and clear_milestone:
             raise click.UsageError("Cannot use --milestone and --clear-milestone together.")
         task_record = _locked_write(
