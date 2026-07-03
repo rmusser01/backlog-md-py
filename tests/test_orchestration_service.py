@@ -418,7 +418,8 @@ def test_release_task_clears_lease_and_increments_version(tmp_path):
     orchestration = parse_orchestration(task)
     assert orchestration is not None
     assert orchestration.version == 2
-    assert orchestration.status_key == "inprogress"
+    # Release returns the task to a claimable status so it re-enters the queue.
+    assert orchestration.status_key == "todo"
     assert orchestration.lease_owner is None
     assert orchestration.lease_expires_at is None
     assert orchestration.idempotency_key == "release-task-1"

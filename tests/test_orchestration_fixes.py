@@ -12,6 +12,7 @@ from backlog_py.orchestration import (
     OrchestrationTransitionError,
     parse_orchestration,
 )
+from backlog_py.orchestration.policy import load_orchestration_policy
 from backlog_py.core.repository import MutableRepository
 from backlog_py.storage.project import discover_project
 
@@ -111,6 +112,24 @@ def test_record_run_rejects_marker_in_summary(tmp_path):
 
     # The task's run history must remain parseable and mutable afterwards.
     _service(repo).record_run("TASK-1", actor="agent", result="succeeded", summary="clean entry")
+
+
+# --- #19: released task is stuck (not re-claimable) -------------------------
+
+def test_task_can_be_reclaimed_after_release(tmp_path):
+    repo = _repo(tmp_path)
+    service = _service(repo)
+
+    claim = service.claim_task("TASK-1", actor="agent-a", expected_version=0)
+    release = service.release_task("TASK-1", actor="agent-a", expected_version=claim.version)
+
+    # After release the task must be back in a claimable state.
+    policy = load_orchestration_policy(service.project)
+    assert policy.is_claimable(_status_key(repo))
+
+    # And another agent can actually claim it again.
+    service.claim_task("TASK-1", actor="agent-b", expected_version=release.version)
+    assert _status_key(repo) == "inprogress"
 
 
 # --- #20: substring "complete" detection misclassifies statuses -------------

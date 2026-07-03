@@ -560,13 +560,19 @@ class OrchestrationService:
             current_version: int,
             policy: OrchestrationPolicy,
         ) -> tuple[OrchestrationRunEvent, dict[str, Any]]:
-            _ = current_version, policy
+            _ = current_version
             current_orchestration = state.raw if state is not None else {}
             current_status = _state_status_key(task, state)
             actor = resolve_orchestration_actor(request.actor)
             next_orchestration = dict(current_orchestration)
             next_orchestration.pop("lease_owner", None)
             next_orchestration.pop("lease_expires_at", None)
+            # Return the task to a claimable status so releasing it puts it back
+            # in the work queue instead of stranding it in a non-claimable state.
+            release_status = policy.first_claimable_status()
+            to_status = release_status if release_status is not None else current_status
+            if release_status is not None:
+                next_orchestration["status_key"] = release_status
             if request.idempotency_key:
                 next_orchestration["idempotency_key"] = request.idempotency_key
             event = OrchestrationRunEvent(
@@ -579,7 +585,7 @@ class OrchestrationService:
                 idempotency_key=request.idempotency_key or "",
                 task_id=task.id,
                 from_status=current_status,
-                to_status=current_status,
+                to_status=to_status,
             )
             return event, next_orchestration
 

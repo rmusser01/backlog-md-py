@@ -319,6 +319,13 @@ class OrchestrationPolicy:
         state = _normalized_states(self).get(_normalize_key(status_key))
         return state is not None and state.claimable
 
+    def first_claimable_status(self) -> str | None:
+        """Return the first claimable status key, in declaration order, if any."""
+        for key, state in self.states.items():
+            if state.claimable:
+                return _normalize_key(key)
+        return None
+
     def is_terminal(self, status_key: str) -> bool:
         state = _normalized_states(self).get(_normalize_key(status_key))
         return state is not None and state.terminal
