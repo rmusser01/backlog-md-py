@@ -935,6 +935,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
     with tempfile.NamedTemporaryFile(
         "w",
         encoding="utf-8",
+        newline="",  # write content verbatim; the code manages \r\n itself
         dir=safe_path.parent,
         prefix=f".{safe_path.name}.",
         suffix=".tmp",

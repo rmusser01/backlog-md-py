@@ -91,6 +91,21 @@ def test_rename_milestone_does_not_overwrite_local_with_branch_content(tmp_path)
     assert "milestone: M1-renamed" in after
 
 
+# --- M4: atomic write must not translate newlines (Windows \r\r\n) ----------
+
+def test_atomic_write_preserves_crlf_bytes(tmp_path):
+    from backlog_py.core.repository import _atomic_write_text
+
+    target = tmp_path / "file.md"
+    content = "---\r\nid: TASK-1\r\n---\r\n\r\nBody line\r\n"
+    _atomic_write_text(target, content)
+
+    # Read raw bytes: the write must not have doubled \r into \r\r\n.
+    raw = target.read_bytes()
+    assert b"\r\r\n" not in raw
+    assert raw == content.encode("utf-8")
+
+
 # --- substring done-status detection ----------------------------------------
 
 def test_is_done_status_uses_exact_matching():
