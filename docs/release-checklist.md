@@ -6,7 +6,7 @@ push is the final maintainer-controlled gate.
 
 ## Current Candidate
 
-- Intended next release: `v1.0.0`.
+- Intended next release: `v1.0.1`.
 - Release commit must be on `origin/main` after the release-prep PR merges.
 - Do not reuse an existing tag or package version: PyPI package versions are
   immutable after publication.
@@ -112,8 +112,8 @@ After the release-prep PR is merged and the exact `origin/main` commit is green:
 git fetch origin main --tags
 git switch main
 git pull --ff-only origin main
-git tag -a v1.0.0 -m "backlog-md-py v1.0.0"
-git push origin v1.0.0
+git tag -a v1.0.1 -m "backlog-md-py v1.0.1"
+git push origin v1.0.1
 ```
 
 The `v*` tag starts `.github/workflows/release.yml`. That workflow builds the
@@ -133,11 +133,11 @@ Before pushing the tag, verify the PyPI trusted publisher is configured for:
 After the release workflow completes:
 
 ```bash
-gh release view v1.0.0 --repo rmusser01/backlog-md-py
+gh release view v1.0.1 --repo rmusser01/backlog-md-py
 python -m pip index versions backlog-md-py
 python -m venv /tmp/backlog-md-py-pypi-smoke
 /tmp/backlog-md-py-pypi-smoke/bin/python -m pip install --upgrade pip
-/tmp/backlog-md-py-pypi-smoke/bin/python -m pip install "backlog-md-py==1.0.0"
+/tmp/backlog-md-py-pypi-smoke/bin/python -m pip install "backlog-md-py==1.0.1"
 /tmp/backlog-md-py-pypi-smoke/bin/backlog-py --version
 ```
 

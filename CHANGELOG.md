@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.1 - 2026-07-03
+
 ### Added
 
 - Add MCP `task_create(..., draft=False, ...)` support so task creation can

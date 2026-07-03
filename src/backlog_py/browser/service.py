@@ -278,7 +278,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         try:
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Internal server error"})
         except Exception:
-            pass
+            logger.debug("Failed to send fallback browser error response", exc_info=True)
 
     def _handle_get(self) -> None:
         parsed_url = urlparse(self.path)
