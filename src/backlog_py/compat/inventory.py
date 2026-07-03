@@ -446,18 +446,3 @@ def _implemented(name: str, classification: str, upstream_reference: str, expect
     )
 
 
-def _deferred(
-    name: str,
-    classification: str,
-    upstream_reference: str,
-    expected: str,
-    deferred_reason: str,
-) -> CompatibilityItem:
-    return CompatibilityItem(
-        name=name,
-        classification=classification,
-        upstream_reference=upstream_reference,
-        expected=expected,
-        status="deferred",
-        deferred_reason=deferred_reason,
-    )

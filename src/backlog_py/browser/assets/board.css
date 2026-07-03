@@ -305,7 +305,8 @@
       min-height: 32px;
       white-space: pre;
     }
-    .mermaid-render-failed .mermaid {
+    .mermaid-render-failed .mermaid,
+    .mermaid-render-disabled .mermaid {
       color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.94em;

@@ -55,21 +55,47 @@
       list.appendChild(empty);
     }
 
-    const mermaidModuleUrl = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
-    let mermaidModulePromise = null;
+    const mermaidModuleUrl = (boardElement?.dataset.mermaidUrl || "").trim();
+    let mermaidLoadPromise = null;
+
+    function loadMermaidModule() {
+      if (mermaidLoadPromise) return mermaidLoadPromise;
+      if (mermaidModuleUrl.endsWith(".mjs")) {
+        mermaidLoadPromise = import(mermaidModuleUrl).then((module) => module.default || module);
+      } else {
+        mermaidLoadPromise = new Promise((resolve, reject) => {
+          if (window.mermaid) {
+            resolve(window.mermaid);
+            return;
+          }
+          const script = document.createElement("script");
+          script.src = mermaidModuleUrl;
+          script.addEventListener("load", () => {
+            window.mermaid ? resolve(window.mermaid) : reject(new Error("mermaid global not found"));
+          });
+          script.addEventListener("error", () => reject(new Error("failed to load mermaid")));
+          document.head.appendChild(script);
+        });
+      }
+      return mermaidLoadPromise;
+    }
 
     async function renderMermaidDiagrams(root = document) {
       const diagrams = Array.from(root.querySelectorAll("[data-mermaid-diagram] .mermaid"));
       if (diagrams.length === 0) return;
+      if (!mermaidModuleUrl) {
+        diagrams.forEach((diagram) => {
+          diagram.closest("[data-mermaid-diagram]")?.classList.add("mermaid-render-disabled");
+        });
+        return;
+      }
       try {
-        mermaidModulePromise = mermaidModulePromise || import(mermaidModuleUrl);
-        const module = await mermaidModulePromise;
-        const mermaid = module.default || module;
+        const mermaid = await loadMermaidModule();
         mermaid.initialize({startOnLoad: false, securityLevel: "strict"});
         await mermaid.run({nodes: diagrams});
       } catch (error) {
         console.error(error);
-        mermaidModulePromise = null;
+        mermaidLoadPromise = null;
         diagrams.forEach((diagram) => {
           diagram.closest("[data-mermaid-diagram]")?.classList.add("mermaid-render-failed");
         });
