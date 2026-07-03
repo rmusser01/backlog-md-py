@@ -249,9 +249,13 @@ def _coerce_now(now: datetime | None) -> datetime:
     return now.astimezone(timezone.utc)
 
 
+_COMPLETE_STATUS_KEYS = {"done", "complete", "completed"}
+
+
 def _is_complete_status(status: str) -> bool:
-    normalized = status.strip().casefold()
-    return "done" in normalized or "complete" in normalized
+    # Match the whole normalized status, not a substring: "Incomplete" and
+    # "Abandoned" must not be read as complete.
+    return _normalize_key(status) in _COMPLETE_STATUS_KEYS
 
 
 def _normalize_key(value: str) -> str:

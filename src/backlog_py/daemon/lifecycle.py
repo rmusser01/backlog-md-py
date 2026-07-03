@@ -6,6 +6,9 @@ import signal
 import subprocess  # nosec B404
 import sys
 import time
+import urllib.error
+import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -28,6 +31,10 @@ class DaemonNotRunningError(RuntimeError):
     """Raised when no healthy daemon runtime record exists."""
 
 
+class DaemonStartError(RuntimeError):
+    """Raised when a freshly launched daemon never becomes healthy."""
+
+
 class DaemonStopTimeoutError(TimeoutError):
     """Raised when a daemon process does not exit before the stop timeout."""
 
@@ -47,6 +54,11 @@ def daemon_status() -> DaemonStatus:
     if record is None:
         raise DaemonNotRunningError("Daemon not running")
     if not is_pid_alive(record.pid):
+        delete_runtime_record(layout)
+        raise DaemonNotRunningError("Daemon not running")
+    if _daemon_endpoint_owned(record) is False:
+        # The PID is alive but the recorded endpoint is not served by our
+        # daemon: the PID was reused. Treat the record as stale.
         delete_runtime_record(layout)
         raise DaemonNotRunningError("Daemon not running")
     return DaemonStatus(record=record)
@@ -88,6 +100,10 @@ def daemon_start(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> DaemonSt
             **os.environ,
             "BACKLOG_PY_DAEMON_TOKEN": token,
             "BACKLOG_PY_DAEMON_LOG": str(log_path),
+            # Managed by this parent: the parent writes the authoritative
+            # runtime record after the health check, so the child must not also
+            # write one (avoids a two-writer race on daemon.json).
+            "BACKLOG_PY_DAEMON_MANAGED": "1",
         }
         with log_path.open("a", encoding="utf-8") as log_handle:
             # Fixed argv invokes this package's daemon entry point.
@@ -97,6 +113,14 @@ def daemon_start(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> DaemonSt
                 stdout=log_handle,
                 stderr=log_handle,
                 start_new_session=True,
+            )
+        # Only record the daemon as running once the child has actually bound
+        # the port. Otherwise a failed start (e.g. port collision) would be
+        # recorded as healthy, and daemon_ensure would crash-loop respawning it.
+        if not _wait_for_daemon_healthy(host, port, process):
+            _terminate_process(process)
+            raise DaemonStartError(
+                f"Daemon failed to become healthy on {host}:{port}; see log {log_path}"
             )
         record = RuntimeRecord(
             pid=int(process.pid),
@@ -114,11 +138,20 @@ def daemon_start(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> DaemonSt
 
 def daemon_stop(*, force: bool = False, timeout: float = 5.0) -> bool:
     """Stop the recorded daemon process and remove the runtime record."""
+    with DaemonRuntimeLock(operation="daemon_stop").acquire():
+        return _daemon_stop_locked(force=force, timeout=timeout)
+
+
+def _daemon_stop_locked(*, force: bool, timeout: float) -> bool:
     layout = ensure_state_layout()
     record = read_runtime_record(layout)
     if record is None:
         return False
     if not is_pid_alive(record.pid):
+        delete_runtime_record(layout)
+        return False
+    if _daemon_endpoint_owned(record) is False:
+        # The PID was reused by an unrelated process; never signal it.
         delete_runtime_record(layout)
         return False
 
@@ -134,6 +167,63 @@ def daemon_stop(*, force: bool = False, timeout: float = 5.0) -> bool:
         raise DaemonStopTimeoutError(f"Daemon process {record.pid} did not stop before timeout")
     delete_runtime_record(layout)
     return True
+
+
+def _wait_for_daemon_healthy(host: str, port: int, process: "subprocess.Popen[bytes]", *, timeout: float = 10.0) -> bool:
+    """Poll the daemon's /health endpoint until it responds or the child dies."""
+    url = f"http://{host}:{port}/health"
+    deadline = time.monotonic() + max(timeout, 0)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False  # child exited before binding
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:  # nosec B310
+                if response.status == 200:
+                    return True
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def _terminate_process(process: "subprocess.Popen[bytes]") -> None:
+    with suppress(Exception):
+        if process.poll() is None:
+            process.terminate()
+            with suppress(Exception):
+                process.wait(timeout=2)
+
+
+def _status_url(record: RuntimeRecord) -> str:
+    host = record.host
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{record.port}/status"
+
+
+def _daemon_endpoint_owned(record: RuntimeRecord) -> bool | None:
+    """Whether the recorded endpoint answers as *our* daemon.
+
+    Returns True when the authenticated /status endpoint responds, False when a
+    different process (or nothing) holds the address — the signal that the
+    recorded PID has been reused — and None when ownership is uncertain (e.g. a
+    slow daemon timing out), so callers do not tear down a live daemon.
+    """
+    request = urllib.request.Request(
+        _status_url(record), headers={"Authorization": f"Bearer {record.token}"}
+    )
+    try:
+        # Endpoint is loopback HTTP with a bearer token; this confirms identity.
+        with urllib.request.urlopen(request, timeout=2) as response:  # nosec B310
+            return response.status == 200
+    except urllib.error.HTTPError:
+        return False
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ConnectionRefusedError):
+            return False
+        return None
+    except OSError:
+        return None
 
 
 def is_pid_alive(pid: int) -> bool:

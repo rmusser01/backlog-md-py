@@ -563,7 +563,8 @@ def test_tools_call_orchestration_claim_release_transition_happy_path(tmp_path):
             },
         )
     )
-    _assert_orchestration_contract(release, version=2, category="in_workflow")
+    # Release returns the task to a claimable status, so it is eligible again.
+    _assert_orchestration_contract(release, version=2, category="eligible")
     assert len(release["runHistoryEventIds"]) == 2
 
     transition = _tool_payload(
@@ -572,7 +573,7 @@ def test_tools_call_orchestration_claim_release_transition_happy_path(tmp_path):
             {
                 "project": str(repo),
                 "task_id": "TASK-1",
-                "toStatus": "review",
+                "toStatus": "inprogress",
                 "actor": "codex",
                 "expectedVersion": 2,
             },

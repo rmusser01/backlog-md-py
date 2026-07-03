@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess  # nosec B404
+import sys
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -18,11 +19,11 @@ from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report, build_release_evidence_manifest
 from backlog_py.core.agents import AgentInstructionError, AgentInstructionUpdate, update_agent_instruction_files
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
-from backlog_py.core.decisions import DecisionRecord, DecisionService
-from backlog_py.core.documents import DocumentRecord, DocumentService
+from backlog_py.core.decisions import DecisionMutationError, DecisionRecord, DecisionService
+from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.drafts import DraftService
 from backlog_py.core.init import InitProjectError, InitProjectResult, init_project
-from backlog_py.core.milestones import MilestoneRecord, MilestoneService
+from backlog_py.core.milestones import MilestoneMutationError, MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
     MutableRepository,
@@ -35,6 +36,7 @@ from backlog_py.daemon.lifecycle import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DaemonNotRunningError,
+    DaemonStartError,
     daemon_ensure,
     daemon_start,
     daemon_status,
@@ -59,14 +61,53 @@ from backlog_py.storage.config import (
     replace_definition_of_done_defaults,
     set_config_value,
 )
-from backlog_py.runtime.locks import with_init_lock, with_project_write_lock
+from backlog_py.runtime.locks import LockTimeoutError, with_init_lock, with_project_write_lock
 from backlog_py.runtime.state import RuntimeRecord, runtime_status
+from backlog_py.security.paths import PathContainmentError
 from backlog_py.storage.project import discover_project
 
 T = TypeVar("T")
 
 
-@click.group()
+# Domain errors that should surface as a clean "Error: ..." message and a
+# non-zero exit code rather than a raw Python traceback.
+_CLI_DOMAIN_ERRORS = (
+    TaskMutationError,
+    MilestoneMutationError,
+    DecisionMutationError,
+    DocumentMutationError,
+    InitProjectError,
+    OrchestrationError,
+    AgentInstructionError,
+    CompletionInstallError,
+    DaemonNotRunningError,
+    DaemonStartError,
+    PathContainmentError,
+    LockTimeoutError,
+    KeyError,
+)
+
+
+def _clean_error_message(exc: Exception) -> str:
+    if isinstance(exc, KeyError) and exc.args:
+        return str(exc.args[0])
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
+
+
+class _BacklogGroup(click.Group):
+    """Top-level group that maps known domain errors to clean CLI errors."""
+
+    def invoke(self, ctx: click.Context) -> object:
+        try:
+            return super().invoke(ctx)
+        except click.ClickException:
+            raise
+        except _CLI_DOMAIN_ERRORS as exc:
+            raise click.ClickException(_clean_error_message(exc)) from exc
+
+
+@click.group(cls=_BacklogGroup)
 @click.option("--cwd", type=click.Path(path_type=Path), default=None, help="Backlog project directory.")
 @click.version_option(__version__, prog_name="backlog-py")
 @click.pass_context
@@ -126,6 +167,64 @@ def init_command(
         click.echo(f"Preserved existing config at {result.project.config_path}")
     for update in instruction_updates:
         click.echo(f"Updated {update.path_relative}")
+
+
+def _reject_edit_only_create_flags(
+    *,
+    title: str | None,
+    append_plan: tuple[str, ...],
+    clear_plan: bool,
+    append_notes: str | None,
+    append_final_summary: tuple[str, ...],
+    clear_final_summary: bool,
+    check_ac: tuple[int, ...],
+    check_dod: tuple[int, ...],
+    uncheck_ac: tuple[int, ...],
+    uncheck_dod: tuple[int, ...],
+    remove_ac: tuple[int, ...],
+    remove_dod: tuple[int, ...],
+) -> None:
+    """Reject flags that only apply to 'task edit' so they never silently no-op on create."""
+    offenders: list[str] = []
+    if title is not None:
+        offenders.append("--title (use the TITLE argument)")
+    if append_notes is not None:
+        offenders.append("--append-notes")
+    if clear_plan:
+        offenders.append("--clear-plan")
+    if clear_final_summary:
+        offenders.append("--clear-final-summary")
+    for name, value in (
+        ("--append-plan", append_plan),
+        ("--append-final-summary", append_final_summary),
+        ("--check-ac", check_ac),
+        ("--check-dod", check_dod),
+        ("--uncheck-ac", uncheck_ac),
+        ("--uncheck-dod", uncheck_dod),
+        ("--remove-ac", remove_ac),
+        ("--remove-dod", remove_dod),
+    ):
+        if value:
+            offenders.append(name)
+    if offenders:
+        raise click.UsageError(
+            "These options apply to 'task edit', not 'task create': " + ", ".join(offenders)
+        )
+
+
+def _reject_unsupported_edit_flags(*, parent_task_id: str | None, task_id: str | None, draft: bool) -> None:
+    """Reject flags 'task edit' cannot honor so they never silently no-op."""
+    offenders: list[str] = []
+    if parent_task_id is not None:
+        offenders.append("--parent")
+    if task_id is not None:
+        offenders.append("--id")
+    if draft:
+        offenders.append("--draft")
+    if offenders:
+        raise click.UsageError(
+            "These options are not supported by 'task edit': " + ", ".join(offenders)
+        )
 
 
 @main.command("task")
@@ -242,6 +341,22 @@ def task_command(
     if args and args[0] == "create":
         if len(args) != 2:
             raise click.UsageError("Usage: task create TITLE")
+        _reject_edit_only_create_flags(
+            title=title,
+            append_plan=append_plan,
+            clear_plan=clear_plan,
+            append_notes=append_notes,
+            append_final_summary=append_final_summary,
+            clear_final_summary=clear_final_summary,
+            check_ac=check_ac,
+            check_dod=check_dod,
+            uncheck_ac=uncheck_ac,
+            uncheck_dod=uncheck_dod,
+            remove_ac=remove_ac,
+            remove_dod=remove_dod,
+        )
+        if draft and status is not None:
+            raise click.UsageError("Drafts are always created with status 'Draft'; --status is not allowed with --draft.")
         if clear_milestone:
             raise click.UsageError("Cannot use --clear-milestone with task create.")
         if draft:
@@ -305,6 +420,7 @@ def task_command(
     if args and args[0] == "edit":
         if len(args) != 2:
             raise click.UsageError("Usage: task edit TASK_ID")
+        _reject_unsupported_edit_flags(parent_task_id=parent_task_id, task_id=task_id, draft=draft)
         if milestone is not None and clear_milestone:
             raise click.UsageError("Cannot use --milestone and --clear-milestone together.")
         task_record = _locked_write(
@@ -817,9 +933,24 @@ def browser_command(ctx: click.Context, port: int | None, no_open: bool) -> None
 
 
 @main.command("cleanup")
+@click.option("--dry-run", is_flag=True, help="List the Done tasks that would be moved without moving them.")
+@click.option("-y", "--yes", is_flag=True, help="Skip the interactive confirmation prompt.")
 @click.pass_context
-def cleanup_command(ctx: click.Context) -> None:
+def cleanup_command(ctx: click.Context, dry_run: bool, yes: bool) -> None:
     """Move active Done tasks into backlog/completed."""
+    candidates = [task for task in _mutable_repository(ctx).list_tasks() if _is_completed_status(task.status)]
+    if not candidates:
+        click.echo("No completed tasks to move.")
+        return
+    noun = "task" if len(candidates) == 1 else "tasks"
+    click.echo(f"{len(candidates)} completed {noun} will be moved to backlog/completed:")
+    for task in candidates:
+        click.echo(f"  {task.id} - {task.title}")
+    if dry_run:
+        click.echo("Dry run: no changes made.")
+        return
+    if not yes and sys.stdin.isatty():
+        click.confirm("Move these tasks?", abort=True)
     done_tasks = _locked_write(ctx, "cleanup_complete_done", lambda: _cleanup_completed_tasks(ctx))
     count = len(done_tasks)
     noun = "task" if count == 1 else "tasks"
@@ -2495,8 +2626,10 @@ def _parse_ordinal(ordinal: str | None) -> int | float | None:
 
 
 def _is_completed_status(status: str) -> bool:
-    normalized = status.casefold()
-    return "done" in normalized or "complete" in normalized
+    # Whole-status match so "Not Done"/"Incomplete" are never swept into
+    # completed/ by cleanup.
+    normalized = "".join(character for character in status.casefold() if character.isalnum())
+    return normalized in {"done", "complete", "completed"}
 
 
 def _bool_text(value: bool) -> str:

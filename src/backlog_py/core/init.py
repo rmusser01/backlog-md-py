@@ -125,7 +125,7 @@ def _default_config_source(
     }
     if backlog_directory is not None:
         raw["backlogDirectory"] = backlog_directory
-    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
     return f"{yaml_text}\n"
 
 

@@ -21,19 +21,23 @@ def run_foreground_service(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -
     server = create_mcp_http_server(host=host, port=port, token=token)
     actual_host, actual_port = server.server_address[:2]
     endpoint = endpoint_for_server(server)
-    write_runtime_record(
-        RuntimeRecord(
-            pid=os.getpid(),
-            host=str(actual_host),
-            port=int(actual_port),
-            endpoint=endpoint,
-            token=token,
-            started_at=_utc_now(),
-            version=__version__,
-            log_path=log_path,
-        ),
-        layout,
-    )
+    # When launched by daemon_start (managed), the parent writes the runtime
+    # record after verifying health; writing here too would race it. A manually
+    # run foreground daemon is the sole writer and records itself.
+    if not os.environ.get("BACKLOG_PY_DAEMON_MANAGED"):
+        write_runtime_record(
+            RuntimeRecord(
+                pid=os.getpid(),
+                host=str(actual_host),
+                port=int(actual_port),
+                endpoint=endpoint,
+                token=token,
+                started_at=_utc_now(),
+                version=__version__,
+                log_path=log_path,
+            ),
+            layout,
+        )
 
     shutdown_requested = Event()
 

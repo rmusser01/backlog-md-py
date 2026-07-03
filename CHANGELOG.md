@@ -8,6 +8,46 @@
   create draft tasks with the same rich sections as the CLI `task create --draft`
   path.
 
+### Fixed
+
+- Stop reusing task IDs after a task is completed or cleaned up, and let
+  completed tasks be viewed/edited/archived again (ID allocation and lookup now
+  span the active, completed, and archived buckets).
+- Make ID lookups zero-padding-insensitive so zero-padded drafts, decisions,
+  and tasks are addressable.
+- Skip (and warn about) an unparsable task file instead of making the whole
+  repository unreadable, and reject content containing reserved section/
+  run-history markers instead of silently corrupting files.
+- Read only the local working tree for milestone/draft mutations so another git
+  branch's snapshot can no longer overwrite local task content.
+- Write task/config files without newline translation (no more `\r\r\n` on
+  Windows) and store non-ASCII frontmatter as readable UTF-8.
+- Harden the MCP and browser HTTP servers (Content-Length validation/caps,
+  socket timeouts, constant-time token compare) and time-bound/non-interactive
+  git subprocesses so read commands and the TUI can't hang.
+- Enforce the orchestration policy in `record_run` status transitions, reject
+  reserved markers in run-history text, and fix TUI crashes on markup-like or
+  non-ASCII task content.
+- Verify daemon endpoint ownership before reporting status or signalling a PID,
+  so `daemon stop --force` can no longer kill an unrelated process after PID
+  reuse.
+
+### Changed
+
+- MCP tool failures (task not found, invalid mutation, lock timeout, ...) now
+  return an MCP tool error (`isError: true`) instead of a JSON-RPC `-32603`
+  internal error, and no longer leak absolute filesystem paths.
+- Releasing an orchestration task now returns it to the first claimable status
+  (default `todo`) so it re-enters the work queue; the release response's
+  `queueCategory` is `eligible` accordingly.
+- `_is_done_status`/cleanup now match the whole normalized status against
+  `{done, complete, completed}`, so statuses like "Not Done"/"Incomplete" are
+  no longer treated as done (compound statuses such as "Done - Verified" are no
+  longer matched by substring).
+- Scope git auto-commit to the backlog directory, give the CLI clean error
+  messages instead of tracebacks, and reject `task create`/`task edit` flags
+  that the chosen subcommand cannot honor.
+
 ## 1.0.0 - 2026-06-27 (Stable)
 
 ### Changed

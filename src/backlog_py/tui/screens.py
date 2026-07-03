@@ -55,7 +55,11 @@ class BoardScreen(Container):
 
 
 def widget_id(value: str) -> str:
-    return "".join(character if character.isalnum() else "-" for character in value).strip("-")
+    # ASCII-only: a non-ASCII status name would otherwise produce an invalid
+    # Textual identifier. Column uniqueness is handled by column_widget_id.
+    return "".join(
+        character if character.isascii() and character.isalnum() else "-" for character in value
+    ).strip("-")
 
 
 def column_widget_id(status: str, seen: dict[str, int]) -> str:

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import re
+
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
@@ -83,10 +87,13 @@ class TaskCard(Static):
 
 class TaskInspector(Static, can_focus=True):
     def update_task(self, task: TaskView | None, dependency_state: DependencyState | None = None) -> None:
+        # Render as a literal Text so task content containing Rich-markup
+        # metacharacters (e.g. "list[str]" or "[/]") is neither swallowed nor
+        # able to raise MarkupError.
         if task is None:
-            self.update("No task selected")
+            self.update(Text("No task selected"))
             return
-        self.update(_inspector_text(task, dependency_state))
+        self.update(Text(_inspector_text(task, dependency_state)))
 
 
 def _task_card_text(task: TaskView, dependency_state: DependencyState | None = None) -> str:
@@ -182,5 +189,18 @@ def _filter_summary(filters: FilterState) -> str:
     return ", ".join(parts)
 
 
+_VALID_WIDGET_ID_RE = re.compile(r"[a-zA-Z_-][a-zA-Z0-9_-]*$")
+
+
 def _widget_id(value: str) -> str:
-    return "".join(character if character.isalnum() else "-" for character in value).strip("-")
+    # Textual identifiers are ASCII-only and must be unique. Keep already-valid
+    # ids stable; otherwise sanitize to ASCII and append a short hash so that
+    # distinct ids (e.g. non-ASCII, or "task-1.2" vs "task-1_2") never collide.
+    if _VALID_WIDGET_ID_RE.match(value):
+        return value
+    ascii_safe = "".join(
+        character if character.isascii() and (character.isalnum() or character in "_-") else "-"
+        for character in value
+    ).strip("-")
+    digest = hashlib.blake2s(value.encode("utf-8"), digest_size=4).hexdigest()
+    return f"{ascii_safe or 'id'}-{digest}"

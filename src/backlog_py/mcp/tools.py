@@ -141,7 +141,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
     def mutate() -> dict[str, Any]:
         task_id = _get_alias(kwargs, "task_id", "id")
         fresh_project = _fresh_project(project)
-        title = str(kwargs.get("title") or "")
+        title = _required_mcp_string(_get_alias(kwargs, "title"), "title")
         description = str(kwargs.get("description") or "")
         plan = str(_get_alias(kwargs, "implementationPlan", "implementation_plan", "plan") or "")
         notes = str(kwargs.get("notes") or "")
@@ -633,8 +633,8 @@ def document_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         lambda: _document_detail(
             project,
             DocumentService(project).create_document(
-                str(kwargs.get("path") or ""),
-                title=str(kwargs.get("title") or ""),
+                _required_mcp_string(kwargs.get("path"), "path"),
+                title=_required_mcp_string(kwargs.get("title"), "title"),
                 content=str(kwargs.get("content") or ""),
                 metadata=_dict_value(kwargs.get("metadata")),
             ),

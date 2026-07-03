@@ -215,7 +215,7 @@ def _render_document(frontmatter: dict[str, Any], content: str) -> str:
 
 
 def _render_document_body(frontmatter: dict[str, Any], body_source: str) -> str:
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     return f"---\n{yaml_text}\n---\n{body_source}"
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import threading
 import uuid
@@ -10,6 +11,24 @@ from typing import Mapping
 from urllib.parse import urlparse
 
 from backlog_py.mcp.protocol import McpRequestContext, handle_jsonrpc_text
+
+
+# Cap a single JSON-RPC request body so a malicious/oversized Content-Length
+# cannot exhaust daemon memory. 10 MiB is far above any legitimate tool call.
+MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+
+# Socket timeout (seconds) so a slow or idle client cannot pin a handler thread
+# indefinitely (slowloris).
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+class _RequestBodyError(Exception):
+    """Signals an unreadable request body with the HTTP status to return."""
+
+    def __init__(self, status: HTTPStatus, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
 
 
 @dataclass(frozen=True)
@@ -83,6 +102,7 @@ class McpThreadingHTTPServer(ThreadingHTTPServer):
 
 class _McpHttpHandler(BaseHTTPRequestHandler):
     server: McpThreadingHTTPServer
+    timeout = REQUEST_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -106,7 +126,11 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "Unauthorized"})
             return
 
-        text = self._read_body()
+        try:
+            text = self._read_body()
+        except _RequestBodyError as exc:
+            self._send_json(exc.status, {"error": exc.message})
+            return
         response_session_id = self.headers.get("Mcp-Session-Id")
         if response_session_id is None and _contains_initialize(text):
             response_session_id = uuid.uuid4().hex
@@ -124,11 +148,30 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
         _ = format, args
 
     def _is_authorized(self) -> bool:
-        return self.headers.get("Authorization") == f"Bearer {self.server.daemon_token}"
+        header = self.headers.get("Authorization", "")
+        expected = f"Bearer {self.server.daemon_token}"
+        return hmac.compare_digest(header, expected)
 
     def _read_body(self) -> str:
-        length = int(self.headers.get("Content-Length", "0"))
-        return self.rfile.read(length).decode("utf-8")
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return ""
+        try:
+            length = int(raw_length)
+        except ValueError:
+            raise _RequestBodyError(HTTPStatus.BAD_REQUEST, "Invalid Content-Length header")
+        if length < 0:
+            raise _RequestBodyError(HTTPStatus.BAD_REQUEST, "Invalid Content-Length header")
+        if length > MAX_REQUEST_BODY_BYTES:
+            raise _RequestBodyError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Request body too large")
+        try:
+            raw = self.rfile.read(length)
+        except OSError:
+            raise _RequestBodyError(HTTPStatus.BAD_REQUEST, "Failed to read request body")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise _RequestBodyError(HTTPStatus.BAD_REQUEST, "Request body must be UTF-8")
 
     def _send_json(
         self,
