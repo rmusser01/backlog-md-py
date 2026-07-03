@@ -61,10 +61,11 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if not context.clean_before:
         logger.warning("Skipping auto-commit for {}: project had pre-existing git changes", operation)
         return
-    if not _has_project_changes(context.work_dir):
+    pathspecs = _auto_commit_pathspecs(project)
+    if not _has_changes_in(context.work_dir, pathspecs):
         return
 
-    add = _run_git(context.work_dir, "add", "-A", "--", ".")
+    add = _run_git(context.work_dir, "add", "-A", "--", *pathspecs)
     if add.returncode != 0:
         logger.warning("Skipping auto-commit for {}: git add failed: {}", operation, _git_error(add))
         return
@@ -77,7 +78,7 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if commit.returncode == 0:
         return
 
-    _run_git(context.work_dir, "reset", "--", ".")
+    _run_git(context.work_dir, "reset", "--", *pathspecs)
     logger.warning("Skipping auto-commit for {}: git commit failed: {}", operation, _git_error(commit))
 
 
@@ -189,6 +190,29 @@ def _is_git_worktree(work_dir: Path) -> bool:
 def _has_project_changes(work_dir: Path) -> bool:
     result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", ".")
     return bool(result.stdout.strip()) if result.returncode == 0 else False
+
+
+def _has_changes_in(work_dir: Path, pathspecs: list[str]) -> bool:
+    if not pathspecs:
+        return False
+    result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", *pathspecs)
+    return bool(result.stdout.strip()) if result.returncode == 0 else False
+
+
+def _auto_commit_pathspecs(project: BacklogProject) -> list[str]:
+    """Files auto-commit is allowed to stage: the backlog dir and its config.
+
+    Restricting the pathspec keeps unrelated files written during the locked
+    operation (an editor session, a status-change hook) out of the commit.
+    """
+    pathspecs: list[str] = []
+    backlog_rel = _relative_path(project.root, project.backlog_dir)
+    if backlog_rel is not None:
+        pathspecs.append(backlog_rel)
+    config_rel = _relative_path(project.root, project.config_path)
+    if config_rel is not None and not (backlog_rel and config_rel.startswith(f"{backlog_rel}/")):
+        pathspecs.append(config_rel)
+    return pathspecs
 
 
 def _has_path_changes(work_dir: Path, relative_path: str) -> bool:

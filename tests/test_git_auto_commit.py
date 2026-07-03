@@ -51,6 +51,27 @@ def test_project_write_lock_skips_auto_commit_when_repo_was_dirty(tmp_path, monk
     }
 
 
+def test_auto_commit_does_not_stage_unrelated_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = _git_backlog_repo(tmp_path, auto_commit=True)
+    project = _project(repo, auto_commit=True)
+
+    def mutate() -> str:
+        # A file written outside backlog/ during the locked operation (e.g. an
+        # editor session or a status-change hook) must not be swept into the
+        # auto-commit.
+        (repo / "unrelated.txt").write_text("side effect\n", encoding="utf-8")
+        return _write_task(repo, "task-2 - Scoped.md", "id: TASK-2\ntitle: Scoped\n")
+
+    with_project_write_lock(project, "task_create", mutate)
+
+    assert _git(repo, "log", "-1", "--format=%s") == "backlog: task_create"
+    committed = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    assert any("task-2" in name for name in committed), committed
+    assert "unrelated.txt" not in committed, committed
+    assert "?? unrelated.txt" in _status_entries(repo)
+
+
 def test_project_write_lock_runs_git_hooks_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
     repo = _git_backlog_repo(tmp_path, auto_commit=True, bypass_git_hooks=False)
