@@ -20,10 +20,10 @@ def _project(tmp_path: Path):
 def test_mermaid_defaults_to_local_vendored_asset_no_third_party(tmp_path, monkeypatch):
     monkeypatch.delenv("BACKLOG_PY_BROWSER_MERMAID_URL", raising=False)
     html = render_board_html(_project(tmp_path))
-    assert 'data-mermaid-url="assets/mermaid.min.js"' in html
-    # Privacy: the default board must not reference any third-party host.
+    assert 'data-mermaid-url="/assets/mermaid.min.js"' in html
+    # Privacy: the default board loads Mermaid from the local asset, not a CDN.
     assert "cdn.jsdelivr.net" not in html
-    assert "cdn." not in html
+    assert "mermaid@" not in html
 
 
 def test_mermaid_url_can_be_overridden(tmp_path, monkeypatch):

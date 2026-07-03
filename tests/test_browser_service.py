@@ -1042,7 +1042,7 @@ def test_browser_board_html_exposes_mermaid_renderer_hook(tmp_path):
 
     assert "renderMermaidDiagrams" in html
     # Mermaid is served from the local vendored asset by default (no CDN).
-    assert 'data-mermaid-url="assets/mermaid.min.js"' in html
+    assert 'data-mermaid-url="/assets/mermaid.min.js"' in html
     assert "cdn.jsdelivr.net" not in html
     assert 'querySelectorAll("[data-mermaid-diagram] .mermaid")' in html
     assert 'securityLevel: "strict"' in html

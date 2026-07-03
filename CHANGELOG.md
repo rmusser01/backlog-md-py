@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed
+
+- Vendor Mermaid (v10.9.1, MIT) and serve it locally from the browser board so
+  no third-party request is made by default. Override the source with
+  `BACKLOG_PY_BROWSER_MERMAID_URL` (a `.mjs` URL loads as an ES module, any
+  other URL as a classic script) or set it to an empty string to disable
+  diagram rendering.
+- Add a `verification: "self-declared"` field to the compatibility report and
+  each of its items to make explicit that parity statuses are a maintained
+  declaration rather than automated per-item verification. Existing report
+  fields (including `agent_cutover_ready` and the release gates) are unchanged.
+
 ## 1.0.0 - 2026-06-27 (Stable)
 
 ### Changed

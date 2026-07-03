@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -41,8 +42,8 @@ _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
 # self-contained UMD build served from this process, so no third-party request
 # is ever made (privacy-respecting). Override with a URL (e.g. a CDN or a newer
 # local copy) or set the env var to an empty string to disable rendering.
-_BROWSER_MERMAID_DEFAULT_URL = "assets/mermaid.min.js"
 _BROWSER_MERMAID_ASSET_PATH = "/assets/mermaid.min.js"
+_BROWSER_MERMAID_DEFAULT_URL = _BROWSER_MERMAID_ASSET_PATH
 _BROWSER_MERMAID_URL_ENV = "BACKLOG_PY_BROWSER_MERMAID_URL"
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
@@ -265,7 +266,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         if path == _BROWSER_MERMAID_ASSET_PATH:
             self._send_cached_asset(
-                _load_browser_text_resource("assets", "mermaid.min.js"),
+                _vendored_mermaid_source(),
                 content_type="application/javascript; charset=utf-8",
             )
             return
@@ -626,6 +627,12 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 def _load_browser_text_resource(*path_parts: str) -> str:
     """Load a packaged browser template or asset as UTF-8 text."""
     return files("backlog_py.browser").joinpath(*path_parts).read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _vendored_mermaid_source() -> str:
+    """Return the vendored Mermaid build, read once (it is a large, static asset)."""
+    return _load_browser_text_resource("assets", "mermaid.min.js")
 
 
 def render_board_html(project: BacklogProject, *, queue_category_filter: str | None = None) -> str:
