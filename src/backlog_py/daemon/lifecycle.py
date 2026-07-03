@@ -6,6 +6,9 @@ import signal
 import subprocess  # nosec B404
 import sys
 import time
+import urllib.error
+import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -26,6 +29,10 @@ DEFAULT_PORT = 18765
 
 class DaemonNotRunningError(RuntimeError):
     """Raised when no healthy daemon runtime record exists."""
+
+
+class DaemonStartError(RuntimeError):
+    """Raised when a freshly launched daemon never becomes healthy."""
 
 
 class DaemonStopTimeoutError(TimeoutError):
@@ -98,6 +105,14 @@ def daemon_start(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> DaemonSt
                 stderr=log_handle,
                 start_new_session=True,
             )
+        # Only record the daemon as running once the child has actually bound
+        # the port. Otherwise a failed start (e.g. port collision) would be
+        # recorded as healthy, and daemon_ensure would crash-loop respawning it.
+        if not _wait_for_daemon_healthy(host, port, process):
+            _terminate_process(process)
+            raise DaemonStartError(
+                f"Daemon failed to become healthy on {host}:{port}; see log {log_path}"
+            )
         record = RuntimeRecord(
             pid=int(process.pid),
             host=host,
@@ -134,6 +149,31 @@ def daemon_stop(*, force: bool = False, timeout: float = 5.0) -> bool:
         raise DaemonStopTimeoutError(f"Daemon process {record.pid} did not stop before timeout")
     delete_runtime_record(layout)
     return True
+
+
+def _wait_for_daemon_healthy(host: str, port: int, process: "subprocess.Popen[bytes]", *, timeout: float = 10.0) -> bool:
+    """Poll the daemon's /health endpoint until it responds or the child dies."""
+    url = f"http://{host}:{port}/health"
+    deadline = time.monotonic() + max(timeout, 0)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False  # child exited before binding
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:  # nosec B310
+                if response.status == 200:
+                    return True
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def _terminate_process(process: "subprocess.Popen[bytes]") -> None:
+    with suppress(Exception):
+        if process.poll() is None:
+            process.terminate()
+            with suppress(Exception):
+                process.wait(timeout=2)
 
 
 def is_pid_alive(pid: int) -> bool:

@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess  # nosec B404
+import sys
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -35,6 +36,7 @@ from backlog_py.daemon.lifecycle import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DaemonNotRunningError,
+    DaemonStartError,
     daemon_ensure,
     daemon_start,
     daemon_status,
@@ -79,6 +81,7 @@ _CLI_DOMAIN_ERRORS = (
     AgentInstructionError,
     CompletionInstallError,
     DaemonNotRunningError,
+    DaemonStartError,
     PathContainmentError,
     LockTimeoutError,
     KeyError,
@@ -930,9 +933,24 @@ def browser_command(ctx: click.Context, port: int | None, no_open: bool) -> None
 
 
 @main.command("cleanup")
+@click.option("--dry-run", is_flag=True, help="List the Done tasks that would be moved without moving them.")
+@click.option("-y", "--yes", is_flag=True, help="Skip the interactive confirmation prompt.")
 @click.pass_context
-def cleanup_command(ctx: click.Context) -> None:
+def cleanup_command(ctx: click.Context, dry_run: bool, yes: bool) -> None:
     """Move active Done tasks into backlog/completed."""
+    candidates = [task for task in _mutable_repository(ctx).list_tasks() if _is_completed_status(task.status)]
+    if not candidates:
+        click.echo("No completed tasks to move.")
+        return
+    noun = "task" if len(candidates) == 1 else "tasks"
+    click.echo(f"{len(candidates)} completed {noun} will be moved to backlog/completed:")
+    for task in candidates:
+        click.echo(f"  {task.id} - {task.title}")
+    if dry_run:
+        click.echo("Dry run: no changes made.")
+        return
+    if not yes and sys.stdin.isatty():
+        click.confirm("Move these tasks?", abort=True)
     done_tasks = _locked_write(ctx, "cleanup_complete_done", lambda: _cleanup_completed_tasks(ctx))
     count = len(done_tasks)
     noun = "task" if count == 1 else "tasks"

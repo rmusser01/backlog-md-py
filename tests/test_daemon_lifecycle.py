@@ -111,6 +111,7 @@ def test_daemon_start_launches_foreground_service_and_writes_runtime(tmp_path, m
         return FakeProcess()
 
     monkeypatch.setattr("backlog_py.daemon.lifecycle.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._wait_for_daemon_healthy", lambda *a, **k: True)
 
     result = CliRunner().invoke(main, ["daemon", "start", "--host", "127.0.0.1", "--port", "18888", "--json"])
 
@@ -122,6 +123,33 @@ def test_daemon_start_launches_foreground_service_and_writes_runtime(tmp_path, m
     command = launches[0][0]
     assert command[-5:] == ["--foreground", "--host", "127.0.0.1", "--port", "18888"]
     assert read_runtime_record(ensure_state_layout()).pid == 43210
+
+
+def test_daemon_start_does_not_record_unhealthy_child(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    terminated = []
+
+    class FakeProcess:
+        pid = 43211
+
+        def poll(self):
+            return 1  # already exited (e.g. port collision)
+
+        def terminate(self):
+            terminated.append(self.pid)
+
+        def kill(self):
+            terminated.append(self.pid)
+
+        def wait(self, timeout=None):
+            return 1
+
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.subprocess.Popen", lambda command, **kwargs: FakeProcess())
+
+    result = CliRunner().invoke(main, ["daemon", "start", "--host", "127.0.0.1", "--port", "18889", "--json"])
+
+    assert result.exit_code != 0, result.output
+    assert read_runtime_record(ensure_state_layout()) is None, "recorded a daemon that never became healthy"
 
 
 def test_daemon_stop_removes_stale_runtime_record(tmp_path, monkeypatch):
