@@ -17,6 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
+from loguru import logger
+
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
@@ -38,6 +40,10 @@ from backlog_py.storage.config import (
 )
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+# Cap request bodies so an oversized Content-Length cannot exhaust memory, and
+# bound the socket so a slow/idle client cannot pin a handler thread forever.
+_MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
+_REQUEST_TIMEOUT_SECONDS = 30
 # Mermaid diagram support. By default the board loads a locally vendored,
 # self-contained UMD build served from this process, so no third-party request
 # is ever made (privacy-respecting). Override with a URL (e.g. a CDN or a newer
@@ -257,8 +263,24 @@ def _request_server_shutdown(server: BrowserThreadingHTTPServer) -> bool:
 
 class _BrowserHttpHandler(BaseHTTPRequestHandler):
     server: BrowserThreadingHTTPServer
+    timeout = _REQUEST_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:
+        try:
+            self._handle_get()
+        except Exception:
+            # A single unreadable file or bad config must not drop the
+            # connection with a bare traceback; return a 500 error page.
+            logger.exception("Unhandled error serving GET {}", self.path)
+            self._safe_send_error()
+
+    def _safe_send_error(self) -> None:
+        try:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Internal server error"})
+        except Exception:
+            pass
+
+    def _handle_get(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         if path == "/favicon.ico":
@@ -535,7 +557,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         _ = format, args
 
     def _read_json_body(self) -> object:
-        length = int(self.headers.get("Content-Length", "0"))
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length) if raw_length is not None else 0
+        except ValueError:
+            raise ValueError("Invalid Content-Length header")
+        if length < 0:
+            raise ValueError("Invalid Content-Length header")
+        if length > _MAX_REQUEST_BODY_BYTES:
+            raise ValueError("Request body too large")
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _origin_allowed(self) -> bool:
@@ -558,6 +588,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", "0")
+        self._send_security_headers()
         self.end_headers()
         _record_service_request(
             self.server,
@@ -581,6 +612,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("Content-Length", str(len(data)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
         _record_service_request(
@@ -591,6 +623,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             content_type=content_type,
         )
 
+    def _send_security_headers(self) -> None:
+        # Purely defensive, additive headers: block MIME sniffing, framing
+        # (clickjacking of the Stop/Archive controls), and referrer leakage.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def _send_cached_asset(self, text: str, *, content_type: str) -> None:
         data = text.encode("utf-8")
         self.send_response(HTTPStatus.OK)
@@ -598,6 +637,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         # The vendored asset is version-pinned and immutable.
         self.send_header("Cache-Control", "public, max-age=86400, immutable")
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
         _record_service_request(
@@ -613,6 +653,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
         _record_service_request(

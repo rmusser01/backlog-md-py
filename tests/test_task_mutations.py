@@ -1103,6 +1103,31 @@ def test_cli_cleanup_moves_done_tasks_to_completed(tmp_path):
     assert (repo / "backlog" / "tasks" / "task-3 - Active-task.md").is_file()
 
 
+def test_cli_cleanup_dry_run_lists_but_moves_nothing(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    repository = _repository(repo)
+    repository.create_task(title="Done cleanup task", task_id="TASK-2", status="Done")
+
+    result = runner.invoke(main, ["--cwd", str(repo), "cleanup", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "TASK-2" in result.output
+    assert "Moved" not in result.output
+    assert (repo / "backlog" / "tasks" / "task-2 - Done-cleanup-task.md").is_file()
+    assert not (repo / "backlog" / "completed" / "task-2 - Done-cleanup-task.md").exists()
+
+
+def test_cli_cleanup_with_no_done_tasks_reports_nothing_to_do(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["--cwd", str(repo), "cleanup"])
+
+    assert result.exit_code == 0
+    assert "No completed tasks" in result.output
+
+
 def test_cli_task_create_accepts_checklists_defaults_and_dependencies(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)

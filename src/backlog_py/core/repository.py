@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import yaml
+from loguru import logger
 
-from backlog_py.core.ids import format_child_task_id, format_numbered_id
+from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
 from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -118,18 +119,41 @@ class ReadOnlyRepository:
         ]
 
     def get_task(self, task_id: str) -> TaskRecord:
-        normalized_id = task_id.casefold()
         try:
-            normalized_lookup_id = _normalize_dependency_id(task_id, self.project.config.task_prefix).casefold()
+            normalized_lookup_id = _normalize_dependency_id(task_id, self.project.config.task_prefix)
         except TaskMutationError:
-            normalized_lookup_id = normalized_id
+            normalized_lookup_id = task_id
+
+        def matches(candidate_id: str) -> bool:
+            return ids_equivalent(candidate_id, task_id) or ids_equivalent(candidate_id, normalized_lookup_id)
+
         for task in self.list_tasks():
-            if task.id.casefold() in {normalized_id, normalized_lookup_id}:
+            if matches(task.id):
                 return task
-        for task in _load_tasks_from_dir(self.project.backlog_dir / "tasks"):
-            if task.id.casefold() in {normalized_id, normalized_lookup_id}:
-                return task
+        for directory in self._task_lookup_dirs():
+            for task in _load_tasks_from_dir(directory):
+                if matches(task.id):
+                    return task
         raise KeyError(f"Task not found: {task_id}")
+
+    def _task_lookup_dirs(self) -> tuple[Path, ...]:
+        """Directories that back task lookups and id reservation, in priority order.
+
+        Completed and archived tasks are included so that a task never becomes
+        unaddressable after being moved, and so their ids are never reused.
+        """
+        return (
+            self.project.backlog_dir / "tasks",
+            self.project.backlog_dir / "completed",
+            self.project.backlog_dir / "archive" / "tasks",
+        )
+
+    def _reserved_task_ids(self) -> set[str]:
+        """Casefolded ids of every task in any bucket (active, completed, archived)."""
+        ids = {task.id.casefold() for task in self.list_tasks()}
+        for directory in self._task_lookup_dirs():
+            ids.update(task.id.casefold() for task in _load_tasks_from_dir(directory))
+        return ids
 
     def list_completed_tasks(self) -> list[TaskRecord]:
         return sorted(self._load_completed_tasks(), key=_task_record_sort_key)
@@ -187,8 +211,8 @@ class ReadOnlyRepository:
             try:
                 self._visible_task_records = self._load_visible_task_records_from_sqlite_index()
                 return self._visible_task_records
-            except (OSError, SQLiteIndexError, ValueError):
-                pass
+            except (OSError, SQLiteIndexError, ValueError) as exc:
+                logger.warning("SQLite task index unavailable, falling back to markdown: {}", exc)
         self._visible_task_records = self._load_visible_task_records_from_markdown()
         return self._visible_task_records
 
@@ -287,7 +311,15 @@ def _sqlite_index_enabled() -> bool:
 def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
     if not task_dir.is_dir():
         return []
-    return [_load_task(path) for path in sorted(task_dir.glob("*.md"))]
+    records: list[TaskRecord] = []
+    for path in sorted(task_dir.glob("*.md")):
+        try:
+            records.append(_load_task(path))
+        except (ValueError, OSError) as exc:
+            # A single unparsable file must not make the whole repository
+            # unreadable; skip it (as branch snapshots already do) and warn.
+            logger.warning("Skipping unreadable task file {}: {}", path, exc)
+    return records
 
 
 def _current_branch_records(project: BacklogProject, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
@@ -392,7 +424,7 @@ class MutableRepository(ReadOnlyRepository):
             ),
             current_config.task_prefix,
         )
-        if _task_exists(tasks, normalized_id):
+        if normalized_id.casefold() in self._reserved_task_ids():
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
         _reject_missing_dependencies(normalized_dependencies, tasks)
@@ -487,7 +519,7 @@ class MutableRepository(ReadOnlyRepository):
         safe_current_path = _mutation_path(task.path.parent, task.path)
         target_path = safe_current_path
         if title is not None:
-            target_path = self._task_path(task.id, title)
+            target_path = self._task_path(task.id, title, base_dir=task.path.parent)
             if target_path != safe_current_path and target_path.exists():
                 raise TaskMutationError(f"Task path already exists: {target_path.name}")
         normalized_dependencies = None
@@ -687,26 +719,26 @@ class MutableRepository(ReadOnlyRepository):
         max_id = 0
         prefix = current_config.task_prefix.upper()
         pattern = re.compile(rf"{re.escape(prefix)}-(\d+)", re.IGNORECASE)
-        for task in self.list_tasks():
-            match = pattern.fullmatch(task.id)
+        for task_id in self._reserved_task_ids():
+            match = pattern.fullmatch(task_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
         return format_numbered_id(f"{prefix}-", max_id + 1, current_config.zero_padded_ids)
 
     def _next_child_task_id(self, parent_task_id: str) -> str:
         max_id = 0
-        prefix = f"{parent_task_id}."
-        for task in self.list_tasks():
-            if not task.id.upper().startswith(prefix):
+        prefix = f"{parent_task_id}.".casefold()
+        for task_id in self._reserved_task_ids():
+            if not task_id.startswith(prefix):
                 continue
-            rest = task.id[len(prefix):]
+            rest = task_id[len(prefix):]
             first_segment = rest.split(".", 1)[0]
             if first_segment.isdigit():
                 max_id = max(max_id, int(first_segment))
         return format_child_task_id(parent_task_id, max_id + 1, self.project.config.zero_padded_ids)
 
-    def _task_path(self, task_id: str, title: str) -> Path:
-        task_dir = self.project.backlog_dir / "tasks"
+    def _task_path(self, task_id: str, title: str, *, base_dir: Path | None = None) -> Path:
+        task_dir = base_dir if base_dir is not None else self.project.backlog_dir / "tasks"
         task_dir.mkdir(parents=True, exist_ok=True)
         path = task_dir / f"{task_id.lower()} - {_slug_title(title)}.md"
         return _mutation_path(task_dir, path)
@@ -870,7 +902,7 @@ def _new_task_source(
         frontmatter["modified_files"] = list(modified_files)
     if on_status_change:
         frontmatter["onStatusChange"] = on_status_change
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     return (
         f"---\n{yaml_text}\n---\n\n"
         "## Description\n\n"
@@ -903,6 +935,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
     with tempfile.NamedTemporaryFile(
         "w",
         encoding="utf-8",
+        newline="",  # write content verbatim; the code manages \r\n itself
         dir=safe_path.parent,
         prefix=f".{safe_path.name}.",
         suffix=".tmp",
@@ -1181,7 +1214,7 @@ def _replace_frontmatter_values(
         else:
             frontmatter[key] = value
     newline = "\r\n" if "\r\n" in source else "\n"
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     yaml_text = yaml_text.replace("\n", newline)
     body = parsed.body
     return f"---{newline}{yaml_text}{newline}---{newline}{body}"
@@ -1209,6 +1242,8 @@ def _set_checklist_line(line: str, *, checked: bool) -> str:
 
 
 def _render_checklist(items: Sequence[str]) -> str:
+    for item in items:
+        _reject_reserved_markers(item)
     return "".join(f"- [ ] #{index} {item}\n" for index, item in enumerate(items, start=1))
 
 
@@ -1241,8 +1276,23 @@ def _definition_of_done_for_create(
     return inherited
 
 
+_RESERVED_MARKER_RE = re.compile(
+    r"<!--\s*(?:SECTION:[A-Za-z0-9_ -]+|AC|DOD|RUN_HISTORY(?:_ENTRY)?):(?:BEGIN|END)\s*-->"
+)
+
+
+def _reject_reserved_markers(content: str) -> None:
+    match = _RESERVED_MARKER_RE.search(content)
+    if match is not None:
+        raise TaskMutationError(
+            f"Content may not contain reserved section markers: {match.group(0)!r}"
+        )
+
+
 def _normalize_block(content: str) -> str:
-    return content.strip()
+    normalized = content.strip()
+    _reject_reserved_markers(normalized)
+    return normalized
 
 
 def _normalize_task_id(task_id: str, task_prefix: str = "task") -> str:
@@ -1372,11 +1422,6 @@ def _task_ids_equal(left: str, right: str, task_prefix: str = "task") -> bool:
         return left.strip().casefold() == right.strip().casefold()
 
 
-def _task_exists(tasks: Iterable[TaskRecord], task_id: str) -> bool:
-    normalized_id = task_id.casefold()
-    return any(task.id.casefold() == normalized_id for task in tasks)
-
-
 def _reject_circular_dependencies(
     task_id: str,
     dependencies: Sequence[str],
@@ -1483,9 +1528,14 @@ def _run_status_change_callback(
         return
 
 
+_DONE_STATUS_KEYS = {"done", "complete", "completed"}
+
+
 def _is_done_status(status: str) -> bool:
-    normalized_status = status.strip().casefold()
-    return "done" in normalized_status or "complete" in normalized_status
+    # Match the whole normalized status, not a substring: "Not Done", "Undone"
+    # and "Incomplete" must not count as done.
+    normalized_status = "".join(character for character in status.casefold() if character.isalnum())
+    return normalized_status in _DONE_STATUS_KEYS
 
 
 def _slug_title(title: str) -> str:

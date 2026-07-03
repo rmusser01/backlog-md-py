@@ -8,7 +8,7 @@ from typing import Any, Sequence
 
 import yaml
 
-from backlog_py.core.ids import format_numbered_id
+from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -75,7 +75,7 @@ class DecisionService:
     def view_decision(self, decision_id: str) -> DecisionRecord:
         normalized = _normalize_decision_id(decision_id)
         for decision in self.list_decisions():
-            if decision.id.casefold() == normalized.casefold():
+            if ids_equivalent(decision.id, normalized):
                 return decision
         raise KeyError(f"Decision not found: {decision_id}")
 
@@ -124,7 +124,7 @@ def _load_decision(base: Path, path: Path) -> DecisionRecord:
 
 
 def _render_decision(frontmatter: dict[str, Any]) -> str:
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     body = "\n## Context\n\n\n## Decision\n\n\n## Consequences\n"
     return f"---\n{yaml_text}\n---\n{body}"
 

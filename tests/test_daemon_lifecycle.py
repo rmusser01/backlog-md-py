@@ -34,6 +34,7 @@ def test_daemon_status_reports_not_running(tmp_path, monkeypatch):
 def test_daemon_status_json_omits_token(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
     write_runtime_record(_record(pid=os.getpid(), token="secret-token"), ensure_state_layout())
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: True)
 
     result = CliRunner().invoke(main, ["daemon", "status", "--json"])
 
@@ -49,6 +50,7 @@ def test_daemon_status_json_reports_known_project_and_lock_state(tmp_path, monke
     project_root = tmp_path / "repo"
     project_root.mkdir()
     write_runtime_record(_record(pid=os.getpid(), token="secret-token"), ensure_state_layout())
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: True)
 
     with ProjectWriteLock(project_root, operation="task_edit").acquire(timeout=0.1):
         result = CliRunner().invoke(main, ["daemon", "status", "--json"])
@@ -87,6 +89,7 @@ def test_daemon_status_cleans_stale_runtime_record(tmp_path, monkeypatch):
 def test_daemon_ensure_reuses_existing_runtime_record(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
     write_runtime_record(_record(pid=os.getpid()), ensure_state_layout())
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: True)
 
     def fail_popen(*args, **kwargs):
         raise AssertionError("ensure should not start a healthy daemon")
@@ -111,6 +114,7 @@ def test_daemon_start_launches_foreground_service_and_writes_runtime(tmp_path, m
         return FakeProcess()
 
     monkeypatch.setattr("backlog_py.daemon.lifecycle.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._wait_for_daemon_healthy", lambda *a, **k: True)
 
     result = CliRunner().invoke(main, ["daemon", "start", "--host", "127.0.0.1", "--port", "18888", "--json"])
 
@@ -122,6 +126,33 @@ def test_daemon_start_launches_foreground_service_and_writes_runtime(tmp_path, m
     command = launches[0][0]
     assert command[-5:] == ["--foreground", "--host", "127.0.0.1", "--port", "18888"]
     assert read_runtime_record(ensure_state_layout()).pid == 43210
+
+
+def test_daemon_start_does_not_record_unhealthy_child(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    terminated = []
+
+    class FakeProcess:
+        pid = 43211
+
+        def poll(self):
+            return 1  # already exited (e.g. port collision)
+
+        def terminate(self):
+            terminated.append(self.pid)
+
+        def kill(self):
+            terminated.append(self.pid)
+
+        def wait(self, timeout=None):
+            return 1
+
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.subprocess.Popen", lambda command, **kwargs: FakeProcess())
+
+    result = CliRunner().invoke(main, ["daemon", "start", "--host", "127.0.0.1", "--port", "18889", "--json"])
+
+    assert result.exit_code != 0, result.output
+    assert read_runtime_record(ensure_state_layout()) is None, "recorded a daemon that never became healthy"
 
 
 def test_daemon_stop_removes_stale_runtime_record(tmp_path, monkeypatch):
@@ -144,12 +175,46 @@ def test_daemon_stop_keeps_runtime_record_when_graceful_stop_times_out(tmp_path,
 
     monkeypatch.setattr("backlog_py.daemon.lifecycle.is_pid_alive", lambda pid: True)
     monkeypatch.setattr("backlog_py.daemon.lifecycle.os.kill", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: True)
 
     with pytest.raises(TimeoutError, match="did not stop"):
         daemon_stop(timeout=0)
 
     assert kills == [(12345, signal.SIGTERM)]
     assert read_runtime_record(layout) is not None
+
+
+def test_daemon_stop_does_not_signal_a_reused_pid(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout = ensure_state_layout()
+    write_runtime_record(_record(pid=12345), layout)
+    kills = []
+
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.is_pid_alive", lambda pid: True)
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.os.kill", lambda pid, sig: kills.append((pid, sig)))
+    # The recorded PID now belongs to an unrelated process, so its endpoint is
+    # not served by our daemon.
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: False)
+
+    result = daemon_stop(force=True)
+
+    assert result is False
+    assert kills == [], "signalled a PID that is no longer our daemon"
+    assert read_runtime_record(layout) is None
+
+
+def test_daemon_status_treats_reused_pid_as_not_running(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout = ensure_state_layout()
+    write_runtime_record(_record(pid=12345), layout)
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.is_pid_alive", lambda pid: True)
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: False)
+
+    from backlog_py.daemon.lifecycle import DaemonNotRunningError, daemon_status
+
+    with pytest.raises(DaemonNotRunningError):
+        daemon_status()
+    assert read_runtime_record(layout) is None
 
 
 def test_daemon_run_foreground_exits_on_sigterm(tmp_path):

@@ -147,7 +147,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
         _golden(
             "mcp:task-create",
             "MCP tools",
-            "task_create(project, title, id=None, status=None, description=None, notes=None, ordinal=None, milestone=None, parentTaskId=None, acceptanceCriteria=None, definitionOfDone=None, definitionOfDoneAdd=None, disableDefinitionOfDoneDefaults=False, dependencies=None, assignee=None, labels=None, priority=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, onStatusChange=None)",
+            "task_create(project, title, id=None, draft=False, status=None, description=None, notes=None, ordinal=None, milestone=None, parentTaskId=None, acceptanceCriteria=None, definitionOfDone=None, definitionOfDoneAdd=None, disableDefinitionOfDoneDefaults=False, dependencies=None, assignee=None, labels=None, priority=None, references=None, documentation=None, modifiedFiles=None, implementationPlan=None, finalSummary=None, onStatusChange=None)",
         ),
         _golden(
             "mcp:task-edit",

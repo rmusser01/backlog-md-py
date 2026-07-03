@@ -203,11 +203,13 @@ def test_orchestration_release_json_clears_claim(tmp_path):
     assert payload["version"] == 2
     assert payload["eventId"].startswith("run-")
     assert len(payload["runHistoryEventIds"]) == 2
-    assert payload["queueCategory"] == "in_workflow"
+    # Released tasks return to a claimable status, so they are eligible again.
+    assert payload["queueCategory"] == "eligible"
     task = MutableRepository.from_path(repo).get_task("TASK-1")
     orchestration = parse_orchestration(task)
     assert orchestration is not None
     assert orchestration.version == 2
+    assert orchestration.status_key == "todo"
     assert orchestration.lease_owner is None
     assert orchestration.lease_expires_at is None
 

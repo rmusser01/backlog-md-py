@@ -70,3 +70,50 @@ def _request(url: str, payload: object, *, token: str | None = None) -> urllib.r
         headers=headers,
         method="POST",
     )
+
+
+def _raw_mcp_post(host, port, extra_headers, *, token="secret", body=b"", timeout=5.0):
+    import socket
+
+    request = (
+        "POST /mcp HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        f"Authorization: Bearer {token}\r\n"
+        "Content-Type: application/json\r\n"
+        + extra_headers
+        + "Connection: close\r\n\r\n"
+    ).encode("ascii") + body
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        sock.sendall(request)
+        chunks = []
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+    return b"".join(chunks).decode("latin1")
+
+
+def _status_code(raw_response: str) -> int:
+    return int(raw_response.split("\r\n", 1)[0].split(" ")[1])
+
+
+def test_http_endpoint_rejects_garbage_content_length():
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_mcp_post(service.host, service.port, "Content-Length: not-a-number\r\n")
+        assert _status_code(response) == 400
+    finally:
+        service.shutdown()
+
+
+def test_http_endpoint_rejects_oversized_content_length_without_reading_body():
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_mcp_post(
+            service.host, service.port, "Content-Length: 1000000000\r\n", body=b""
+        )
+        assert _status_code(response) == 413
+    finally:
+        service.shutdown()

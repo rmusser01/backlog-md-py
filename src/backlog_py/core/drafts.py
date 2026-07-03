@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Sequence
 
-from backlog_py.core.ids import format_numbered_id
+from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
     MutableRepository,
@@ -68,7 +68,11 @@ class DraftService:
         normalized_id = _normalize_draft_id(draft_id) if draft_id is not None else self._next_draft_id()
         if self._draft_exists(normalized_id):
             raise TaskMutationError(f"Draft id already exists: {normalized_id}")
-        tasks = ReadOnlyRepository(self.project).list_tasks()
+        tasks = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=False,
+        ).list_tasks()
         current_config = load_config(self.project.config_path)
         normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
@@ -118,7 +122,7 @@ class DraftService:
     def view_draft(self, draft_id: str) -> TaskRecord:
         normalized_id = _normalize_draft_id(draft_id)
         for draft in self.list_drafts():
-            if draft.id.casefold() == normalized_id.casefold():
+            if ids_equivalent(draft.id, normalized_id):
                 return draft
         raise KeyError(f"Draft not found: {draft_id}")
 
@@ -141,7 +145,14 @@ class DraftService:
         return _load_task(target)
 
     def demote_task(self, task_id: str) -> TaskRecord:
-        task = ReadOnlyRepository(self.project).get_task(task_id)
+        # Local working tree only: an active-branch snapshot could otherwise
+        # write another branch's content into the new draft (and unlink the
+        # local file), losing local edits.
+        task = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=False,
+        ).get_task(task_id)
         draft_id = self._next_draft_id()
         target = self._draft_path(draft_id, task.title)
         if target.exists():
@@ -177,8 +188,7 @@ class DraftService:
         return format_numbered_id("draft-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _draft_exists(self, draft_id: str) -> bool:
-        normalized_id = draft_id.casefold()
-        return any(draft.id.casefold() == normalized_id for draft in self.list_drafts())
+        return any(ids_equivalent(draft.id, draft_id) for draft in self.list_drafts())
 
     def _draft_path(self, draft_id: str, title: str) -> Path:
         self.drafts_dir.mkdir(parents=True, exist_ok=True)

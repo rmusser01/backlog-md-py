@@ -138,7 +138,15 @@ class MilestoneService:
 
     def _task_reference_updates(self, old_name: str, new_name: str | None) -> list[_TaskReferenceUpdate]:
         updates: list[_TaskReferenceUpdate] = []
-        for task in ReadOnlyRepository(self.project).list_tasks():
+        # Read the local working tree only. Active-branch snapshots can return a
+        # record whose content is from another branch but whose path points at
+        # the local file, which would overwrite local content on write.
+        local_repository = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=False,
+        )
+        for task in local_repository.list_tasks():
             milestone = task.parsed.frontmatter.get("milestone")
             if not isinstance(milestone, str) or milestone.casefold() != old_name.casefold():
                 continue
@@ -147,7 +155,7 @@ class MilestoneService:
                 frontmatter.pop("milestone", None)
             else:
                 frontmatter["milestone"] = new_name
-            yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+            yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
             source = f"---\n{yaml_text}\n---\n{task.parsed.body}"
             parse_task_markdown(source)
             try:
@@ -209,7 +217,7 @@ def _unlink_best_effort(path: Path) -> None:
 
 
 def _render_milestone(frontmatter: dict[str, Any], content: str) -> str:
-    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     body = content.strip()
     return f"---\n{yaml_text}\n---\n\n{body}\n"
 

@@ -302,6 +302,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "title": {"type": "string"},
                 "id": {"type": "string", "description": "Explicit task ID to create."},
                 "task_id": {"type": "string", "description": "Alias for id."},
+                "draft": {"type": "boolean", "description": "Create the task as a draft."},
                 "status": {"type": "string", "description": "Initial task status."},
                 "description": {"type": "string", "description": "Initial task description section."},
                 "notes": {"type": "string", "description": "Initial implementation notes section."},

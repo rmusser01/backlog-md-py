@@ -71,7 +71,7 @@ def parse_run_history(source: str) -> RunHistoryParseResult:
 def render_run_history_entry(event: OrchestrationRunEvent) -> str:
     _validate_entry_limits(event)
     metadata = _render_metadata(event)
-    yaml_text = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=False).strip()
+    yaml_text = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True).strip()
     summary = _cap_text(_normalize_summary(event.summary), MAX_RUN_HISTORY_SUMMARY_CHARS)
     body = f"{summary}\n" if summary else ""
     return f"{ENTRY_BEGIN}\n```yaml\n{yaml_text}\n```\n{body}{ENTRY_END}\n"
@@ -333,7 +333,21 @@ def _render_metadata(event: OrchestrationRunEvent) -> dict[str, Any]:
     return metadata
 
 
+_RESERVED_RUN_HISTORY_MARKERS = (SECTION_BEGIN, SECTION_END, ENTRY_BEGIN, ENTRY_END)
+
+
+def _contains_reserved_marker(text: str) -> bool:
+    return any(marker in text for marker in _RESERVED_RUN_HISTORY_MARKERS)
+
+
 def _validate_entry_limits(event: OrchestrationRunEvent) -> None:
+    for text in (event.summary, *event.files, *event.verification):
+        if isinstance(text, str) and _contains_reserved_marker(text):
+            raise RunHistoryParseError(
+                "run_history_reserved_marker",
+                "Run history text may not contain reserved run-history markers",
+                "summary",
+            )
     if len(event.files) > MAX_RUN_HISTORY_FILES:
         raise RunHistoryParseError(
             "run_history_files_limit_exceeded",

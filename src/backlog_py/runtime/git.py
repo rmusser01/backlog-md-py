@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
 from dataclasses import dataclass
@@ -11,6 +12,11 @@ from loguru import logger
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.storage.config import load_config
+
+
+# Upper bound for any single git invocation so an unreachable remote or a
+# hanging credential helper cannot pin a caller (CLI command, TUI refresh).
+GIT_COMMAND_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -55,10 +61,11 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if not context.clean_before:
         logger.warning("Skipping auto-commit for {}: project had pre-existing git changes", operation)
         return
-    if not _has_project_changes(context.work_dir):
+    pathspecs = _auto_commit_pathspecs(project)
+    if not _has_changes_in(context.work_dir, pathspecs):
         return
 
-    add = _run_git(context.work_dir, "add", "-A", "--", ".")
+    add = _run_git(context.work_dir, "add", "-A", "--", *pathspecs)
     if add.returncode != 0:
         logger.warning("Skipping auto-commit for {}: git add failed: {}", operation, _git_error(add))
         return
@@ -71,7 +78,7 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if commit.returncode == 0:
         return
 
-    _run_git(context.work_dir, "reset", "--", ".")
+    _run_git(context.work_dir, "reset", "--", *pathspecs)
     logger.warning("Skipping auto-commit for {}: git commit failed: {}", operation, _git_error(commit))
 
 
@@ -183,6 +190,29 @@ def _is_git_worktree(work_dir: Path) -> bool:
 def _has_project_changes(work_dir: Path) -> bool:
     result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", ".")
     return bool(result.stdout.strip()) if result.returncode == 0 else False
+
+
+def _has_changes_in(work_dir: Path, pathspecs: list[str]) -> bool:
+    if not pathspecs:
+        return False
+    result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", *pathspecs)
+    return bool(result.stdout.strip()) if result.returncode == 0 else False
+
+
+def _auto_commit_pathspecs(project: BacklogProject) -> list[str]:
+    """Files auto-commit is allowed to stage: the backlog dir and its config.
+
+    Restricting the pathspec keeps unrelated files written during the locked
+    operation (an editor session, a status-change hook) out of the commit.
+    """
+    pathspecs: list[str] = []
+    backlog_rel = _relative_path(project.root, project.backlog_dir)
+    if backlog_rel is not None:
+        pathspecs.append(backlog_rel)
+    config_rel = _relative_path(project.root, project.config_path)
+    if config_rel is not None and not (backlog_rel and config_rel.startswith(f"{backlog_rel}/")):
+        pathspecs.append(config_rel)
+    return pathspecs
 
 
 def _has_path_changes(work_dir: Path, relative_path: str) -> bool:
@@ -304,6 +334,10 @@ def _git_error(result: subprocess.CompletedProcess[str]) -> str:
 
 def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
     command = ["git", *args]
+    # GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on an
+    # interactive credential prompt; the timeout bounds a slow/unreachable
+    # remote so read commands and the TUI refresh cannot hang indefinitely.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
         return subprocess.run(  # nosec B603
             command,
@@ -311,6 +345,12 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
             check=False,
             capture_output=True,
             text=True,
+            timeout=GIT_COMMAND_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            command, 124, "", f"git command timed out after {GIT_COMMAND_TIMEOUT_SECONDS}s"
         )
     except OSError as exc:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
