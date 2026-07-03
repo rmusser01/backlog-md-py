@@ -50,7 +50,8 @@ def run_stdio(
         if forward_target is None:
             response = handle_jsonrpc_text(line, context=local_context)
         else:
-            response, session_id = _forward_jsonrpc_text(line, forward_target, session_id=session_id)
+            forward_text = _inject_project_hint(line, local_context.project_hint)
+            response, session_id = _forward_jsonrpc_text(forward_text, forward_target, session_id=session_id)
         if response is None:
             continue
         output_stream.write(f"{response}\n")
@@ -80,6 +81,39 @@ def _discover_project_hint() -> str | None:
         return str(discover_project(Path.cwd()).root)
     except (FileNotFoundError, OSError, ValueError):
         return None
+
+
+def _inject_project_hint(text: str, project_hint: str | None) -> str:
+    """Add the locally-discovered project to forwarded tools/call requests.
+
+    The daemon has no project context of its own, so a tools/call that omits
+    'project' would fail there even though it resolves locally. Injecting the
+    hint before forwarding makes daemon and non-daemon execution behave the
+    same. On any parse issue the original text is forwarded unchanged.
+    """
+    if project_hint is None:
+        return text
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    messages = payload if isinstance(payload, list) else [payload]
+    changed = False
+    for message in messages:
+        if not isinstance(message, dict) or message.get("method") != "tools/call":
+            continue
+        params = message.get("params")
+        if not isinstance(params, dict):
+            continue
+        arguments = params.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        if "project" not in arguments:
+            arguments["project"] = project_hint
+            changed = True
+    if not changed:
+        return text
+    return json.dumps(payload)
 
 
 @dataclass(frozen=True)
