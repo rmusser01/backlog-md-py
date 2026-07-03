@@ -123,13 +123,34 @@ class ReadOnlyRepository:
             normalized_lookup_id = _normalize_dependency_id(task_id, self.project.config.task_prefix).casefold()
         except TaskMutationError:
             normalized_lookup_id = normalized_id
+        wanted = {normalized_id, normalized_lookup_id}
         for task in self.list_tasks():
-            if task.id.casefold() in {normalized_id, normalized_lookup_id}:
+            if task.id.casefold() in wanted:
                 return task
-        for task in _load_tasks_from_dir(self.project.backlog_dir / "tasks"):
-            if task.id.casefold() in {normalized_id, normalized_lookup_id}:
-                return task
+        for directory in self._task_lookup_dirs():
+            for task in _load_tasks_from_dir(directory):
+                if task.id.casefold() in wanted:
+                    return task
         raise KeyError(f"Task not found: {task_id}")
+
+    def _task_lookup_dirs(self) -> tuple[Path, ...]:
+        """Directories that back task lookups and id reservation, in priority order.
+
+        Completed and archived tasks are included so that a task never becomes
+        unaddressable after being moved, and so their ids are never reused.
+        """
+        return (
+            self.project.backlog_dir / "tasks",
+            self.project.backlog_dir / "completed",
+            self.project.backlog_dir / "archive" / "tasks",
+        )
+
+    def _reserved_task_ids(self) -> set[str]:
+        """Casefolded ids of every task in any bucket (active, completed, archived)."""
+        ids = {task.id.casefold() for task in self.list_tasks()}
+        for directory in self._task_lookup_dirs():
+            ids.update(task.id.casefold() for task in _load_tasks_from_dir(directory))
+        return ids
 
     def list_completed_tasks(self) -> list[TaskRecord]:
         return sorted(self._load_completed_tasks(), key=_task_record_sort_key)
@@ -392,7 +413,7 @@ class MutableRepository(ReadOnlyRepository):
             ),
             current_config.task_prefix,
         )
-        if _task_exists(tasks, normalized_id):
+        if normalized_id.casefold() in self._reserved_task_ids():
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
         _reject_missing_dependencies(normalized_dependencies, tasks)
@@ -487,7 +508,7 @@ class MutableRepository(ReadOnlyRepository):
         safe_current_path = _mutation_path(task.path.parent, task.path)
         target_path = safe_current_path
         if title is not None:
-            target_path = self._task_path(task.id, title)
+            target_path = self._task_path(task.id, title, base_dir=task.path.parent)
             if target_path != safe_current_path and target_path.exists():
                 raise TaskMutationError(f"Task path already exists: {target_path.name}")
         normalized_dependencies = None
@@ -687,26 +708,26 @@ class MutableRepository(ReadOnlyRepository):
         max_id = 0
         prefix = current_config.task_prefix.upper()
         pattern = re.compile(rf"{re.escape(prefix)}-(\d+)", re.IGNORECASE)
-        for task in self.list_tasks():
-            match = pattern.fullmatch(task.id)
+        for task_id in self._reserved_task_ids():
+            match = pattern.fullmatch(task_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
         return format_numbered_id(f"{prefix}-", max_id + 1, current_config.zero_padded_ids)
 
     def _next_child_task_id(self, parent_task_id: str) -> str:
         max_id = 0
-        prefix = f"{parent_task_id}."
-        for task in self.list_tasks():
-            if not task.id.upper().startswith(prefix):
+        prefix = f"{parent_task_id}.".casefold()
+        for task_id in self._reserved_task_ids():
+            if not task_id.startswith(prefix):
                 continue
-            rest = task.id[len(prefix):]
+            rest = task_id[len(prefix):]
             first_segment = rest.split(".", 1)[0]
             if first_segment.isdigit():
                 max_id = max(max_id, int(first_segment))
         return format_child_task_id(parent_task_id, max_id + 1, self.project.config.zero_padded_ids)
 
-    def _task_path(self, task_id: str, title: str) -> Path:
-        task_dir = self.project.backlog_dir / "tasks"
+    def _task_path(self, task_id: str, title: str, *, base_dir: Path | None = None) -> Path:
+        task_dir = base_dir if base_dir is not None else self.project.backlog_dir / "tasks"
         task_dir.mkdir(parents=True, exist_ok=True)
         path = task_dir / f"{task_id.lower()} - {_slug_title(title)}.md"
         return _mutation_path(task_dir, path)
@@ -1370,11 +1391,6 @@ def _task_ids_equal(left: str, right: str, task_prefix: str = "task") -> bool:
         ).casefold()
     except TaskMutationError:
         return left.strip().casefold() == right.strip().casefold()
-
-
-def _task_exists(tasks: Iterable[TaskRecord], task_id: str) -> bool:
-    normalized_id = task_id.casefold()
-    return any(task.id.casefold() == normalized_id for task in tasks)
 
 
 def _reject_circular_dependencies(
