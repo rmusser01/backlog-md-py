@@ -124,6 +124,10 @@ def build_compatibility_report(
     ]
 
     return {
+        # The inventory statuses are a maintained declaration of parity, not
+        # the result of automated per-item verification. Surface that honestly
+        # so consumers do not read "implemented" as "measured".
+        "verification": "self-declared",
         "agent_cutover_ready": _agent_cutover_ready(inventory.items),
         "full_browser_release_ready": _full_browser_release_ready(release_gates),
         "upstream_baseline": dict(UPSTREAM_BASELINE),
@@ -146,6 +150,7 @@ def _item_to_dict(item: CompatibilityItem) -> dict[str, Any]:
         "upstream_reference": item.upstream_reference,
         "expected": item.expected,
         "status": item.status,
+        "verification": "self-declared",
         "fixture": item.fixture,
         "deferred_reason": item.deferred_reason,
     }
