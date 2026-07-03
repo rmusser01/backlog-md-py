@@ -367,3 +367,19 @@ def test_compatibility_report_keeps_screenshot_gate_required_without_desktop_and
         "desktop and mobile"
         in gates_by_name["browser:desktop-mobile-screenshot-release-check"]["evidence_error"]
     )
+
+
+def test_compatibility_report_declares_self_declared_verification():
+    report = build_compatibility_report(load_builtin_inventory())
+
+    # The report is a maintained declaration, not automated verification; it
+    # must say so rather than implying the statuses were measured.
+    assert report["verification"] == "self-declared"
+    for item in report["items"]:
+        assert item["verification"] == "self-declared"
+
+
+def test_deferred_helper_is_not_dead_code():
+    import backlog_py.compat.inventory as inventory
+
+    assert not hasattr(inventory, "_deferred"), "unused _deferred scaffolding should be removed"
