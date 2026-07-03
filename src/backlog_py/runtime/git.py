@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
 from dataclasses import dataclass
@@ -11,6 +12,11 @@ from loguru import logger
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.storage.config import load_config
+
+
+# Upper bound for any single git invocation so an unreachable remote or a
+# hanging credential helper cannot pin a caller (CLI command, TUI refresh).
+GIT_COMMAND_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -304,6 +310,10 @@ def _git_error(result: subprocess.CompletedProcess[str]) -> str:
 
 def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
     command = ["git", *args]
+    # GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on an
+    # interactive credential prompt; the timeout bounds a slow/unreachable
+    # remote so read commands and the TUI refresh cannot hang indefinitely.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     try:
         return subprocess.run(  # nosec B603
             command,
@@ -311,6 +321,12 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
             check=False,
             capture_output=True,
             text=True,
+            timeout=GIT_COMMAND_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            command, 124, "", f"git command timed out after {GIT_COMMAND_TIMEOUT_SECONDS}s"
         )
     except OSError as exc:
         return subprocess.CompletedProcess(command, 127, "", str(exc))

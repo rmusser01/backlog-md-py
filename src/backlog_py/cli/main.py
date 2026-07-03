@@ -18,11 +18,11 @@ from backlog_py.compat.inventory import load_builtin_inventory
 from backlog_py.compat.report import build_compatibility_report, build_release_evidence_manifest
 from backlog_py.core.agents import AgentInstructionError, AgentInstructionUpdate, update_agent_instruction_files
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
-from backlog_py.core.decisions import DecisionRecord, DecisionService
-from backlog_py.core.documents import DocumentRecord, DocumentService
+from backlog_py.core.decisions import DecisionMutationError, DecisionRecord, DecisionService
+from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.drafts import DraftService
 from backlog_py.core.init import InitProjectError, InitProjectResult, init_project
-from backlog_py.core.milestones import MilestoneRecord, MilestoneService
+from backlog_py.core.milestones import MilestoneMutationError, MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
     MutableRepository,
@@ -59,14 +59,52 @@ from backlog_py.storage.config import (
     replace_definition_of_done_defaults,
     set_config_value,
 )
-from backlog_py.runtime.locks import with_init_lock, with_project_write_lock
+from backlog_py.runtime.locks import LockTimeoutError, with_init_lock, with_project_write_lock
 from backlog_py.runtime.state import RuntimeRecord, runtime_status
+from backlog_py.security.paths import PathContainmentError
 from backlog_py.storage.project import discover_project
 
 T = TypeVar("T")
 
 
-@click.group()
+# Domain errors that should surface as a clean "Error: ..." message and a
+# non-zero exit code rather than a raw Python traceback.
+_CLI_DOMAIN_ERRORS = (
+    TaskMutationError,
+    MilestoneMutationError,
+    DecisionMutationError,
+    DocumentMutationError,
+    InitProjectError,
+    OrchestrationError,
+    AgentInstructionError,
+    CompletionInstallError,
+    DaemonNotRunningError,
+    PathContainmentError,
+    LockTimeoutError,
+    KeyError,
+)
+
+
+def _clean_error_message(exc: Exception) -> str:
+    if isinstance(exc, KeyError) and exc.args:
+        return str(exc.args[0])
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
+
+
+class _BacklogGroup(click.Group):
+    """Top-level group that maps known domain errors to clean CLI errors."""
+
+    def invoke(self, ctx: click.Context) -> object:
+        try:
+            return super().invoke(ctx)
+        except click.ClickException:
+            raise
+        except _CLI_DOMAIN_ERRORS as exc:
+            raise click.ClickException(_clean_error_message(exc)) from exc
+
+
+@click.group(cls=_BacklogGroup)
 @click.option("--cwd", type=click.Path(path_type=Path), default=None, help="Backlog project directory.")
 @click.version_option(__version__, prog_name="backlog-py")
 @click.pass_context
