@@ -15,6 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
+from loguru import logger
+
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
@@ -36,6 +38,10 @@ from backlog_py.storage.config import (
 )
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+# Cap request bodies so an oversized Content-Length cannot exhaust memory, and
+# bound the socket so a slow/idle client cannot pin a handler thread forever.
+_MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
+_REQUEST_TIMEOUT_SECONDS = 30
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
@@ -248,8 +254,24 @@ def _request_server_shutdown(server: BrowserThreadingHTTPServer) -> bool:
 
 class _BrowserHttpHandler(BaseHTTPRequestHandler):
     server: BrowserThreadingHTTPServer
+    timeout = _REQUEST_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:
+        try:
+            self._handle_get()
+        except Exception:
+            # A single unreadable file or bad config must not drop the
+            # connection with a bare traceback; return a 500 error page.
+            logger.exception("Unhandled error serving GET {}", self.path)
+            self._safe_send_error()
+
+    def _safe_send_error(self) -> None:
+        try:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Internal server error"})
+        except Exception:
+            pass
+
+    def _handle_get(self) -> None:
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         if path == "/favicon.ico":
@@ -520,7 +542,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         _ = format, args
 
     def _read_json_body(self) -> object:
-        length = int(self.headers.get("Content-Length", "0"))
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length) if raw_length is not None else 0
+        except ValueError:
+            raise ValueError("Invalid Content-Length header")
+        if length < 0:
+            raise ValueError("Invalid Content-Length header")
+        if length > _MAX_REQUEST_BODY_BYTES:
+            raise ValueError("Request body too large")
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _origin_allowed(self) -> bool:
