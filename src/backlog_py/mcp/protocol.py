@@ -6,12 +6,30 @@ from dataclasses import dataclass
 from typing import Any
 
 from backlog_py import __version__
+from backlog_py.core.decisions import DecisionMutationError
+from backlog_py.core.documents import DocumentMutationError
+from backlog_py.core.milestones import MilestoneMutationError
+from backlog_py.core.repository import TaskMutationError
 from backlog_py.mcp.catalog import (
     list_resources,
     list_tools,
     project_from_argument,
     read_resource_content,
     tool_by_name,
+)
+from backlog_py.runtime.locks import LockTimeoutError
+from backlog_py.security.paths import PathContainmentError
+
+# Exceptions that mean "the tool ran but the operation failed" (as opposed to a
+# malformed request). These become MCP tool-error results, not JSON-RPC -32603.
+_TOOL_EXECUTION_ERRORS = (
+    KeyError,
+    TaskMutationError,
+    MilestoneMutationError,
+    DecisionMutationError,
+    DocumentMutationError,
+    PathContainmentError,
+    LockTimeoutError,
 )
 
 JSONRPC_VERSION = "2.0"
@@ -183,10 +201,25 @@ def _call_tool(params: dict[str, object], *, context: McpRequestContext) -> dict
         result = tool.handler(project_from_argument(project_path), **arguments)
     except TypeError as exc:
         raise JsonRpcError(INVALID_PARAMS, str(exc)) from exc
+    except _TOOL_EXECUTION_ERRORS as exc:
+        # The tool ran but the operation failed (not found, invalid mutation,
+        # lock timeout, ...). Per MCP this is a tool error result, not a
+        # protocol-level -32603, and the message must not leak absolute paths.
+        return {
+            "content": [{"type": "text", "text": _tool_error_message(exc)}],
+            "isError": True,
+        }
     return {
         "content": [{"type": "text", "text": _tool_text(result)}],
         "isError": False,
     }
+
+
+def _tool_error_message(exc: Exception) -> str:
+    if isinstance(exc, KeyError) and exc.args:
+        return str(exc.args[0])
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
 
 
 def _tool_text(result: object) -> str:

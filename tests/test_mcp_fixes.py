@@ -28,6 +28,33 @@ def _call_tool(project_root: Path, name: str, **arguments):
     )
 
 
+# --- #9: domain errors surface as -32603 and leak paths ---------------------
+
+def test_task_view_missing_returns_tool_error_not_internal_error(tmp_path):
+    project = _project(tmp_path)
+
+    response = _call_tool(project.root, "task_view", task_id="TASK-999")
+
+    assert "error" not in response, response.get("error")
+    result = response["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "not found" in text.casefold()
+    assert str(project.root) not in text, "tool error leaked the absolute project path"
+
+
+def test_task_edit_unknown_status_returns_tool_error(tmp_path):
+    from backlog_py.core.repository import MutableRepository
+
+    project = _project(tmp_path)
+    MutableRepository(project).create_task(title="Task")
+
+    response = _call_tool(project.root, "task_edit", task_id="TASK-1", status="Nonsense")
+
+    assert "error" not in response, response.get("error")
+    assert response["result"]["isError"] is True
+
+
 # --- #7: unquoted dates in frontmatter crash JSON serialization -------------
 
 def test_document_view_with_unquoted_date_does_not_error(tmp_path):
