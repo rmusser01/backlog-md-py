@@ -2626,8 +2626,10 @@ def _parse_ordinal(ordinal: str | None) -> int | float | None:
 
 
 def _is_completed_status(status: str) -> bool:
-    normalized = status.casefold()
-    return "done" in normalized or "complete" in normalized
+    # Whole-status match so "Not Done"/"Incomplete" are never swept into
+    # completed/ by cleanup.
+    normalized = "".join(character for character in status.casefold() if character.isalnum())
+    return normalized in {"done", "complete", "completed"}
 
 
 def _bool_text(value: bool) -> str:

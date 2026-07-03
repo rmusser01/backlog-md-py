@@ -91,6 +91,43 @@ def test_rename_milestone_does_not_overwrite_local_with_branch_content(tmp_path)
     assert "milestone: M1-renamed" in after
 
 
+# --- substring done-status detection ----------------------------------------
+
+def test_is_done_status_uses_exact_matching():
+    from backlog_py.core.repository import _is_done_status
+
+    assert _is_done_status("Done")
+    assert _is_done_status("Completed")
+    assert not _is_done_status("Undone")
+    assert not _is_done_status("Not Done")
+    assert not _is_done_status("Incomplete")
+    assert not _is_done_status("In Progress")
+
+
+def test_cli_is_completed_status_uses_exact_matching():
+    from backlog_py.cli.main import _is_completed_status
+
+    assert _is_completed_status("Done")
+    assert _is_completed_status("Completed")
+    assert not _is_completed_status("Not Done")
+    assert not _is_completed_status("Incomplete")
+
+
+def test_complete_task_rejects_not_done_status(tmp_path):
+    from backlog_py.core.repository import TaskMutationError
+
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    task = repo.create_task(title="Task")
+    # Force a non-done status that contains the substring "done".
+    path = task.path
+    path.write_text(path.read_text(encoding="utf-8").replace("status: To Do", "status: Not Done"), encoding="utf-8")
+
+    with pytest.raises(TaskMutationError):
+        repo.complete_task(task.id)
+    assert path.parent.name == "tasks", "a Not Done task was moved to completed/"
+
+
 # --- #1: task IDs reused after completion -----------------------------------
 
 def test_next_task_id_does_not_reuse_completed_ids(tmp_path):

@@ -1527,9 +1527,14 @@ def _run_status_change_callback(
         return
 
 
+_DONE_STATUS_KEYS = {"done", "complete", "completed"}
+
+
 def _is_done_status(status: str) -> bool:
-    normalized_status = status.strip().casefold()
-    return "done" in normalized_status or "complete" in normalized_status
+    # Match the whole normalized status, not a substring: "Not Done", "Undone"
+    # and "Incomplete" must not count as done.
+    normalized_status = "".join(character for character in status.casefold() if character.isalnum())
+    return normalized_status in _DONE_STATUS_KEYS
 
 
 def _slug_title(title: str) -> str:
