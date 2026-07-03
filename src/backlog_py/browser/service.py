@@ -573,6 +573,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", "0")
+        self._send_security_headers()
         self.end_headers()
         _record_service_request(
             self.server,
@@ -596,6 +597,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("Content-Length", str(len(data)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
         _record_service_request(
@@ -606,11 +608,19 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             content_type=content_type,
         )
 
+    def _send_security_headers(self) -> None:
+        # Purely defensive, additive headers: block MIME sniffing, framing
+        # (clickjacking of the Stop/Archive controls), and referrer leakage.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def _send_text(self, status: HTTPStatus, text: str, *, content_type: str) -> None:
         data = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
         _record_service_request(

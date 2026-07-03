@@ -37,6 +37,20 @@ def test_get_board_with_broken_orchestration_returns_500_not_dropped_connection(
     assert status == 500, "board GET should return a 500 error page, not drop the connection"
 
 
+def test_board_response_sets_security_headers(tmp_path):
+    project = _project(tmp_path)
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with urllib.request.urlopen(service.root_url, timeout=5) as response:
+            headers = dict(response.headers)
+    finally:
+        service.shutdown()
+
+    assert headers.get("X-Content-Type-Options") == "nosniff"
+    assert headers.get("X-Frame-Options") == "DENY"
+    assert headers.get("Referrer-Policy") == "no-referrer"
+
+
 def test_oversized_post_body_is_rejected_quickly(tmp_path):
     project = _project(tmp_path)
     service = start_browser_service(project, host="127.0.0.1", port=0)
