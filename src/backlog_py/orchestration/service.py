@@ -203,7 +203,7 @@ class OrchestrationService:
     def _record_run_locked(self, request: OrchestrationRecordRunRequest) -> OrchestrationMutationResult:
         repository = MutableRepository(self.project, refresh_remote_refs=False)
         task = repository.get_task(request.task_id)
-        load_orchestration_policy(self.project)
+        policy = load_orchestration_policy(self.project)
         parsed_history = parse_run_history(task.raw_source)
         if parsed_history.issues:
             issue = parsed_history.issues[0]
@@ -240,6 +240,7 @@ class OrchestrationService:
         source = task.raw_source
         next_version = current_version
         if request.state_update is not None:
+            self._validate_record_run_state_update(task, state, policy, request, current_version)
             updated_orchestration = _apply_state_update(state.raw if state is not None else {}, request.state_update)
             current_orchestration = state.raw if state is not None else {}
             if updated_orchestration != current_orchestration:
@@ -257,6 +258,42 @@ class OrchestrationService:
             event=candidate,
             idempotent_replay=False,
         )
+
+    def _validate_record_run_state_update(
+        self,
+        task: TaskRecord,
+        state: Any,
+        policy: OrchestrationPolicy,
+        request: OrchestrationRecordRunRequest,
+        current_version: int,
+    ) -> None:
+        """Hold record_run state updates to the same policy as transition_task.
+
+        Without this, record_run could jump a task to any status (including a
+        status the policy does not define) or steal another agent's active
+        lease, routing around the workflow state machine entirely.
+        """
+        actor = resolve_orchestration_actor(request.actor)
+        _require_lease_owner(task, state, current_version, actor, self._now())
+        update = request.state_update
+        if update is None or update.status_key is None:
+            return
+        current_status = _state_status_key(task, state)
+        target_status = _normalize_key(update.status_key)
+        if not policy.has_state(target_status):
+            raise OrchestrationTransitionError(
+                "Unknown orchestration status",
+                details={"task_id": task.id, "to_status": update.status_key},
+            )
+        if target_status != current_status and not policy.can_transition(current_status, target_status):
+            raise OrchestrationTransitionError(
+                "Orchestration transition is not allowed",
+                details={
+                    "task_id": task.id,
+                    "from_status": current_status,
+                    "to_status": update.status_key,
+                },
+            )
 
     def _split_task_locked(self, request: TaskSplitRequest) -> TaskSplitResult:
         repository = MutableRepository(self.project, refresh_remote_refs=False)

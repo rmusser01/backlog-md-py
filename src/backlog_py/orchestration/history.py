@@ -333,7 +333,21 @@ def _render_metadata(event: OrchestrationRunEvent) -> dict[str, Any]:
     return metadata
 
 
+_RESERVED_RUN_HISTORY_MARKERS = (SECTION_BEGIN, SECTION_END, ENTRY_BEGIN, ENTRY_END)
+
+
+def _contains_reserved_marker(text: str) -> bool:
+    return any(marker in text for marker in _RESERVED_RUN_HISTORY_MARKERS)
+
+
 def _validate_entry_limits(event: OrchestrationRunEvent) -> None:
+    for text in (event.summary, *event.files, *event.verification):
+        if isinstance(text, str) and _contains_reserved_marker(text):
+            raise RunHistoryParseError(
+                "run_history_reserved_marker",
+                "Run history text may not contain reserved run-history markers",
+                "summary",
+            )
     if len(event.files) > MAX_RUN_HISTORY_FILES:
         raise RunHistoryParseError(
             "run_history_files_limit_exceeded",

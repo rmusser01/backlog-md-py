@@ -309,6 +309,9 @@ class OrchestrationPolicy:
             },
         )
 
+    def has_state(self, status_key: str) -> bool:
+        return _normalize_key(status_key) in _normalized_states(self)
+
     def can_transition(self, from_status: str, to_status: str) -> bool:
         return _normalize_key(to_status) in _normalized_transitions(self).get(_normalize_key(from_status), ())
 
