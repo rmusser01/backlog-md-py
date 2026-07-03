@@ -12,7 +12,7 @@ from typing import Iterable, Sequence
 
 import yaml
 
-from backlog_py.core.ids import format_child_task_id, format_numbered_id
+from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
 from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -118,18 +118,20 @@ class ReadOnlyRepository:
         ]
 
     def get_task(self, task_id: str) -> TaskRecord:
-        normalized_id = task_id.casefold()
         try:
-            normalized_lookup_id = _normalize_dependency_id(task_id, self.project.config.task_prefix).casefold()
+            normalized_lookup_id = _normalize_dependency_id(task_id, self.project.config.task_prefix)
         except TaskMutationError:
-            normalized_lookup_id = normalized_id
-        wanted = {normalized_id, normalized_lookup_id}
+            normalized_lookup_id = task_id
+
+        def matches(candidate_id: str) -> bool:
+            return ids_equivalent(candidate_id, task_id) or ids_equivalent(candidate_id, normalized_lookup_id)
+
         for task in self.list_tasks():
-            if task.id.casefold() in wanted:
+            if matches(task.id):
                 return task
         for directory in self._task_lookup_dirs():
             for task in _load_tasks_from_dir(directory):
-                if task.id.casefold() in wanted:
+                if matches(task.id):
                     return task
         raise KeyError(f"Task not found: {task_id}")
 

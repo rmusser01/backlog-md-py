@@ -71,6 +71,42 @@ def test_get_task_finds_completed_task(tmp_path):
     assert found.id == first.id
 
 
+# --- #3: zero-padded ids unaddressable --------------------------------------
+
+def test_zero_padded_draft_is_addressable(tmp_path):
+    from backlog_py.core.drafts import DraftService
+
+    project = _project(tmp_path, zeroPaddedIds="3")
+    drafts = DraftService(project)
+    draft = drafts.create_draft(title="Draft one")
+    assert draft.id == "draft-001"
+
+    for lookup in ("draft-001", "draft-1"):
+        assert drafts.view_draft(lookup).id == draft.id, f"lookup {lookup!r} failed"
+
+
+def test_zero_padded_decision_is_addressable_by_number(tmp_path):
+    from backlog_py.core.decisions import DecisionService
+
+    project = _project(tmp_path, zeroPaddedIds="3")
+    decisions = DecisionService(project)
+    created = decisions.create_decision("Adopt X")
+    assert created.id == "decision-001"
+
+    for lookup in ("decision-001", "decision-1", "1"):
+        assert decisions.view_decision(lookup).id == created.id, f"lookup {lookup!r} failed"
+
+
+def test_zero_padded_task_is_addressable_unpadded(tmp_path):
+    project = _project(tmp_path, zeroPaddedIds="3")
+    repo = MutableRepository(project)
+    task = repo.create_task(title="Padded")
+    assert task.id == "TASK-001"
+
+    for lookup in ("TASK-001", "TASK-1", "1"):
+        assert repo.get_task(lookup).id == task.id, f"lookup {lookup!r} failed"
+
+
 def test_editing_completed_task_keeps_it_in_completed(tmp_path):
     project = _project(tmp_path)
     repo = MutableRepository(project)

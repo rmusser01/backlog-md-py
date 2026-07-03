@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Sequence
 
-from backlog_py.core.ids import format_numbered_id
+from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
     MutableRepository,
@@ -118,7 +118,7 @@ class DraftService:
     def view_draft(self, draft_id: str) -> TaskRecord:
         normalized_id = _normalize_draft_id(draft_id)
         for draft in self.list_drafts():
-            if draft.id.casefold() == normalized_id.casefold():
+            if ids_equivalent(draft.id, normalized_id):
                 return draft
         raise KeyError(f"Draft not found: {draft_id}")
 
@@ -177,8 +177,7 @@ class DraftService:
         return format_numbered_id("draft-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _draft_exists(self, draft_id: str) -> bool:
-        normalized_id = draft_id.casefold()
-        return any(draft.id.casefold() == normalized_id for draft in self.list_drafts())
+        return any(ids_equivalent(draft.id, draft_id) for draft in self.list_drafts())
 
     def _draft_path(self, draft_id: str, title: str) -> Path:
         self.drafts_dir.mkdir(parents=True, exist_ok=True)
