@@ -13,6 +13,7 @@ from typing import Iterable, Sequence
 import yaml
 from loguru import logger
 
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
 from backlog_py.core.status_callback import execute_status_callback
@@ -134,7 +135,7 @@ class ReadOnlyRepository:
             for task in _load_tasks_from_dir(directory):
                 if matches(task.id):
                     return task
-        raise KeyError(f"Task not found: {task_id}")
+        raise NotFoundError(f"Task not found: {task_id}")
 
     def _task_lookup_dirs(self) -> tuple[Path, ...]:
         """Directories that back task lookups and id reservation, in priority order.

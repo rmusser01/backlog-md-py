@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 import yaml
 
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
@@ -77,7 +78,7 @@ class DecisionService:
         for decision in self.list_decisions():
             if ids_equivalent(decision.id, normalized):
                 return decision
-        raise KeyError(f"Decision not found: {decision_id}")
+        raise NotFoundError(f"Decision not found: {decision_id}")
 
     def _load_decision(self, path: Path) -> DecisionRecord:
         try:

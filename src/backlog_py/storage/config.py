@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 
@@ -128,7 +129,7 @@ def get_config_value(project: BacklogProject, key: str) -> Any:
         return raw[raw_key]
 
     if normalized_key is None:
-        raise KeyError(f"Unknown config key: {key}")
+        raise NotFoundError(f"Unknown config key: {key}")
     value = getattr(load_config(project.config_path), normalized_key)
     if normalized_key == "zero_padded_ids":
         return _zero_padded_ids_display(value)

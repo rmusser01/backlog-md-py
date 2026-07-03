@@ -50,6 +50,59 @@ def _status_key(repo: Path) -> str:
     return parse_orchestration(task).status_key
 
 
+def _repo_with_orchestration(tmp_path: Path, orchestration_yaml: str, *, status: str = "To Do") -> Path:
+    repo = tmp_path / "repo"
+    task_dir = repo / "backlog" / "tasks"
+    task_dir.mkdir(parents=True)
+    (repo / "backlog" / "config.yml").write_text("projectName: orch-fixes\n", encoding="utf-8")
+    indented = "".join(f"  {line}\n" for line in orchestration_yaml.strip().splitlines())
+    (task_dir / "task-1 - Example.md").write_text(
+        f"---\nid: TASK-1\ntitle: Example\nstatus: {status}\norchestration:\n{indented}---\n\n"
+        "## Description\n\nBody\n",
+        encoding="utf-8",
+    )
+    return repo
+
+
+# --- review follow-up: record_run must not acquire a lease outside claim rules
+
+def test_record_run_cannot_acquire_lease_on_non_claimable_task(tmp_path):
+    # 'review' is not claimable in the default policy and there is no active
+    # lease, so record_run must not let an actor grant itself one (that would
+    # bypass claim_task's is_claimable check).
+    repo = _repo_with_orchestration(tmp_path, "status_key: review\nversion: 0", status="In Progress")
+
+    with pytest.raises(OrchestrationTransitionError):
+        _service(repo).record_run(
+            "TASK-1",
+            actor="agent",
+            result="succeeded",
+            summary="grab",
+            expected_version=0,
+            state_update=OrchestrationStateUpdate(lease_owner="agent"),
+        )
+
+
+def test_record_run_can_renew_own_active_lease(tmp_path):
+    # The actor already holds the active lease, so updating its lease fields is
+    # allowed even on a non-claimable status.
+    repo = _repo_with_orchestration(
+        tmp_path,
+        "status_key: review\nversion: 0\nlease_owner: agent\nlease_expires_at: '2026-06-26T19:00:00Z'",
+        status="In Progress",
+    )
+
+    result = _service(repo).record_run(
+        "TASK-1",
+        actor="agent",
+        result="succeeded",
+        summary="renew",
+        expected_version=0,
+        state_update=OrchestrationStateUpdate(lease_expires_at="2026-06-26T20:00:00Z"),
+    )
+    assert result.version == 1
+
+
 # --- #18: record_run bypasses the policy state machine ----------------------
 
 def test_record_run_rejects_illegal_status_jump(tmp_path):

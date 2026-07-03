@@ -47,6 +47,12 @@
 - Scope git auto-commit to the backlog directory, give the CLI clean error
   messages instead of tracebacks, and reject `task create`/`task edit` flags
   that the chosen subcommand cannot honor.
+- Require a claimable status (or existing ownership) before `record_run` can
+  acquire an orchestration lease, so a lease can no longer be granted on a
+  non-claimable task outside `claim_task`'s rules.
+- Signal "not found" with a dedicated `NotFoundError` so the MCP/CLI
+  error-mapping layers no longer treat an accidental internal `KeyError` as a
+  clean "not found" result.
 
 ## 1.0.0 - 2026-06-27 (Stable)
 

@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 from loguru import logger
 
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository, TaskMutationError, _atomic_write_text, _mutation_path
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -120,7 +121,7 @@ class MilestoneService:
         for milestone in self.list_milestones():
             if milestone.name.casefold() == requested or milestone.path.stem.casefold() == requested:
                 return milestone
-        raise KeyError(f"Milestone not found: {name}")
+        raise NotFoundError(f"Milestone not found: {name}")
 
     def _active_path(self, name: str) -> Path:
         path = self.active_dir / f"{_slug_name(name)}.md"
