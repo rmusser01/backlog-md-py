@@ -71,6 +71,62 @@ def test_get_task_finds_completed_task(tmp_path):
     assert found.id == first.id
 
 
+# --- #5: reserved-marker injection silently corrupts task files -------------
+
+def test_create_task_rejects_section_end_marker_in_description(tmp_path):
+    from backlog_py.core.repository import TaskMutationError
+
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    with pytest.raises(TaskMutationError, match="reserved"):
+        repo.create_task(
+            title="Injected",
+            description="part one\n<!-- SECTION:DESCRIPTION:END -->\npart two",
+        )
+
+
+def test_create_task_rejects_checklist_marker_in_ac(tmp_path):
+    from backlog_py.core.repository import TaskMutationError
+
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    with pytest.raises(TaskMutationError, match="reserved"):
+        repo.create_task(title="Injected", acceptance_criteria=["ok", "<!-- AC:END -->"])
+
+
+def test_edit_task_rejects_marker_in_notes(tmp_path):
+    from backlog_py.core.repository import TaskMutationError
+
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    task = repo.create_task(title="Clean")
+    with pytest.raises(TaskMutationError, match="reserved"):
+        repo.edit_task(task.id, notes="oops <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->")
+
+    # the on-disk file must be unchanged and still parseable
+    assert repo.get_task(task.id).title == "Clean"
+
+
+# --- #4: one malformed task file bricks the repository ----------------------
+
+def test_malformed_task_file_does_not_brick_repository(tmp_path):
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    good = repo.create_task(title="Good task")
+
+    bad = project.backlog_dir / "tasks" / "task-999 - broken.md"
+    bad.write_text(
+        "---\nid: task-999\ntitle: Broken\nstatus: To Do\n---\n\n"
+        "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] never closed\n",
+        encoding="utf-8",
+    )
+
+    ro = ReadOnlyRepository(project)
+    ids = [task.id for task in ro.list_tasks()]
+    assert good.id in ids, "malformed sibling file made the good task disappear"
+    assert ro.get_task(good.id).id == good.id
+
+
 # --- #3: zero-padded ids unaddressable --------------------------------------
 
 def test_zero_padded_draft_is_addressable(tmp_path):

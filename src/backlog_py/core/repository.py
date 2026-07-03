@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import yaml
+from loguru import logger
 
 from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
@@ -310,7 +311,15 @@ def _sqlite_index_enabled() -> bool:
 def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
     if not task_dir.is_dir():
         return []
-    return [_load_task(path) for path in sorted(task_dir.glob("*.md"))]
+    records: list[TaskRecord] = []
+    for path in sorted(task_dir.glob("*.md")):
+        try:
+            records.append(_load_task(path))
+        except (ValueError, OSError) as exc:
+            # A single unparsable file must not make the whole repository
+            # unreadable; skip it (as branch snapshots already do) and warn.
+            logger.warning("Skipping unreadable task file {}: {}", path, exc)
+    return records
 
 
 def _current_branch_records(project: BacklogProject, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
@@ -1232,6 +1241,8 @@ def _set_checklist_line(line: str, *, checked: bool) -> str:
 
 
 def _render_checklist(items: Sequence[str]) -> str:
+    for item in items:
+        _reject_reserved_markers(item)
     return "".join(f"- [ ] #{index} {item}\n" for index, item in enumerate(items, start=1))
 
 
@@ -1264,8 +1275,23 @@ def _definition_of_done_for_create(
     return inherited
 
 
+_RESERVED_MARKER_RE = re.compile(
+    r"<!--\s*(?:SECTION:[A-Za-z0-9_ -]+|AC|DOD|RUN_HISTORY(?:_ENTRY)?):(?:BEGIN|END)\s*-->"
+)
+
+
+def _reject_reserved_markers(content: str) -> None:
+    match = _RESERVED_MARKER_RE.search(content)
+    if match is not None:
+        raise TaskMutationError(
+            f"Content may not contain reserved section markers: {match.group(0)!r}"
+        )
+
+
 def _normalize_block(content: str) -> str:
-    return content.strip()
+    normalized = content.strip()
+    _reject_reserved_markers(normalized)
+    return normalized
 
 
 def _normalize_task_id(task_id: str, task_prefix: str = "task") -> str:
