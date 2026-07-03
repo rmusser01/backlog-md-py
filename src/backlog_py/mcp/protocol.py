@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -191,4 +192,12 @@ def _call_tool(params: dict[str, object], *, context: McpRequestContext) -> dict
 def _tool_text(result: object) -> str:
     if isinstance(result, str):
         return result
-    return json.dumps(result, sort_keys=True)
+    return json.dumps(result, sort_keys=True, default=_json_default)
+
+
+def _json_default(value: object) -> object:
+    # YAML parses unquoted frontmatter dates/times into date/datetime objects,
+    # which json.dumps cannot serialize. Render them as ISO-8601 strings.
+    if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")

@@ -141,7 +141,7 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         task_id = _get_alias(kwargs, "task_id", "id")
         repository = MutableRepository(_fresh_project(project))
         task = repository.create_task(
-            title=str(kwargs.get("title") or ""),
+            title=_required_mcp_string(_get_alias(kwargs, "title"), "title"),
             task_id=None if task_id is None else str(task_id),
             status=_optional_string(_get_alias(kwargs, "status")),
             description=str(kwargs.get("description") or ""),
@@ -588,8 +588,8 @@ def document_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         lambda: _document_detail(
             project,
             DocumentService(project).create_document(
-                str(kwargs.get("path") or ""),
-                title=str(kwargs.get("title") or ""),
+                _required_mcp_string(kwargs.get("path"), "path"),
+                title=_required_mcp_string(kwargs.get("title"), "title"),
                 content=str(kwargs.get("content") or ""),
                 metadata=_dict_value(kwargs.get("metadata")),
             ),
