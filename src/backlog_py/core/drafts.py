@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Sequence
 
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import (
@@ -124,7 +125,7 @@ class DraftService:
         for draft in self.list_drafts():
             if ids_equivalent(draft.id, normalized_id):
                 return draft
-        raise KeyError(f"Draft not found: {draft_id}")
+        raise NotFoundError(f"Draft not found: {draft_id}")
 
     def promote_draft(self, draft_id: str) -> TaskRecord:
         draft = self.view_draft(draft_id)

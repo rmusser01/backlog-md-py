@@ -276,9 +276,22 @@ class OrchestrationService:
         actor = resolve_orchestration_actor(request.actor)
         _require_lease_owner(task, state, current_version, actor, self._now())
         update = request.state_update
-        if update is None or update.status_key is None:
+        if update is None:
             return
         current_status = _state_status_key(task, state)
+        # A lease may only be (re)acquired through record_run under the same
+        # precondition as claim_task: the task must be claimable, unless the
+        # acting agent already owns the lease (renewal). Otherwise record_run
+        # could hand an agent a lease on a non-claimable task, bypassing claim.
+        if update.lease_owner is not None or update.lease_expires_at is not None:
+            current_owner = state.lease_owner if state is not None else None
+            if current_owner != actor and not policy.is_claimable(current_status):
+                raise OrchestrationTransitionError(
+                    "Cannot acquire a lease on a non-claimable status via record_run",
+                    details={"task_id": task.id, "status": current_status},
+                )
+        if update.status_key is None:
+            return
         target_status = _normalize_key(update.status_key)
         if not policy.has_state(target_status):
             raise OrchestrationTransitionError(

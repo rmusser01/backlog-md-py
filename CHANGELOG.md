@@ -56,6 +56,12 @@
   each of its items to make explicit that parity statuses are a maintained
   declaration rather than automated per-item verification. Existing report
   fields (including `agent_cutover_ready` and the release gates) are unchanged.
+- Require a claimable status (or existing ownership) before `record_run` can
+  acquire an orchestration lease, so a lease can no longer be granted on a
+  non-claimable task outside `claim_task`'s rules.
+- Signal "not found" with a dedicated `NotFoundError` so the MCP/CLI
+  error-mapping layers no longer treat an accidental internal `KeyError` as a
+  clean "not found" result.
 
 ## 1.0.0 - 2026-06-27 (Stable)
 

@@ -8,6 +8,7 @@ from typing import Any, Sequence
 import yaml
 
 from backlog_py.core.ids import format_numbered_id
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -90,7 +91,7 @@ class DocumentService:
         for document in self.list_documents():
             if document.id is not None and document.id.casefold() == normalized_id:
                 return document
-        raise KeyError(f"Document not found: {path_or_id}")
+        raise NotFoundError(f"Document not found: {path_or_id}")
 
     def update_document(
         self,

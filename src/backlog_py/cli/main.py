@@ -25,6 +25,7 @@ from backlog_py.core.drafts import DraftService
 from backlog_py.core.init import InitProjectError, InitProjectResult, init_project
 from backlog_py.core.milestones import MilestoneMutationError, MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.repository import (
     MutableRepository,
     ReadOnlyRepository,
@@ -84,7 +85,7 @@ _CLI_DOMAIN_ERRORS = (
     DaemonStartError,
     PathContainmentError,
     LockTimeoutError,
-    KeyError,
+    NotFoundError,
 )
 
 

@@ -8,6 +8,7 @@ from typing import Any
 from backlog_py import __version__
 from backlog_py.core.decisions import DecisionMutationError
 from backlog_py.core.documents import DocumentMutationError
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.milestones import MilestoneMutationError
 from backlog_py.core.repository import TaskMutationError
 from backlog_py.mcp.catalog import (
@@ -22,8 +23,10 @@ from backlog_py.security.paths import PathContainmentError
 
 # Exceptions that mean "the tool ran but the operation failed" (as opposed to a
 # malformed request). These become MCP tool-error results, not JSON-RPC -32603.
+# NotFoundError (a KeyError subclass) is used instead of bare KeyError so an
+# accidental dict[missing] bug inside a handler still surfaces as -32603.
 _TOOL_EXECUTION_ERRORS = (
-    KeyError,
+    NotFoundError,
     TaskMutationError,
     MilestoneMutationError,
     DecisionMutationError,
