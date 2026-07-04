@@ -1,0 +1,69 @@
+name: Auto Release Tag
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  tag:
+    name: Tag merged package version
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve package version
+        id: version
+        run: |
+          version="$(python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          tree = ast.parse(Path("src/backlog_py/__init__.py").read_text(encoding="utf-8"))
+          for node in tree.body:
+              if isinstance(node, ast.Assign):
+                  for target in node.targets:
+                      if isinstance(target, ast.Name) and target.id == "__version__":
+                          print(ast.literal_eval(node.value))
+                          raise SystemExit
+          raise SystemExit("__version__ not found")
+          PY
+          )"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create release tag
+        id: tag
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "created=false" >> "${GITHUB_OUTPUT}"
+            echo "Tag ${tag} already exists; skipping release dispatch."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "backlog-md-py ${tag#v}"
+          git push origin "${tag}"
+          echo "created=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Dispatch release workflow
+        if: steps.tag.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref "${{ steps.version.outputs.tag }}"

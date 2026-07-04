@@ -28,8 +28,8 @@ Before tagging, merge a release-prep PR that:
 4. Confirms `docs/stability-policy.md` still describes the supported contract.
 5. Updates this checklist when the release workflow or validation gate changes.
 
-Do not push the tag until the release-prep PR is merged and GitHub Actions CI is
-green for the exact `origin/main` commit being tagged.
+Do not merge the release-prep PR until GitHub Actions CI is green for the exact
+commit being released.
 
 ## Local Validation Gate
 
@@ -106,7 +106,12 @@ claim.
 
 ## Tag And Publish
 
-After the release-prep PR is merged and the exact `origin/main` commit is green:
+After the release-prep PR is merged, `.github/workflows/auto-release-tag.yml`
+tags the package version from `src/backlog_py/__init__.py` as `v<version>` when
+that tag does not already exist, then dispatches `.github/workflows/release.yml`
+on the tag.
+
+Manual fallback:
 
 ```bash
 git fetch origin main --tags

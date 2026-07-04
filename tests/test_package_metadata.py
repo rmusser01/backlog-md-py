@@ -50,7 +50,7 @@ def test_stable_release_metadata_and_docs_are_declared():
     assert "## 1.0.0" in changelog
     assert "## 0.2.0" in changelog
     assert "Stable" in changelog
-    assert "Do not push the tag until" in release_checklist
+    assert "Do not merge the release-prep PR until" in release_checklist
 
 
 def test_pyproject_exposes_sdk_free_mcp_script_without_mcp_extra():
@@ -168,6 +168,41 @@ def test_release_workflow_publishes_github_release_assets_and_pypi():
     assert actions["Create GitHub Release"] == "softprops/action-gh-release@v2"
     assert actions["Publish to PyPI"] == "pypa/gh-action-pypi-publish@release/v1"
     assert steps[-1]["with"]["packages-dir"] == "dist/"
+
+
+def test_auto_release_tag_workflow_tags_merged_main_versions():
+    workflow = yaml.safe_load(Path(".github/workflows/auto-release-tag.yml").read_text())
+
+    assert workflow["name"] == "Auto Release Tag"
+    trigger = workflow[True]
+    assert trigger["push"]["branches"] == ["main"]
+    assert "workflow_dispatch" in trigger
+    assert workflow["permissions"] == {"actions": "write", "contents": "write"}
+    assert workflow["concurrency"]["cancel-in-progress"] is False
+
+    tag_job = workflow["jobs"]["tag"]
+    assert tag_job["name"] == "Tag merged package version"
+    assert tag_job["runs-on"] == "ubuntu-latest"
+    assert tag_job["if"] == "github.ref == 'refs/heads/main'"
+
+    steps = tag_job["steps"]
+    assert [step["name"] for step in steps] == [
+        "Checkout",
+        "Resolve package version",
+        "Create release tag",
+        "Dispatch release workflow",
+    ]
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[0]["with"]["fetch-depth"] == 0
+
+    run_script = "\n".join(str(step.get("run", "")) for step in steps)
+    assert "src/backlog_py/__init__.py" in run_script
+    assert "git ls-remote --exit-code --tags origin" in run_script
+    assert 'git tag -a "${tag}"' in run_script
+    assert 'git push origin "${tag}"' in run_script
+    assert 'gh workflow run release.yml --ref "${{ steps.version.outputs.tag }}"' in run_script
+    assert steps[-1]["if"] == "steps.tag.outputs.created == 'true'"
+    assert steps[-1]["env"]["GH_TOKEN"] == "${{ github.token }}"
 
 
 def test_python_support_range_is_311_through_313():
