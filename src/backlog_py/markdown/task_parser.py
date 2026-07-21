@@ -18,7 +18,7 @@ _CHECKLIST_RE = re.compile(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class TaskMarkdownParseError(ValueError):
     code: str
     message: str

@@ -39,7 +39,7 @@ class RunHistoryParseResult:
     issues: list[RunHistoryParseIssue]
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationIdempotencyConflict(ValueError):
     idempotency_key: str
     message: str
@@ -48,7 +48,7 @@ class OrchestrationIdempotencyConflict(ValueError):
         return self.message
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class RunHistoryParseError(ValueError):
     code: str
     message: str
@@ -58,7 +58,7 @@ class RunHistoryParseError(ValueError):
         return self.message
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationError(ValueError):
     message: str
     details: dict[str, object] = field(default_factory=dict)
@@ -67,32 +67,32 @@ class OrchestrationError(ValueError):
         return self.message
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationPolicyError(OrchestrationError):
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationValidationError(OrchestrationError):
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationVersionConflict(OrchestrationError):
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationLeaseConflict(OrchestrationError):
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class OrchestrationTransitionError(OrchestrationError):
     pass
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class TaskSplitError(OrchestrationError):
     pass
 
