@@ -132,6 +132,72 @@ def test_frontmatterless_leading_h1_title_is_shared_by_document_readers(tmp_path
     assert document_path.read_bytes() == source
 
 
+def test_update_frontmatterless_document_content_preserves_plain_markdown(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    document_path = repo / "backlog" / "docs" / "lessons.md"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_text("# Lessons: testing\n\nOriginal body.\n", encoding="utf-8")
+
+    updated = _service(repo).update_document(
+        "lessons.md", content="# Lessons: testing\n\nUpdated body."
+    )
+
+    assert document_path.read_text(encoding="utf-8") == "# Lessons: testing\n\nUpdated body.\n"
+    assert not document_path.read_text(encoding="utf-8").startswith("---")
+    assert updated.title == "Lessons: testing"
+
+
+def test_move_frontmatterless_crlf_document_preserves_source_bytes(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    old_path = repo / "backlog" / "docs" / "lessons.md"
+    old_path.parent.mkdir(parents=True)
+    source = b"# Lessons: testing\r\n\r\nOriginal body.\r\n"
+    old_path.write_bytes(source)
+
+    moved = _service(repo).update_document("lessons.md", directory="guides")
+
+    new_path = repo / "backlog" / "docs" / "guides" / "lessons.md"
+    assert not old_path.exists()
+    assert new_path.read_bytes() == source
+    assert moved.raw_source == source.decode("utf-8")
+
+
+def test_update_empty_frontmatter_document_keeps_managed_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    document_path = repo / "backlog" / "docs" / "empty.md"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_text("---\n{}\n---\n\nOriginal body.\n", encoding="utf-8")
+
+    updated = _service(repo).update_document("empty.md", content="Updated body.")
+
+    assert document_path.read_text(encoding="utf-8").startswith("---\n{}\n---\n")
+    assert updated.frontmatter == {}
+
+
+def test_update_frontmatterless_document_title_adopts_managed_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    document_path = repo / "backlog" / "docs" / "lessons.md"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_text("# Lessons: testing\n\nOriginal body.\n", encoding="utf-8")
+
+    updated = _service(repo).update_document("lessons.md", title="Managed title")
+
+    assert document_path.read_text(encoding="utf-8").startswith("---\ntitle: Managed title\n---\n")
+    assert updated.title == "Managed title"
+
+
+def test_update_frontmatterless_document_metadata_adopts_managed_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    document_path = repo / "backlog" / "docs" / "lessons.md"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_text("# Lessons: testing\n\nOriginal body.\n", encoding="utf-8")
+
+    updated = _service(repo).update_document("lessons.md", metadata={"type": "lesson"})
+
+    assert document_path.read_text(encoding="utf-8").startswith("---\ntype: lesson\n---\n")
+    assert updated.frontmatter == {"type": "lesson"}
+
+
 def test_create_document_allocates_ids_globally_under_docs(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)

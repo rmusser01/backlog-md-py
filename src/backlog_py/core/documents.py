@@ -104,18 +104,23 @@ class DocumentService:
     ) -> DocumentRecord:
         document = self.view_document(path_or_id)
         frontmatter = dict(document.frontmatter)
+        metadata_updates = dict(metadata or {})
         if title is not None:
             frontmatter["title"] = title
-        for key, value in (metadata or {}).items():
+        for key, value in metadata_updates.items():
             if value is None:
                 frontmatter.pop(key, None)
             else:
                 frontmatter[key] = value
-        source = (
-            _render_document_body(frontmatter, document.body_source)
-            if content is None
-            else _render_document(frontmatter, content)
-        )
+        has_frontmatter = parse_task_markdown(document.raw_source).raw_frontmatter is not None
+        if not has_frontmatter and title is None and not metadata_updates:
+            source = document.raw_source if content is None else _render_plain_document(content)
+        else:
+            source = (
+                _render_document_body(frontmatter, document.body_source)
+                if content is None
+                else _render_document(frontmatter, content)
+            )
         parse_task_markdown(source)
         target = document.path if directory is None else self._moved_document_path(document, directory)
         if target != document.path and target.exists():
@@ -222,6 +227,10 @@ def _load_document(base: Path, path: Path) -> DocumentRecord:
 
 def _render_document(frontmatter: dict[str, Any], content: str) -> str:
     return _render_document_body(frontmatter, f"\n{content.strip()}\n")
+
+
+def _render_plain_document(content: str) -> str:
+    return f"{content.strip()}\n"
 
 
 def _render_document_body(frontmatter: dict[str, Any], body_source: str) -> str:
