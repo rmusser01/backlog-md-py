@@ -196,12 +196,21 @@ class DocumentService:
 
 
 def _load_document(base: Path, path: Path) -> DocumentRecord:
-    raw_source = path.read_text(encoding="utf-8")
+    with path.open("r", encoding="utf-8", newline="") as source_file:
+        raw_source = source_file.read()
     parsed = parse_task_markdown(raw_source)
     frontmatter = dict(parsed.frontmatter)
+    title = str(frontmatter.get("title") or "")
+    if not title:
+        for line in parsed.body.splitlines():
+            if not line.strip():
+                continue
+            if line.startswith("# "):
+                title = line[2:].strip()
+            break
     return DocumentRecord(
         id=None if frontmatter.get("id") is None else str(frontmatter.get("id")),
-        title=str(frontmatter.get("title") or ""),
+        title=title,
         path=path,
         path_relative=path.relative_to(base).as_posix(),
         content=parsed.body.strip(),

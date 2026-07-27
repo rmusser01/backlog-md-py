@@ -89,6 +89,45 @@ def test_search_documents_matches_short_fuzzy_query_to_longer_word(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    ("source", "expected_title"),
+    [
+        ("\n# Lessons: testing evidence\n", "Lessons: testing evidence"),
+        ("#  Lessons with spacing  \n", "Lessons with spacing"),
+        ("# **Evidence**\n", "**Evidence**"),
+        ("Intro first.\n\n# Later heading\n", ""),
+        ("#\tTabbed heading\n", ""),
+        ("---\ntitle: Frontmatter title\n---\n\n# Different heading\n", "Frontmatter title"),
+    ],
+)
+def test_document_title_uses_frontmatter_or_leading_h1(tmp_path, source, expected_title):
+    repo = _copy_fixture(tmp_path)
+    document_path = repo / "backlog" / "docs" / "title.md"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_text(source, encoding="utf-8")
+
+    assert _service(repo).view_document("title.md").title == expected_title
+
+
+def test_frontmatterless_leading_h1_title_is_shared_by_document_readers(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    document_path = repo / "backlog" / "docs" / "lessons-testing-evidence.md"
+    document_path.parent.mkdir(parents=True)
+    source = b"# Lessons: what counts as evidence\n\nTesting shows what counts as evidence.\n"
+    document_path.write_bytes(source)
+    project = _project(repo)
+
+    assert _service(repo).search_documents("counts as evidence")[0].title == "Lessons: what counts as evidence"
+
+    listed = CliRunner().invoke(main, ["--cwd", str(repo), "doc", "list", "lessons"])
+    assert listed.exit_code == 0
+    assert "lessons-testing-evidence.md Lessons: what counts as evidence" in listed.output
+
+    documents = document_list(project, query="lessons")
+    assert documents[0]["title"] == "Lessons: what counts as evidence"
+    assert document_path.read_bytes() == source
+
+
 def test_create_document_allocates_ids_globally_under_docs(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
