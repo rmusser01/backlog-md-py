@@ -4,8 +4,9 @@
 
 ### Added
 
-- Discover H1-first documents without title frontmatter and teach generated
-  agent instructions the conditional, incident-backed lesson workflow.
+- Add a compatibility extension that discovers H1-first documents without
+  title frontmatter and teaches generated agent instructions the conditional,
+  incident-backed lesson workflow.
 
 ### Fixed
 
