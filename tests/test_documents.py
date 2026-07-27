@@ -139,7 +139,7 @@ def test_update_frontmatterless_document_content_preserves_plain_markdown(tmp_pa
     document_path.write_text("# Lessons: testing\n\nOriginal body.\n", encoding="utf-8")
 
     updated = _service(repo).update_document(
-        "lessons.md", content="# Lessons: testing\n\nUpdated body."
+        "lessons.md", content=" \n# Lessons: testing\n\nUpdated body.\n\n\n "
     )
 
     assert document_path.read_text(encoding="utf-8") == "# Lessons: testing\n\nUpdated body.\n"
@@ -166,7 +166,7 @@ def test_update_empty_frontmatter_document_keeps_managed_frontmatter(tmp_path):
     repo = _copy_fixture(tmp_path)
     document_path = repo / "backlog" / "docs" / "empty.md"
     document_path.parent.mkdir(parents=True)
-    document_path.write_text("---\n{}\n---\n\nOriginal body.\n", encoding="utf-8")
+    document_path.write_text("---\n---\n\nOriginal body.\n", encoding="utf-8")
 
     updated = _service(repo).update_document("empty.md", content="Updated body.")
 
