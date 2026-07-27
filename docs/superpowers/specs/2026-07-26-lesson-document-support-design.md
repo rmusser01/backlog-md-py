@@ -93,17 +93,28 @@ managed frontmatter renderer remains authoritative. That explicit metadata
 operation may introduce frontmatter. This keeps title and metadata mutation
 semantics predictable without inventing an H1 editor.
 
+“No frontmatter” means the parser returned no raw frontmatter block. It must
+not be inferred from `frontmatter == {}` because an explicit empty block and
+an absent block produce the same metadata dictionary. An empty-but-present
+frontmatter block remains in the managed-frontmatter path.
+
+The document loader must also read text with newline translation disabled,
+matching the repository's atomic writer and task loader. Otherwise a
+directory-only move would normalize CRLF input to LF before writing even when
+the source string is otherwise reused unchanged.
+
 All resulting sources continue through the existing Markdown parser before
 the atomic write. Path containment, duplicate-target checks, and safe move
 ordering remain unchanged.
 
 ## Browser Presentation
 
-The browser API continues returning the full raw body in `content`. For its
-derived `contentHtml` presentation, it omits the leading H1 only when that
-heading text exactly matches the document title after whitespace
-normalization. The dialog already displays `document.title` in its own title
-element, so retaining both would duplicate the same visible heading.
+The browser API continues returning its current parsed body value in
+`content`. For the derived `contentHtml` presentation, it omits the leading H1
+only when that heading text exactly matches the document title after
+whitespace normalization. The dialog already displays `document.title` in its
+own title element, so retaining both would duplicate the same visible
+heading.
 
 If the H1 differs from the frontmatter title, both remain visible. No source
 content is removed or rewritten.
@@ -115,8 +126,8 @@ The owned Backlog.md workflow section generated into `AGENTS.md`, `CLAUDE.md`,
 guidance:
 
 - If `backlog/docs/lessons-*.md` files exist, list them with
-  `backlog-py --cwd <repo> doc list lessons` and read the relevant themed file
-  before starting work.
+  `backlog-py --cwd <repo> doc list lessons`, then read the relevant themed
+  file with `backlog-py --cwd <repo> doc view <path>` before starting work.
 - At completion, if the task exposed a reusable trap, costly wrong assumption,
   or verification constraint, add or update the relevant themed lesson through
   the normal document workflow.
@@ -128,6 +139,18 @@ guidance:
 This is a conditional completion hook in agent guidance, not a new
 `definitionOfDone` configuration default. Existing projects keep control of
 their task checklist policy.
+
+## User-facing Documentation
+
+The integration guide will document that `doc list` and document search use a
+leading H1 when frontmatter has no title, and that content-only updates and
+moves preserve a frontmatterless document format. Its generated-agent section
+will summarize the conditional lesson discovery and evidence-first completion
+hook.
+
+The Unreleased changelog will record the compatibility extension and format
+preservation fix. Parity documentation will not claim this as upstream
+behavior because upstream remains frontmatter-only.
 
 ## Data Flow
 
@@ -183,6 +206,8 @@ Tests will prove:
   frontmatter.
 - A directory-only move preserves a frontmatterless CRLF source
   byte-for-byte.
+- An empty-but-present frontmatter block is not mistaken for an absent block
+  during an update.
 - Explicit title or metadata updates continue using managed frontmatter.
 - Browser `content` retains the H1 while `contentHtml` avoids an identical
   duplicate title.
