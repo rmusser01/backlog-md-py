@@ -63,6 +63,14 @@ heading, fenced-code example, or later content as the document title. The H1
 remains part of `content`, `body_source`, and `raw_source`; title derivation is
 read-only metadata.
 
+The fallback grammar is deliberately literal: the line must begin with `# `
+(hash plus ASCII space), with no indentation. Additional spaces after that
+prefix are allowed because the extracted text is trimmed. A tab after the
+hash does not match, optional Markdown closing hashes are not removed, and
+inline Markdown is not rendered or stripped. For example, `# **Evidence**`
+produces the literal title `**Evidence**`. Supporting richer Markdown title
+parsing is outside this compatibility fix.
+
 Frontmatter precedence also covers documents that have both a frontmatter
 title and an H1. The H1 is not required to match the authoritative
 frontmatter value.
@@ -173,6 +181,8 @@ Tests will prove:
 - Read-only operations leave the source byte-for-byte unchanged.
 - Content-only updates and directory-only moves preserve the lack of
   frontmatter.
+- A directory-only move preserves a frontmatterless CRLF source
+  byte-for-byte.
 - Explicit title or metadata updates continue using managed frontmatter.
 - Browser `content` retains the H1 while `contentHtml` avoids an identical
   duplicate title.
