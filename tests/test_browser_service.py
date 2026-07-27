@@ -788,6 +788,7 @@ def test_document_detail_payload_omits_derived_leading_title_from_html(tmp_path)
     assert document.title == "Lesson evidence"
     assert document.content == "# Lesson evidence\n\nBody text."
     assert payload["content"] == "# Lesson evidence\n\nBody text."
+    assert "<h1>" not in payload["contentHtml"]
     assert "<h1>Lesson evidence</h1>" not in payload["contentHtml"]
     assert "<p>Body text.</p>" in payload["contentHtml"]
 
@@ -809,6 +810,7 @@ def test_document_detail_payload_normalizes_whitespace_when_omitting_leading_tit
     payload = _document_detail_payload(document)
 
     assert payload["content"] == document.content
+    assert "<h1>" not in payload["contentHtml"]
     assert "<h1>Lessons:   testing evidence</h1>" not in payload["contentHtml"]
     assert "<p>Body text.</p>" in payload["contentHtml"]
 
@@ -831,6 +833,27 @@ def test_document_detail_payload_keeps_different_leading_heading_in_html(tmp_pat
 
     assert payload["content"] == document.content
     assert "<h1>Different heading</h1>" in payload["contentHtml"]
+
+
+def test_document_detail_payload_keeps_empty_leading_heading_marker_in_html(tmp_path):
+    document = DocumentRecord(
+        id=None,
+        title="",
+        path=tmp_path / "lesson.md",
+        path_relative="lesson.md",
+        content="# \n\nBody text.",
+        body_source="# \n\nBody text.",
+        frontmatter={},
+        raw_source="# \n\nBody text.",
+    )
+
+    from backlog_py.browser.service import _document_detail_payload
+
+    payload = _document_detail_payload(document)
+
+    assert payload["content"] == document.content
+    assert "<p>#</p>" in payload["contentHtml"]
+    assert "<p>Body text.</p>" in payload["contentHtml"]
 
 
 def test_browser_document_detail_endpoint_rejects_invalid_encoded_path(tmp_path):

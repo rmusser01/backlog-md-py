@@ -882,7 +882,10 @@ def _document_content_for_html(document: DocumentRecord) -> str:
     if not lines:
         return document.content
     heading = lines[0].rstrip("\r\n")
-    if not heading.startswith("# ") or _normalized_document_title(document.title) != _normalized_document_title(heading[2:]):
+    if not heading.startswith("# "):
+        return document.content
+    heading_text = heading[2:].strip()
+    if not heading_text or _normalized_document_title(document.title) != _normalized_document_title(heading_text):
         return document.content
     return "".join(lines[1:]).lstrip("\r\n")
 
