@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
+from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.repository import MutableRepository
 from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
@@ -769,6 +770,67 @@ def test_browser_documents_endpoints_return_readonly_markdown_payloads(tmp_path)
     assert 'data-mermaid-diagram="true"' in detail["contentHtml"]
     assert "A --&gt; B" in detail["contentHtml"]
     assert detail_by_path == detail
+
+
+def test_document_detail_payload_omits_derived_leading_title_from_html(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    docs_dir = repo / "backlog" / "docs"
+    docs_dir.mkdir()
+    document_path = docs_dir / "lesson.md"
+    document_path.write_text("# Lesson evidence\n\nBody text.\n", encoding="utf-8")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    document = DocumentService(project).view_document("lesson.md")
+
+    from backlog_py.browser.service import _document_detail_payload
+
+    payload = _document_detail_payload(document)
+
+    assert document.title == "Lesson evidence"
+    assert document.content == "# Lesson evidence\n\nBody text."
+    assert payload["content"] == "# Lesson evidence\n\nBody text."
+    assert "<h1>Lesson evidence</h1>" not in payload["contentHtml"]
+    assert "<p>Body text.</p>" in payload["contentHtml"]
+
+
+def test_document_detail_payload_normalizes_whitespace_when_omitting_leading_title(tmp_path):
+    document = DocumentRecord(
+        id=None,
+        title="Lessons: testing evidence",
+        path=tmp_path / "lesson.md",
+        path_relative="lesson.md",
+        content="# Lessons:   testing evidence\n\nBody text.",
+        body_source="# Lessons:   testing evidence\n\nBody text.",
+        frontmatter={},
+        raw_source="# Lessons:   testing evidence\n\nBody text.",
+    )
+
+    from backlog_py.browser.service import _document_detail_payload
+
+    payload = _document_detail_payload(document)
+
+    assert payload["content"] == document.content
+    assert "<h1>Lessons:   testing evidence</h1>" not in payload["contentHtml"]
+    assert "<p>Body text.</p>" in payload["contentHtml"]
+
+
+def test_document_detail_payload_keeps_different_leading_heading_in_html(tmp_path):
+    document = DocumentRecord(
+        id=None,
+        title="Document title",
+        path=tmp_path / "lesson.md",
+        path_relative="lesson.md",
+        content="# Different heading\n\nBody text.",
+        body_source="# Different heading\n\nBody text.",
+        frontmatter={},
+        raw_source="# Different heading\n\nBody text.",
+    )
+
+    from backlog_py.browser.service import _document_detail_payload
+
+    payload = _document_detail_payload(document)
+
+    assert payload["content"] == document.content
+    assert "<h1>Different heading</h1>" in payload["contentHtml"]
 
 
 def test_browser_document_detail_endpoint_rejects_invalid_encoded_path(tmp_path):
