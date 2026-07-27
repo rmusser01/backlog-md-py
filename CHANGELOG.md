@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Add a compatibility extension that discovers H1-first documents without
+  title frontmatter and teaches generated agent instructions the conditional,
+  incident-backed lesson workflow.
+
+### Fixed
+
+- Keep frontmatterless documents frontmatterless for content-only updates and
+  preserve original CRLF bytes during directory-only moves.
+- Avoid rendering a duplicate document title in the browser when the body
+  already begins with the displayed heading.
+
 ## 1.0.1 - 2026-07-03
 
 ### Added

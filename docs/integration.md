@@ -57,6 +57,8 @@ backlog-py --cwd /path/to/project task archive TASK-2 --plain
 backlog-py --cwd /path/to/project cleanup
 backlog-py --cwd /path/to/project doc create "Setup Guide" --path guides --type guide --tags setup,runbook --content "Install and smoke-test the integration."
 backlog-py --cwd /path/to/project doc update doc-1 --title "Setup Handbook" --path runbooks --type runbook --tags setup,verified --content "Updated runbook body."
+backlog-py --cwd /path/to/project doc list lessons
+backlog-py --cwd /path/to/project doc view lessons-testing-evidence.md
 backlog-py --cwd /path/to/project decision create "Use PostgreSQL for primary database" -s accepted
 backlog-py --cwd /path/to/project search "query" --plain
 backlog-py --cwd /path/to/project search "query" --type document --plain
@@ -93,6 +95,12 @@ equal scores preserve the existing stable task, document, or decision order. Use
 Task-specific filters such as `--status`, `--priority`, and `--modified-file`
 keep default search restricted to tasks.
 
+Documents with a non-empty frontmatter `title` use that title. Without one,
+the first nonblank literal unindented `# ` heading supplies the displayed title.
+Content-only updates and directory-only moves keep frontmatterless documents
+frontmatterless; directory moves also preserve the original line endings and
+bytes.
+
 The module entry point is equivalent:
 
 ```bash
@@ -123,6 +131,13 @@ the MCP workflow resources, and fall back to the CLI with explicit `--cwd`
 paths when MCP is unavailable. It also warns agents not to manually edit files
 under `backlog/` unless both MCP and CLI paths are unavailable and a human
 explicitly approves the exception.
+
+When themed `backlog/docs/lessons-*.md` files exist, the generated instructions
+also tell agents to discover them with `backlog-py --cwd <repo> doc list lessons`
+and read relevant entries with `backlog-py --cwd <repo> doc view <path>` before
+work. The completion hook is conditional: add a concise claim → incident →
+action lesson only when the work yields reusable, evidence-backed guidance;
+most tasks add nothing.
 
 For multi-agent environments, the block recommends a shared singleton daemon:
 

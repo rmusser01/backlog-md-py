@@ -867,10 +867,27 @@ def _document_detail_payload(document: DocumentRecord) -> dict[str, object]:
     payload.update(
         {
             "content": document.content,
-            "contentHtml": _markdown_to_html(document.content),
+            "contentHtml": _markdown_to_html(_document_content_for_html(document)),
         }
     )
     return payload
+
+
+def _normalized_document_title(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _document_content_for_html(document: DocumentRecord) -> str:
+    lines = document.content.splitlines(keepends=True)
+    if not lines:
+        return document.content
+    heading = lines[0].rstrip("\r\n")
+    if not heading.startswith("# "):
+        return document.content
+    heading_text = heading[2:].strip()
+    if not heading_text or _normalized_document_title(document.title) != _normalized_document_title(heading_text):
+        return document.content
+    return "".join(lines[1:]).lstrip("\r\n")
 
 
 def _decision_list_payload(project: BacklogProject) -> list[dict[str, object]]:
