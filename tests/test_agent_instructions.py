@@ -126,10 +126,7 @@ def test_cli_agents_update_instructions_writes_incident_backed_lesson_workflow(t
             "backlog/docs/lessons-*.md",
             "doc list lessons",
             "doc view <path>",
-            "concise",
-            "claim",
-            "incident",
-            "action",
+            "Record a concise claim, the actual incident that proves it, and the resulting action",
             "Most tasks produce no lesson",
             "do not invent",
         ):
