@@ -95,6 +95,7 @@ def test_search_documents_matches_short_fuzzy_query_to_longer_word(tmp_path):
         ("\n# Lessons: testing evidence\n", "Lessons: testing evidence"),
         ("#  Lessons with spacing  \n", "Lessons with spacing"),
         ("# **Evidence**\n", "**Evidence**"),
+        ("# Report ##\n", "Report ##"),
         ("Intro first.\n\n# Later heading\n", ""),
         ("#\tTabbed heading\n", ""),
         ("---\ntitle: Frontmatter title\n---\n\n# Different heading\n", "Frontmatter title"),
@@ -113,11 +114,14 @@ def test_frontmatterless_leading_h1_title_is_shared_by_document_readers(tmp_path
     repo = _copy_fixture(tmp_path)
     document_path = repo / "backlog" / "docs" / "lessons-testing-evidence.md"
     document_path.parent.mkdir(parents=True)
-    source = b"# Lessons: what counts as evidence\n\nTesting shows what counts as evidence.\n"
+    source = b"# Lessons: what counts as evidence\r\n\r\nUnrelated incident body.\r\n"
     document_path.write_bytes(source)
     project = _project(repo)
 
     assert _service(repo).search_documents("counts as evidence")[0].title == "Lessons: what counts as evidence"
+
+    record = _service(repo).view_document("lessons-testing-evidence.md")
+    assert record.raw_source == source.decode("utf-8")
 
     listed = CliRunner().invoke(main, ["--cwd", str(repo), "doc", "list", "lessons"])
     assert listed.exit_code == 0
