@@ -109,6 +109,30 @@ def test_cli_agents_update_instructions_writes_orchestration_guidance(tmp_path):
         assert fragment in content
 
 
+def test_cli_agents_update_instructions_writes_incident_backed_lesson_workflow(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "agents", "--update-instructions"])
+
+    assert result.exit_code == 0
+    for relative_path in (
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md",
+        ".github/copilot-instructions.md",
+    ):
+        content = (repo / relative_path).read_text(encoding="utf-8")
+        for fragment in (
+            "backlog/docs/lessons-*.md",
+            "doc list lessons",
+            "doc view <path>",
+            "incident",
+            "Most tasks produce no lesson",
+            "do not invent",
+        ):
+            assert fragment in content
+
+
 def test_cli_agents_update_instructions_is_idempotent(tmp_path):
     repo = _copy_fixture(tmp_path)
 
