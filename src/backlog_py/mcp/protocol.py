@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import datetime
+import inspect
 import json
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from backlog_py import __version__
 from backlog_py.core.decisions import DecisionMutationError
 from backlog_py.core.documents import DocumentMutationError
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.milestones import MilestoneMutationError
+from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import TaskMutationError
 from backlog_py.mcp.catalog import (
     list_resources,
@@ -18,6 +21,7 @@ from backlog_py.mcp.catalog import (
     read_resource_content,
     tool_by_name,
 )
+from backlog_py.mcp.tools import McpArgumentError
 from backlog_py.runtime.locks import LockTimeoutError
 from backlog_py.security.paths import PathContainmentError
 
@@ -41,6 +45,21 @@ INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
+# MCP reserves -32002 for "resource not found" (JSON-RPC leaves -32000..-32099
+# to the application).
+RESOURCE_NOT_FOUND = -32002
+
+# Absolute filesystem paths must never reach a client: they expose the local
+# layout of the machine running the server. Relative paths (backlog/tasks/...)
+# and URIs (backlog://init-required) are meaningful to the caller, so the
+# leading separator must not be preceded by a word character, '.', ':' or '/'.
+_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![\w.:/])(?:[A-Za-z]:[\\/]|/)[^\s'\"]*")
+
+_INIT_REQUIRED_MESSAGE = (
+    "No Backlog.md project was found for the requested project directory. "
+    "Read the backlog://init-required resource for setup guidance, then retry "
+    "with an initialized project."
+)
 
 
 @dataclass(frozen=True)
@@ -125,7 +144,7 @@ def _handle_single_message(
     except Exception as exc:
         if not has_id:
             return None
-        return error_response(request_id, INTERNAL_ERROR, "Internal error", {"detail": str(exc)})
+        return error_response(request_id, INTERNAL_ERROR, "Internal error", {"detail": _redact_paths(str(exc))})
 
     if not has_id:
         return None
@@ -177,7 +196,7 @@ def _read_resource(params: dict[str, object]) -> dict[str, object]:
     try:
         return {"contents": [read_resource_content(uri)]}
     except KeyError as exc:
-        raise JsonRpcError(INVALID_PARAMS, str(exc)) from exc
+        raise JsonRpcError(RESOURCE_NOT_FOUND, _tool_error_message(exc)) from exc
 
 
 def _call_tool(params: dict[str, object], *, context: McpRequestContext) -> dict[str, object]:
@@ -201,28 +220,63 @@ def _call_tool(params: dict[str, object], *, context: McpRequestContext) -> dict
         raise JsonRpcError(INVALID_PARAMS, str(exc)) from exc
 
     try:
-        result = tool.handler(project_from_argument(project_path), **arguments)
-    except TypeError as exc:
-        raise JsonRpcError(INVALID_PARAMS, str(exc)) from exc
+        project = project_from_argument(project_path)
+    except FileNotFoundError:
+        # The caller pointed at a directory that is not inside a Backlog.md
+        # project. That is actionable guidance, not a server fault, so answer
+        # with the setup resource instead of a -32603 echoing the path.
+        return _tool_error_result(_INIT_REQUIRED_MESSAGE)
+
+    _reject_unbindable_arguments(tool.handler, project, arguments)
+    try:
+        result = tool.handler(project, **arguments)
+    except McpArgumentError as exc:
+        raise JsonRpcError(INVALID_PARAMS, _tool_error_message(exc)) from exc
     except _TOOL_EXECUTION_ERRORS as exc:
         # The tool ran but the operation failed (not found, invalid mutation,
         # lock timeout, ...). Per MCP this is a tool error result, not a
         # protocol-level -32603, and the message must not leak absolute paths.
-        return {
-            "content": [{"type": "text", "text": _tool_error_message(exc)}],
-            "isError": True,
-        }
+        return _tool_error_result(_tool_error_message(exc))
     return {
         "content": [{"type": "text", "text": _tool_text(result)}],
         "isError": False,
     }
 
 
+def _reject_unbindable_arguments(
+    handler: Callable[..., Any],
+    project: BacklogProject,
+    arguments: dict[str, object],
+) -> None:
+    """Reject unknown or missing tool arguments before the handler runs.
+
+    Binding first keeps caller mistakes at -32602 while letting a TypeError
+    raised from inside a handler stay a -32603 server bug.
+    """
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):  # pragma: no cover - builtins have no signature
+        return
+    try:
+        signature.bind(project, **arguments)
+    except TypeError as exc:
+        raise JsonRpcError(INVALID_PARAMS, _tool_error_message(exc)) from exc
+
+
+def _tool_error_result(message: str) -> dict[str, object]:
+    return {"content": [{"type": "text", "text": message}], "isError": True}
+
+
 def _tool_error_message(exc: Exception) -> str:
     if isinstance(exc, KeyError) and exc.args:
-        return str(exc.args[0])
-    message = str(exc).strip()
+        return _redact_paths(str(exc.args[0]))
+    message = _redact_paths(str(exc)).strip()
     return message or exc.__class__.__name__
+
+
+def _redact_paths(message: str) -> str:
+    """Replace absolute filesystem paths so errors cannot leak the local layout."""
+    return _ABSOLUTE_PATH_PATTERN.sub("<path>", message)
 
 
 def _tool_text(result: object) -> str:

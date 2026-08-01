@@ -1,22 +1,31 @@
 """Regression tests for inherited MCP-server bugs."""
 from __future__ import annotations
 
+import inspect
 import io
 import json
 from pathlib import Path
 
+import pytest
+
+import backlog_py.core.repository as repository_module
 from backlog_py.core.documents import DocumentService
 from backlog_py.core.init import init_project
+from backlog_py.core.repository import MutableRepository
+from backlog_py.mcp import protocol as protocol_module
+from backlog_py.mcp import tools as tool_registry
+from backlog_py.mcp.catalog import TOOL_DEFINITIONS, ToolDefinition, list_tools
 from backlog_py.mcp.http_server import start_mcp_http_server
 from backlog_py.mcp.protocol import McpRequestContext, handle_jsonrpc_message
-from backlog_py.mcp.stdio_server import run_stdio
+from backlog_py.mcp.stdio_server import _inject_project_hint, run_stdio
+from backlog_py.orchestration import OrchestrationService, OrchestrationValidationError
 
 
 def _project(tmp_path: Path):
     return init_project(tmp_path, no_git=True).project
 
 
-def _call_tool(project_root: Path, name: str, **arguments):
+def _call_tool(project_root: Path, name: str, /, **arguments):
     arguments["project"] = str(project_root)
     return handle_jsonrpc_message(
         {
@@ -138,3 +147,266 @@ def test_stdio_forwarding_injects_local_project_hint(tmp_path):
     response = json.loads(stdout.getvalue().strip())
     assert "error" not in response, response.get("error")
     assert response["result"]["isError"] is False
+
+
+# --- F1: document_update silently drops metadata and directory --------------
+
+def _frontmatter(project, path_or_id: str) -> dict:
+    return DocumentService(project).view_document(path_or_id).frontmatter
+
+
+def test_document_update_round_trips_metadata_to_disk(tmp_path):
+    project = _project(tmp_path)
+    document = DocumentService(project).create_document(path="notes", title="Notes", content="Body")
+
+    response = _call_tool(project.root, "document_update", path_or_id=document.id, metadata={"type": "guide"})
+
+    assert "error" not in response, response.get("error")
+    assert response["result"]["isError"] is False
+    assert _frontmatter(project, document.id)["type"] == "guide"
+
+
+def test_document_update_metadata_none_deletes_key(tmp_path):
+    project = _project(tmp_path)
+    document = DocumentService(project).create_document(
+        path="notes", title="Notes", content="Body", metadata={"type": "guide"}
+    )
+
+    response = _call_tool(project.root, "document_update", path_or_id=document.id, metadata={"type": None})
+
+    assert "error" not in response, response.get("error")
+    assert "type" not in _frontmatter(project, document.id)
+
+
+def test_document_update_type_and_tags_match_cli_metadata_semantics(tmp_path):
+    project = _project(tmp_path)
+    document = DocumentService(project).create_document(path="notes", title="Notes", content="Body")
+
+    response = _call_tool(
+        project.root,
+        "document_update",
+        path_or_id=document.id,
+        type="guide",
+        tags="alpha, beta",
+    )
+
+    assert "error" not in response, response.get("error")
+    frontmatter = _frontmatter(project, document.id)
+    assert frontmatter["type"] == "guide"
+    assert frontmatter["tags"] == ["alpha", "beta"]
+
+
+def test_document_update_moves_document_with_directory(tmp_path):
+    project = _project(tmp_path)
+    document = DocumentService(project).create_document(path="notes", title="Notes", content="Body")
+
+    response = _call_tool(project.root, "document_update", path_or_id=document.id, directory="guides")
+
+    assert "error" not in response, response.get("error")
+    assert DocumentService(project).view_document(document.id).path_relative == "guides/notes.md"
+    assert not document.path.exists()
+
+
+def test_document_update_schema_declares_metadata_and_directory():
+    schema = next(tool for tool in list_tools() if tool["name"] == "document_update")["inputSchema"]
+
+    assert {"metadata", "directory", "type", "tags"}.issubset(schema["properties"])
+
+
+# --- F2: non-project path returns -32603 instead of actionable guidance -----
+
+def test_tool_call_outside_a_project_points_at_init_required(tmp_path):
+    outside = tmp_path / "not-a-project"
+    outside.mkdir()
+
+    response = _call_tool(outside, "task_board")
+
+    assert "error" not in response, response.get("error")
+    result = response["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "backlog://init-required" in text
+    assert str(outside) not in text, "init-required guidance leaked the absolute path"
+
+
+def _stub_tool(handler) -> ToolDefinition:
+    return ToolDefinition("task_board", "stub", {}, handler)
+
+
+def test_internal_errors_do_not_leak_absolute_paths(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    secret = tmp_path / "secret" / "workspace"
+
+    def boom(_project, **_kwargs):
+        raise RuntimeError(f"exploded while reading {secret}")
+
+    monkeypatch.setattr(protocol_module, "tool_by_name", lambda _name: _stub_tool(boom))
+
+    response = _call_tool(project.root, "task_board")
+
+    assert response["error"]["code"] == -32603
+    assert str(secret) not in json.dumps(response), "internal error leaked an absolute path"
+
+
+# --- F3: daemon forwarding changes tools/call with no 'arguments' key -------
+
+def test_inject_project_hint_adds_missing_arguments_object():
+    text = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "task_board"}})
+
+    injected = json.loads(_inject_project_hint(text, "/repo"))
+
+    assert injected["params"]["arguments"] == {"project": "/repo"}
+
+
+def test_tools_call_without_arguments_key_matches_local_and_forwarded_paths(tmp_path):
+    project = _project(tmp_path)
+    message = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "task_board"}}
+    context = McpRequestContext(project_hint=str(project.root))
+
+    local = handle_jsonrpc_message(message, context=context)
+    assert "error" not in local, local.get("error")
+    assert local["result"]["isError"] is False
+
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        stdout = io.StringIO()
+        run_stdio(
+            stdin=io.StringIO(json.dumps(message) + "\n"),
+            stdout=stdout,
+            context=context,
+            daemon_endpoint=service.endpoint,
+            token="secret",
+        )
+    finally:
+        service.shutdown()
+
+    forwarded = json.loads(stdout.getvalue().strip())
+    assert "error" not in forwarded, forwarded.get("error")
+    assert forwarded["result"]["isError"] is False
+
+
+# --- F4: read tools trigger a synchronous git fetch --------------------------
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("project_status", {}),
+        ("task_board", {}),
+        ("task_list", {}),
+        ("task_search", {"query": "Example"}),
+        ("task_view", {"task_id": "TASK-1"}),
+    ],
+)
+def test_mcp_read_tools_do_not_refresh_remote_refs(tmp_path, monkeypatch, tool_name, arguments):
+    project = _project(tmp_path)
+    MutableRepository(project).create_task(title="Example")
+    fetches = []
+    monkeypatch.setattr(repository_module, "maybe_fetch_remote_refs", lambda project: fetches.append(project))
+
+    response = _call_tool(project.root, tool_name, **arguments)
+
+    assert "error" not in response, response.get("error")
+    assert response["result"]["isError"] is False
+    assert fetches == [], f"{tool_name} performed a remote ref refresh"
+
+
+# --- F5: broad except TypeError misclassifies internal bugs ------------------
+
+def test_task_search_coerces_numeric_string_limit(tmp_path):
+    project = _project(tmp_path)
+    MutableRepository(project).create_task(title="Example")
+
+    response = _call_tool(project.root, "task_search", query="Example", limit="10")
+
+    assert "error" not in response, response.get("error")
+    rows = json.loads(response["result"]["content"][0]["text"])
+    assert [row["title"] for row in rows] == ["Example"]
+
+
+def test_task_search_rejects_non_numeric_limit(tmp_path):
+    project = _project(tmp_path)
+
+    response = _call_tool(project.root, "task_search", query="Example", limit="ten")
+
+    assert response["error"]["code"] == -32602
+    assert "limit" in response["error"]["message"]
+
+
+def test_internal_type_error_is_not_reported_as_invalid_params(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+
+    def boom(_project, **_kwargs):
+        raise TypeError("'<=' not supported between instances of 'str' and 'int'")
+
+    monkeypatch.setattr(protocol_module, "tool_by_name", lambda _name: _stub_tool(boom))
+
+    response = _call_tool(project.root, "task_board")
+
+    assert response["error"]["code"] == -32603
+
+
+# --- F6: schema/handler disagreement on additionalProperties ----------------
+
+def _handler_accepts_extra_keys(handler) -> bool:
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in inspect.signature(handler).parameters.values()
+    )
+
+
+def test_tool_schemas_are_strict_exactly_where_handlers_are_strict():
+    schemas = {tool["name"]: tool["inputSchema"] for tool in list_tools()}
+
+    mismatched = {
+        tool.name
+        for tool in TOOL_DEFINITIONS
+        if schemas[tool.name]["additionalProperties"] is not _handler_accepts_extra_keys(tool.handler)
+    }
+
+    assert mismatched == set()
+
+
+def test_unknown_argument_for_strict_tool_is_invalid_params(tmp_path):
+    project = _project(tmp_path)
+
+    response = _call_tool(project.root, "milestone_add", name="Alpha", bogus="x")
+
+    assert response["error"]["code"] == -32602
+
+
+# --- F7: misc consistency ---------------------------------------------------
+
+def test_resources_read_unknown_uri_returns_resource_not_found():
+    response = handle_jsonrpc_message(
+        {"jsonrpc": "2.0", "id": "resource", "method": "resources/read", "params": {"uri": "backlog://nope"}}
+    )
+
+    assert response["error"]["code"] == -32002
+    assert "backlog://nope" in response["error"]["message"], "path redaction mangled the resource URI"
+
+
+def test_task_edit_reloads_project_config_like_task_create(tmp_path):
+    project = _project(tmp_path)
+    MutableRepository(project).create_task(title="Example")
+    project.config_path.write_text(
+        project.config_path.read_text(encoding="utf-8").replace("- Done\n", "- Done\n- Blocked\n"),
+        encoding="utf-8",
+    )
+
+    detail = tool_registry.task_edit(project, "TASK-1", status="Blocked")
+
+    assert detail["status"] == "Blocked"
+
+
+def test_orchestration_validation_error_is_reported_as_a_conflict(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    MutableRepository(project).create_task(title="Example")
+
+    def raise_validation(*_args, **_kwargs):
+        raise OrchestrationValidationError("Task orchestration metadata is invalid", details={"field": "result"})
+
+    monkeypatch.setattr(OrchestrationService, "record_run", raise_validation)
+
+    payload = tool_registry.orchestration_record_run(project, task_id="TASK-1", actor="codex", result="succeeded")
+
+    assert payload["conflict"]["type"] == "OrchestrationValidationError"

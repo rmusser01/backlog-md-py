@@ -14,7 +14,6 @@ from backlog_py.orchestration import (
     OrchestrationQueueItem,
     OrchestrationService,
     OrchestrationStateUpdate,
-    OrchestrationValidationError,
     RunHistoryParseError,
     TaskSplitItem,
     ValidationIssue,
@@ -27,10 +26,21 @@ from backlog_py.storage.config import get_definition_of_done_defaults, load_conf
 T = TypeVar("T")
 
 
+class McpArgumentError(TypeError):
+    """Raised when an MCP tool argument is missing, malformed, or of the wrong type.
+
+    Only this exception is treated as a client error (-32602). A plain TypeError
+    escaping a handler is a server bug and must stay a -32603, so tool helpers
+    must never signal bad caller input with a bare TypeError. It subclasses
+    TypeError so direct Python callers that already catch TypeError from these
+    helpers keep working.
+    """
+
+
 def project_status(project: BacklogProject, recent_limit: int = 5, recentLimit: int | None = None) -> dict[str, Any]:
     """Return read-only project coordination status for multi-agent overlap checks."""
-    limit = recentLimit if recentLimit is not None else recent_limit
-    repository = ReadOnlyRepository(project)
+    limit = _int_argument(recentLimit if recentLimit is not None else recent_limit, "recentLimit", default=5)
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     active_tasks = repository.list_tasks()
     completed_tasks = repository.list_completed_tasks()
     tasks = [*active_tasks, *completed_tasks]
@@ -46,7 +56,7 @@ def project_status(project: BacklogProject, recent_limit: int = 5, recentLimit: 
             "total": len(tasks),
             "byStatus": dict(sorted(by_status.items())),
         },
-        "recentActivity": _recent_activity(project, tasks, limit=max(int(limit), 0)),
+        "recentActivity": _recent_activity(project, tasks, limit=max(limit, 0)),
         "locks": [
             lock
             for lock in list_runtime_locks()
@@ -66,19 +76,20 @@ def task_search(
     modifiedFiles: str | list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Search tasks through the read-only repository and return JSON-safe rows."""
-    if limit <= 0:
+    limit_value = _int_argument(limit, "limit", default=10)
+    if limit_value <= 0:
         return []
     file_filters = modified_files if modified_files is not None else modifiedFiles
     if not query.strip() and not _string_list(file_filters):
         return []
-    repository = ReadOnlyRepository(project)
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     tasks = repository.search_tasks(
         query,
         status=status,
         priority=priority,
         modified_files=file_filters,
     )
-    return [_task_summary(project, task) for task in tasks[:limit]]
+    return [_task_summary(project, task) for task in tasks[:limit_value]]
 
 
 def task_list(
@@ -95,10 +106,11 @@ def task_list(
     parentTaskId: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tasks through the read-only repository and return JSON-safe rows."""
-    if limit <= 0:
+    limit_value = _int_argument(limit, "limit", default=100)
+    if limit_value <= 0:
         return []
     parent_filter = parent_task_id if parent_task_id is not None else parentTaskId
-    repository = ReadOnlyRepository(project)
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     if search is None:
         tasks = repository.list_tasks(
             status=status,
@@ -118,12 +130,12 @@ def task_list(
             milestone=milestone,
             parent_task_id=parent_filter,
         )
-    return [_task_summary(project, task) for task in tasks[:limit]]
+    return [_task_summary(project, task) for task in tasks[:limit_value]]
 
 
 def task_board(project: BacklogProject) -> dict[str, list[dict[str, Any]]]:
     """Return the task board grouped by configured project statuses."""
-    repository = ReadOnlyRepository(project)
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     return {
         status: [_task_summary(project, task) for task in tasks]
         for status, tasks in repository.board().items()
@@ -132,7 +144,7 @@ def task_board(project: BacklogProject) -> dict[str, list[dict[str, Any]]]:
 
 def task_view(project: BacklogProject, task_id: str) -> dict[str, Any]:
     """Return one task through the read-only repository as a JSON-safe mapping."""
-    repository = ReadOnlyRepository(project)
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     return _task_detail(project, repository.get_task(task_id))
 
 
@@ -222,7 +234,10 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
 def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str, Any]:
     """Edit supported task sections through the safe mutation repository."""
     def mutate() -> dict[str, Any]:
-        repository = MutableRepository(project)
+        # Reload config like task_create: the long-lived daemon holds one
+        # BacklogProject per request, and status validation must see the
+        # statuses that are on disk now.
+        repository = MutableRepository(_fresh_project(project))
         priority = _optional_string(_get_alias(kwargs, "priority"))
         clear_priority = ("priority" in kwargs and kwargs.get("priority") is None) or (
             _coerce_bool(_get_alias(kwargs, "clearPriority", "clear_priority")) or False
@@ -252,12 +267,18 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
             final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),
             append_final_summary=_optional_string_list(_get_alias(kwargs, "finalSummaryAppend", "append_final_summary")),
             clear_final_summary=_coerce_bool(_get_alias(kwargs, "finalSummaryClear", "clear_final_summary")) or False,
-            check_ac=_int_list(_get_alias(kwargs, "checkAc", "check_ac")),
-            check_dod=_int_list(_get_alias(kwargs, "checkDod", "check_dod")),
-            uncheck_ac=_int_list(_get_alias(kwargs, "uncheckAc", "uncheck_ac")),
-            uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod")),
-            remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
-            remove_dod=_int_list(_get_alias(kwargs, "definitionOfDoneRemove", "removeDod", "remove_dod")),
+            check_ac=_int_list(_get_alias(kwargs, "checkAc", "check_ac"), "checkAc"),
+            check_dod=_int_list(_get_alias(kwargs, "checkDod", "check_dod"), "checkDod"),
+            uncheck_ac=_int_list(_get_alias(kwargs, "uncheckAc", "uncheck_ac"), "uncheckAc"),
+            uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod"), "uncheckDod"),
+            remove_ac=_int_list(
+                _get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac"),
+                "acceptanceCriteriaRemove",
+            ),
+            remove_dod=_int_list(
+                _get_alias(kwargs, "definitionOfDoneRemove", "removeDod", "remove_dod"),
+                "definitionOfDoneRemove",
+            ),
             dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
             assignees=_optional_string_list(_get_alias(kwargs, "assignee", "assignees")),
             labels=_optional_string_list(_get_alias(kwargs, "labels")),
@@ -319,8 +340,10 @@ def orchestration_record_run(
     idempotency_key = _optional_string(_get_alias(kwargs, "idempotencyKey", "idempotency_key"))
     expected_version = _optional_int_value(_get_alias(kwargs, "expectedVersion", "expected_version"), "expectedVersion")
     state_update = _orchestration_state_update_from_mapping(_get_alias(kwargs, "stateUpdate", "state_update"))
-    try:
-        mutation = OrchestrationService(project).record_run(
+    return _orchestration_mutation(
+        project,
+        task_identifier_value,
+        lambda: OrchestrationService(project).record_run(
             task_identifier_value,
             actor=actor_value,
             result=result_value,
@@ -330,33 +353,8 @@ def orchestration_record_run(
             idempotency_key=idempotency_key,
             expected_version=expected_version,
             state_update=state_update,
-        )
-    except OrchestrationIdempotencyConflict as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier_value,
-            conflict=_orchestration_idempotency_conflict_payload(exc),
-        )
-    except OrchestrationValidationError as exc:
-        raise TypeError(str(exc)) from exc
-    except RunHistoryParseError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier_value,
-            validation_issue=ValidationIssue(
-                code=exc.code,
-                message=exc.message,
-                path=exc.location or "run_history",
-            ),
-        )
-    except OrchestrationError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier_value,
-            conflict=_orchestration_error_conflict_payload(exc),
-        )
-
-    return _orchestration_record_run_response(project, task_identifier_value, result=mutation)
+        ),
+    )
 
 
 def orchestration_status(
@@ -417,34 +415,18 @@ def orchestration_claim_task(
         "expectedVersion",
     )
     ttl = _optional_int_value(leaseTtlSeconds if leaseTtlSeconds is not None else lease_ttl_seconds, "leaseTtlSeconds")
-    try:
-        mutation = OrchestrationService(project).claim_task(
+    return _orchestration_mutation(
+        project,
+        task_identifier,
+        lambda: OrchestrationService(project).claim_task(
             task_identifier,
             actor=actor_value,
             expected_version=expected,
             idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
             lease_ttl_seconds=ttl,
             reason=_optional_mcp_string(reason, "reason"),
-        )
-    except OrchestrationIdempotencyConflict as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_idempotency_conflict_payload(exc),
-        )
-    except OrchestrationError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_error_conflict_payload(exc),
-        )
-    except RunHistoryParseError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
-        )
-    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+        ),
+    )
 
 
 def orchestration_release_task(
@@ -465,33 +447,17 @@ def orchestration_release_task(
         expectedVersion if expectedVersion is not None else expected_version,
         "expectedVersion",
     )
-    try:
-        mutation = OrchestrationService(project).release_task(
+    return _orchestration_mutation(
+        project,
+        task_identifier,
+        lambda: OrchestrationService(project).release_task(
             task_identifier,
             actor=actor_value,
             expected_version=expected,
             idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
             reason=_optional_mcp_string(reason, "reason"),
-        )
-    except OrchestrationIdempotencyConflict as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_idempotency_conflict_payload(exc),
-        )
-    except OrchestrationError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_error_conflict_payload(exc),
-        )
-    except RunHistoryParseError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
-        )
-    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+        ),
+    )
 
 
 def orchestration_transition_task(
@@ -515,34 +481,18 @@ def orchestration_transition_task(
         expectedVersion if expectedVersion is not None else expected_version,
         "expectedVersion",
     )
-    try:
-        mutation = OrchestrationService(project).transition_task(
+    return _orchestration_mutation(
+        project,
+        task_identifier,
+        lambda: OrchestrationService(project).transition_task(
             task_identifier,
             to_status_value,
             actor=actor_value,
             expected_version=expected,
             idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
             reason=_optional_mcp_string(reason, "reason"),
-        )
-    except OrchestrationIdempotencyConflict as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_idempotency_conflict_payload(exc),
-        )
-    except OrchestrationError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_error_conflict_payload(exc),
-        )
-    except RunHistoryParseError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
-        )
-    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+        ),
+    )
 
 
 def orchestration_split_task(
@@ -574,14 +524,17 @@ def orchestration_split_task(
     )
     inherit = _optional_bool(inheritDependencies if inheritDependencies is not None else inherit_dependencies)
     sequence = _optional_bool(linkSequence if linkSequence is not None else link_sequence)
-    try:
-        mutation = OrchestrationService(project).split_task(
+    split_items = _task_split_items(items)
+    return _orchestration_mutation(
+        project,
+        task_identifier,
+        lambda: OrchestrationService(project).split_task(
             task_identifier,
             mode=mode_value,
             actor=actor_value,
             expected_version=expected,
             idempotency_key=idempotencyKey if idempotencyKey is not None else idempotency_key,
-            items=_task_split_items(items),
+            items=split_items,
             inherit_dependencies=True if inherit is None else inherit,
             link_sequence=True if sequence is None else sequence,
             transition_to_status=_optional_mcp_string(
@@ -589,35 +542,18 @@ def orchestration_split_task(
                 "transitionToStatus",
             ),
             reason=_optional_mcp_string(reason, "reason"),
-        )
-    except OrchestrationIdempotencyConflict as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_idempotency_conflict_payload(exc),
-        )
-    except OrchestrationError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            conflict=_orchestration_error_conflict_payload(exc),
-        )
-    except RunHistoryParseError as exc:
-        return _orchestration_record_run_response(
-            project,
-            task_identifier,
-            validation_issue=ValidationIssue(exc.code, exc.message, exc.location or "run_history"),
-        )
-    return _orchestration_record_run_response(project, task_identifier, result=mutation)
+        ),
+    )
 
 
 def document_list(project: BacklogProject, query: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """List or search documents through the safe document service."""
-    if limit <= 0:
+    limit_value = _int_argument(limit, "limit", default=100)
+    if limit_value <= 0:
         return []
     service = DocumentService(project)
     documents = service.list_documents() if query is None else service.search_documents(query)
-    return [_document_detail(project, document) for document in documents[:limit]]
+    return [_document_detail(project, document) for document in documents[:limit_value]]
 
 
 def document_view(project: BacklogProject, path_or_id: str) -> dict[str, Any]:
@@ -636,14 +572,20 @@ def document_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
                 _required_mcp_string(kwargs.get("path"), "path"),
                 title=_required_mcp_string(kwargs.get("title"), "title"),
                 content=str(kwargs.get("content") or ""),
-                metadata=_dict_value(kwargs.get("metadata")),
+                metadata=_dict_value(kwargs.get("metadata"), "metadata"),
             ),
         ),
     )
 
 
 def document_update(project: BacklogProject, path_or_id: str, **kwargs: Any) -> dict[str, Any]:
-    """Update a document while preserving omitted metadata."""
+    """Update a document's title, body, docs-relative directory, and metadata."""
+    metadata = _document_update_metadata(
+        _dict_value(kwargs.get("metadata"), "metadata"),
+        _optional_mcp_string(_get_alias(kwargs, "type"), "type"),
+        _get_alias(kwargs, "tags"),
+    )
+    directory = _optional_mcp_string(_get_alias(kwargs, "directory", "path"), "directory")
     return _locked(
         project,
         "mcp_document_update",
@@ -653,9 +595,31 @@ def document_update(project: BacklogProject, path_or_id: str, **kwargs: Any) -> 
                 path_or_id,
                 title=_optional_string(kwargs.get("title")),
                 content=_optional_string(kwargs.get("content")),
+                directory=directory,
+                metadata=metadata,
             ),
         ),
     )
+
+
+def _document_update_metadata(
+    metadata: dict[str, Any] | None,
+    document_type: str | None,
+    tags: Any,
+) -> dict[str, Any] | None:
+    """Merge explicit metadata with the CLI's --type/--tags shorthand.
+
+    The service deletes a frontmatter key whose value is None, so an explicit
+    {"key": null} still removes it. Shorthand fields mirror the CLI: they are
+    applied only when they carry a value.
+    """
+    merged = dict(metadata or {})
+    if document_type is not None:
+        merged["type"] = document_type
+    tag_values = _csv_string_list(tags)
+    if tag_values is not None:
+        merged["tags"] = tag_values
+    return merged or None
 
 
 def milestone_list(project: BacklogProject) -> list[dict[str, Any]]:
@@ -719,6 +683,45 @@ def definition_of_done_defaults_upsert(project: BacklogProject, items: list[str]
         return {"items": list(config.definition_of_done or [])}
 
     return _locked(project, "mcp_definition_of_done_defaults_upsert", mutate)
+
+
+def _orchestration_mutation(
+    project: BacklogProject,
+    task_id: str,
+    mutate: Callable[[], Any],
+) -> dict[str, Any]:
+    """Run one orchestration mutation and classify its failures consistently.
+
+    Every orchestration tool classifies the same failures the same way: an
+    idempotency clash or any other OrchestrationError (including
+    OrchestrationValidationError) becomes a success-with-conflict payload, and
+    an unparsable run history becomes a validation issue on the payload.
+    """
+    try:
+        mutation = mutate()
+    except OrchestrationIdempotencyConflict as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_id,
+            conflict=_orchestration_idempotency_conflict_payload(exc),
+        )
+    except RunHistoryParseError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_id,
+            validation_issue=ValidationIssue(
+                code=exc.code,
+                message=exc.message,
+                path=exc.location or "run_history",
+            ),
+        )
+    except OrchestrationError as exc:
+        return _orchestration_record_run_response(
+            project,
+            task_id,
+            conflict=_orchestration_error_conflict_payload(exc),
+        )
+    return _orchestration_record_run_response(project, task_id, result=mutation)
 
 
 def _orchestration_record_run_response(
@@ -807,7 +810,7 @@ def _orchestration_state_update_from_mapping(value: Any) -> OrchestrationStateUp
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise TypeError("stateUpdate must be an object")
+        raise McpArgumentError("stateUpdate must be an object")
     fields = {
         "status_key": _optional_string(_get_alias(value, "statusKey", "status_key")),
         "lease_owner": _optional_string(_get_alias(value, "leaseOwner", "lease_owner")),
@@ -828,16 +831,16 @@ def _orchestration_state_update_from_mapping(value: Any) -> OrchestrationStateUp
 
 def _task_split_items(value: Any) -> tuple[TaskSplitItem, ...]:
     if value is None:
-        raise TypeError("items must be an array")
+        raise McpArgumentError("items must be an array")
     if not isinstance(value, list):
-        raise TypeError("items must be an array")
+        raise McpArgumentError("items must be an array")
     items: list[TaskSplitItem] = []
     for index, item in enumerate(value, start=1):
         if isinstance(item, str):
             items.append(TaskSplitItem(title=item))
             continue
         if not isinstance(item, dict):
-            raise TypeError(f"items[{index}] must be a string or object")
+            raise McpArgumentError(f"items[{index}] must be a string or object")
         title = _required_mcp_string(_get_alias(item, "title"), f"items[{index}].title")
         items.append(
             TaskSplitItem(
@@ -1012,7 +1015,7 @@ def _optional_string(value: Any) -> str | None:
 def _required_mcp_string(value: Any, field: str) -> str:
     text = _optional_mcp_string(value, field)
     if text is None or not text.strip():
-        raise TypeError(f"{field} must be a non-empty string")
+        raise McpArgumentError(f"{field} must be a non-empty string")
     return text
 
 
@@ -1020,7 +1023,7 @@ def _optional_mcp_string(value: Any, field: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise TypeError(f"{field} must be a string")
+        raise McpArgumentError(f"{field} must be a string")
     return value
 
 
@@ -1033,11 +1036,11 @@ def _optional_status_callback(value: Any) -> str | bool | None:
         return None
     if isinstance(value, bool):
         if value:
-            raise TypeError("onStatusChange must be a command string, not true")
+            raise McpArgumentError("onStatusChange must be a command string, not true")
         return value
     if isinstance(value, str):
         return value.strip()
-    raise TypeError("onStatusChange must be a command string")
+    raise McpArgumentError("onStatusChange must be a command string")
 
 
 def _coerce_bool(value: Any) -> bool | None:
@@ -1051,7 +1054,7 @@ def _coerce_bool(value: Any) -> bool | None:
             return True
         if normalized in {"false", "0"}:
             return False
-    raise TypeError("Expected boolean value")
+    raise McpArgumentError("Expected boolean value")
 
 
 def _string_list(value: Any) -> list[str]:
@@ -1059,6 +1062,8 @@ def _string_list(value: Any) -> list[str]:
         return []
     if isinstance(value, str):
         return [value]
+    if not isinstance(value, (list, tuple)):
+        raise McpArgumentError("Expected a string or an array of strings")
     return [str(item) for item in value]
 
 
@@ -1068,37 +1073,52 @@ def _optional_string_list(value: Any) -> list[str] | None:
     return _string_list(value)
 
 
-def _int_list(value: Any) -> list[int]:
+def _csv_string_list(value: Any) -> list[str] | None:
+    """Split a string, comma-separated string, or array into trimmed values."""
+    if value is None:
+        return None
+    values = [item.strip() for entry in _string_list(value) for item in entry.split(",")]
+    normalized = [item for item in values if item]
+    return normalized or None
+
+
+def _int_list(value: Any, field: str = "value") -> list[int]:
     if value is None:
         return []
-    if isinstance(value, int):
-        return [value]
-    return [int(item) for item in value]
+    if not isinstance(value, (list, tuple)):
+        return [_required_int_value(value, field)]
+    return [_required_int_value(item, field) for item in value]
+
+
+def _int_argument(value: Any, field: str, *, default: int) -> int:
+    """Coerce an optional numeric tool argument, falling back to its default."""
+    parsed = _optional_int_value(value, field)
+    return default if parsed is None else parsed
 
 
 def _optional_int_value(value: Any, field: str = "value") -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
-        raise TypeError(f"{field} must be an integer")
+        raise McpArgumentError(f"{field} must be an integer")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise TypeError(f"{field} must be an integer") from exc
+        raise McpArgumentError(f"{field} must be an integer") from exc
 
 
 def _required_int_value(value: Any, field: str) -> int:
     parsed = _optional_int_value(value, field)
     if parsed is None:
-        raise TypeError(f"{field} must be an integer")
+        raise McpArgumentError(f"{field} must be an integer")
     return parsed
 
 
-def _dict_value(value: Any) -> dict[str, Any] | None:
+def _dict_value(value: Any, field: str = "value") -> dict[str, Any] | None:
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise TypeError("Expected mapping")
+        raise McpArgumentError(f"{field} must be an object")
     return dict(value)
 
 

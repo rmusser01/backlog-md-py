@@ -90,6 +90,10 @@ def _inject_project_hint(text: str, project_hint: str | None) -> str:
     'project' would fail there even though it resolves locally. Injecting the
     hint before forwarding makes daemon and non-daemon execution behave the
     same. On any parse issue the original text is forwarded unchanged.
+
+    A missing 'arguments' key is treated exactly like an empty one, matching the
+    local dispatcher; otherwise starting a daemon would break tools/call
+    requests that carry no arguments at all.
     """
     if project_hint is None:
         return text
@@ -105,7 +109,7 @@ def _inject_project_hint(text: str, project_hint: str | None) -> str:
         params = message.get("params")
         if not isinstance(params, dict):
             continue
-        arguments = params.get("arguments")
+        arguments = params.setdefault("arguments", {})
         if not isinstance(arguments, dict):
             continue
         if "project" not in arguments:
