@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import sys
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
 from collections.abc import Sequence
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import inf
 from pathlib import Path
+from time import monotonic
 
 from loguru import logger
 
@@ -20,10 +22,18 @@ from backlog_py.storage.config import load_config
 # hanging credential helper cannot pin a caller (CLI command, TUI refresh).
 GIT_COMMAND_TIMEOUT_SECONDS = 30
 
-# work_dir -> (".git" existed when probed, is-inside-work-tree result)
-_WORKTREE_CACHE: dict[str, tuple[bool, bool]] = {}
-# work_dir -> path of work_dir relative to the repository root ("" or "pkg/")
-_PREFIX_CACHE: dict[str, str] = {}
+# Repository layout is cached to keep a scan of N task files from forking O(N)
+# git processes, but the answers are not immutable: a `git init` anywhere at or
+# above the project changes both of them. Entries therefore expire, so a
+# long-lived process (TUI, MCP server) heals within seconds instead of serving
+# the stale answer until restart. The window is long enough that a single scan
+# still pays for the probe once. Read through the module at call time so tests
+# can shorten it.
+_CACHE_TTL_SECONDS = 5.0
+# work_dir -> (probe time, ".git" existed when probed, is-inside-work-tree result)
+_WORKTREE_CACHE: dict[str, tuple[float, bool, bool]] = {}
+# work_dir -> (probe time, path of work_dir relative to the repo root: "" or "pkg/")
+_PREFIX_CACHE: dict[str, tuple[float, str]] = {}
 
 
 @dataclass(frozen=True)
@@ -104,11 +114,6 @@ def maybe_fetch_remote_refs(project: BacklogProject) -> None:
         logger.warning("Skipping remote refresh: git fetch failed: {}", _git_error(fetch))
 
 
-def current_task_snapshot_timestamp(project: BacklogProject, path: Path) -> float:
-    """Return the current checkout timestamp for one task file."""
-    return current_task_snapshot_timestamps(project, [path])[path]
-
-
 def current_task_snapshot_timestamps(
     project: BacklogProject, paths: Sequence[Path]
 ) -> dict[Path, float]:
@@ -160,12 +165,16 @@ def current_task_snapshot_timestamps(
 def _repository_prefix(work_dir: Path) -> str:
     """Path of ``work_dir`` relative to the repository root, with a trailing slash."""
     key = str(work_dir)
+    now = monotonic()
     cached = _PREFIX_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if cached is not None and now - cached[0] < _CACHE_TTL_SECONDS:
+        return cached[1]
     result = _run_git(work_dir, "rev-parse", "--show-prefix")
-    prefix = result.stdout.strip() if result.returncode == 0 else ""
-    _PREFIX_CACHE[key] = prefix
+    # git terminates the prefix with a single newline and nothing else. Every
+    # other byte belongs to the path: `strip()` would delete the leading space
+    # of a directory literally named " pkg", and then no lookup ever matches.
+    prefix = result.stdout.removesuffix("\n") if result.returncode == 0 else ""
+    _PREFIX_CACHE[key] = (now, prefix)
     return prefix
 
 
@@ -198,9 +207,16 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
 
 def _last_commit_timestamps(work_dir: Path, scope: Sequence[str]) -> dict[str, float]:
     """Most recent commit timestamp per path under ``scope``, in one log walk."""
-    result = _run_git(
-        work_dir, "-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only", "HEAD", "--", *scope
-    )
+    log_args = ("-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only")
+    # `--name-only` prints nothing for a merge commit, so a file whose content was
+    # produced while resolving a conflict would be attributed to an older ancestor
+    # instead of the merge. Ordinary merges are simplified out of a path-limited
+    # log and so are unaffected. `--diff-merges` needs git >= 2.31; older git
+    # rejects the option outright, which would report *every* task as unknown, so
+    # fall back to the plain walk when git says it does not know the option.
+    result = _run_git(work_dir, *log_args, "--diff-merges=first-parent", "HEAD", "--", *scope)
+    if result.returncode != 0 and "diff-merges" in (result.stderr or ""):
+        result = _run_git(work_dir, *log_args, "HEAD", "--", *scope)
     if result.returncode != 0:
         return {}
     timestamps: dict[str, float] = {}
@@ -289,19 +305,25 @@ def _auto_commit_config(project: BacklogProject) -> BacklogConfig:
 def _is_git_worktree(work_dir: Path) -> bool:
     """Memoized worktree probe.
 
-    This runs once per task file on every repository scan, so the subprocess cost
-    dominates large projects. The cached answer is keyed on whether a ``.git``
-    entry exists, so a directory that gets ``git init``-ed mid-process is
-    re-probed rather than serving a stale ``False``.
+    This runs on every repository scan, so the subprocess cost dominates large
+    projects. Two things invalidate the memo:
+
+    * the presence of a local ``.git`` — a directory in a normal clone, a *file*
+      in a submodule or linked worktree, so ``exists()`` is the right test;
+    * age. The marker alone cannot see a ``git init`` in a *parent* directory,
+      which leaves the project inside a worktree with no local ``.git`` at all.
+      Without expiry that answer would stay ``False`` for the lifetime of the
+      process, silently disabling auto-commit in a TUI or daemon until restart.
     """
     key = str(work_dir)
     marker = (work_dir / ".git").exists()
+    now = monotonic()
     cached = _WORKTREE_CACHE.get(key)
-    if cached is not None and cached[0] == marker:
-        return cached[1]
+    if cached is not None and cached[1] == marker and now - cached[0] < _CACHE_TTL_SECONDS:
+        return cached[2]
     result = _run_git(work_dir, "rev-parse", "--is-inside-work-tree")
     value = result.returncode == 0 and result.stdout.strip() == "true"
-    _WORKTREE_CACHE[key] = (marker, value)
+    _WORKTREE_CACHE[key] = (now, marker, value)
     return value
 
 
@@ -331,11 +353,6 @@ def _auto_commit_pathspecs(project: BacklogProject) -> list[str]:
     if config_rel is not None and not (backlog_rel and config_rel.startswith(f"{backlog_rel}/")):
         pathspecs.append(config_rel)
     return pathspecs
-
-
-def _has_path_changes(work_dir: Path, relative_path: str) -> bool:
-    result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", relative_path)
-    return bool(result.stdout.strip()) if result.returncode == 0 else True
 
 
 def _relative_path(root: Path, path: Path) -> str | None:
@@ -465,6 +482,13 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
             check=False,
             capture_output=True,
             text=True,
+            # Paths are bytes to git, and `core.quotePath=false` asks it to emit
+            # them raw. A filename that is not valid UTF-8 would abort the whole
+            # scan under strict decoding; surrogateescape preserves the bytes and
+            # reproduces exactly the string ``os.fsdecode`` (and therefore
+            # ``Path``) builds for the same file, so the two still compare equal.
+            encoding=sys.getfilesystemencoding(),
+            errors="surrogateescape",
             timeout=GIT_COMMAND_TIMEOUT_SECONDS,
             env=env,
         )
