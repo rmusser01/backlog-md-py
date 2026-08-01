@@ -47,6 +47,24 @@ if: >-
 Nothing is published when CI fails on the release commit, when the merge does
 not change `__version__`, or when the tag already exists.
 
+**A `workflow_dispatch` run bypasses the CI-success gate.** The first clause of
+the guard (`github.event_name == 'workflow_dispatch'`) short-circuits the whole
+`workflow_run` condition, so a manual dispatch tags whatever `main` currently
+points at without ever looking at the CI conclusion for that commit. It also
+bypasses the "commit changed `__version__`" guard. Only these two guards still
+apply to a manual dispatch:
+
+- the commit is contained in `origin/main`;
+- the `v<version>` tag does not already exist on `origin`.
+
+Tagging starts `release.yml`, and a PyPI publish cannot be undone, so use manual
+dispatch only after confirming by hand that CI concluded `success` on the exact
+commit being tagged:
+
+```bash
+gh run list --repo rmusser01/backlog-md-py --workflow CI --branch main --limit 5
+```
+
 The release workflow itself still runs only for `v*` tags. Its release job is
 guarded by:
 
@@ -187,9 +205,10 @@ Prefer rerunning the automation first:
 gh workflow run "Auto Release Tag" --repo rmusser01/backlog-md-py --ref main
 ```
 
-A manual dispatch skips the "commit changed `__version__`" guard but still
-refuses to tag a commit that is not contained in `origin/main`, and still skips
-an existing tag. If that is not usable, tag by hand:
+A manual dispatch skips both the CI-success gate and the "commit changed
+`__version__`" guard; it still refuses to tag a commit that is not contained in
+`origin/main`, and still skips an existing tag. Confirm CI is green on the
+commit `main` points at before dispatching. If that is not usable, tag by hand:
 
 ```bash
 git fetch origin main --tags

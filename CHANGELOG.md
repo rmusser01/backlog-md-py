@@ -19,6 +19,14 @@ exist because the previous behaviour was unsafe.
   *Migration:* set `taskFrontmatterStatusCallbacks: true` in `backlog/config.yml`
   to restore it. Config-level `onStatusChange` is unaffected, and a command
   passed explicitly to `task create`/`task edit --on-status-change` still runs.
+
+  Be clear about what this does and does not protect. `backlog/config.yml`
+  arrives through the same channel a task file does, so a hostile *repository*
+  can still set `onStatusChange` at config level, or flip this key to `true`.
+  The gate defends against the common case — a pull request or branch that only
+  touches `backlog/tasks/` — not against cloning and operating on a repository
+  you do not trust. Treat a clone's `backlog/config.yml` the way you would treat
+  any other executable content in it.
 - **`daemon start`/`daemon run` reject a non-loopback `--host`.** The daemon
   serves the full MCP JSON-RPC surface, including every write tool, so binding a
   LAN address handed project write access to the network.

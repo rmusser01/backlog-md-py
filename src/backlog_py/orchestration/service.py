@@ -26,7 +26,6 @@ from backlog_py.orchestration.history import (
 from backlog_py.orchestration.models import (
     OrchestrationActorContext,
     OrchestrationClaimTaskRequest,
-    OrchestrationIdempotencyConflict,
     OrchestrationLeaseConflict,
     OrchestrationMutationResult,
     OrchestrationPolicy,
@@ -1023,9 +1022,23 @@ def _validate_updated_orchestration(
     is already broken. What it must not do is write new invalid state - a
     malformed lease_expires_at or a lease owner without an expiry makes every
     later claim, release, and transition raise OrchestrationValidationError and
-    marks the task invalid in the queue until the file is hand repaired. A
-    record_run that repairs the state still passes, because only the resulting
-    mapping is checked.
+    marks the task invalid in the queue until the file is hand repaired.
+
+    Limit of the repair path: the check is on the whole resulting mapping, not
+    on the fields the update touched, so it only lets through a *complete*
+    repair. A task with two independent defects - say a malformed
+    ``lease_expires_at`` and an unknown ``status_key`` - cannot be fixed one
+    field at a time: the update that repairs the expiry is rejected for the
+    status_key issue it did not introduce and cannot see. Worse, that
+    particular pair cannot be repaired in one update either, because
+    ``_validate_record_run_state_update`` refuses a status_key change out of a
+    status the policy does not define (no transition exists from an unknown
+    state). Multi-defect frontmatter is therefore a hand-edit, not a record_run.
+
+    Scoping this to the paths the update writes would make partial repair work
+    while still blocking newly introduced invalidity; it is deliberately not
+    done here because "the stored mapping is valid after every successful
+    record_run" is the stronger and simpler invariant to reason about.
     """
     issues = validate_orchestration({"orchestration": dict(orchestration)}, policy)
     if not issues:
@@ -1059,6 +1072,11 @@ def _claim_target_status(policy: OrchestrationPolicy, current_status: str) -> st
     before the idempotency replay check); a policy with no working state then
     fails the claim in ``validate`` because a status cannot transition to
     itself unless the policy declares that transition.
+
+    See ``OrchestrationPolicy.claim_target_status`` for the documented limit of
+    that derivation: on a policy with more than one claimable status it can
+    resolve a replay to a different ``to_status`` than the original claim, which
+    surfaces as a spurious idempotency conflict.
     """
     return policy.claim_target_status(current_status) or current_status
 

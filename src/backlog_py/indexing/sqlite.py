@@ -111,16 +111,16 @@ def load_task_sources(
 
     try:
         return _load_task_sources(path, fingerprint_factory=fingerprint_factory, rebuild=rebuild)
-    except sqlite3.OperationalError:
-        # Contention, not corruption (a busy database, or a peer that reset it
-        # between our schema check and our query). Deleting the database here
-        # would pull it out from under the readers we are contending with, so
-        # retry against whatever they left behind instead.
-        try:
-            return _load_task_sources(path, fingerprint_factory=fingerprint_factory, rebuild=rebuild)
-        except (OSError, sqlite3.DatabaseError, SQLiteIndexError) as retry_exc:
-            raise SQLiteIndexError(f"Unable to read SQLite read index: {path}") from retry_exc
     except (OSError, sqlite3.DatabaseError, SQLiteIndexError) as exc:
+        if _is_contention_error(exc):
+            # Contention, not corruption (a busy database, or a peer that reset
+            # it between our schema check and our query). Deleting the database
+            # here would pull it out from under the readers we are contending
+            # with, so retry against whatever they left behind instead.
+            try:
+                return _load_task_sources(path, fingerprint_factory=fingerprint_factory, rebuild=rebuild)
+            except (OSError, sqlite3.DatabaseError, SQLiteIndexError) as retry_exc:
+                raise SQLiteIndexError(f"Unable to read SQLite read index: {path}") from retry_exc
         try:
             _discard_index(path)
         except OSError:
@@ -129,6 +129,30 @@ def load_task_sources(
             return _load_task_sources(path, fingerprint_factory=fingerprint_factory, rebuild=rebuild)
         except (OSError, sqlite3.DatabaseError, SQLiteIndexError) as retry_exc:
             raise SQLiteIndexError(f"Unable to rebuild SQLite read index: {path}") from retry_exc
+
+
+# SQLite's primary result codes for "somebody else holds the lock". Extended
+# codes pack the primary code into the low byte (SQLITE_BUSY_SNAPSHOT is
+# 5 | 2<<8), so classification masks it back out.
+_CONTENTION_ERROR_CODES = frozenset((sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED))
+_SQLITE_PRIMARY_CODE_MASK = 0xFF
+
+
+def _is_contention_error(exc: BaseException) -> bool:
+    """True only for a transient lock conflict, not for a broken index.
+
+    ``sqlite3.OperationalError`` is far broader than contention: it is also what
+    "unable to open database file" and "attempt to write a readonly database"
+    arrive as. Retrying those is pointless - the second attempt fails the same
+    way - and, because the retry path never discards the file, a persistently
+    unusable index used to strand every reader on the Markdown fallback with no
+    way back. Only the primary result code separates the two cases, so the class
+    alone is not enough to decide.
+    """
+    code = getattr(exc, "sqlite_errorcode", None)
+    if not isinstance(code, int):
+        return False
+    return (code & _SQLITE_PRIMARY_CODE_MASK) in _CONTENTION_ERROR_CODES
 
 
 def _load_task_sources(

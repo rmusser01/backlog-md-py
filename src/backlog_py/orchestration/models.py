@@ -338,6 +338,29 @@ class OrchestrationPolicy:
         a task that is already claimed and callers can still report the status
         a claim would have aimed for. Returns None when the policy defines no
         working state at all.
+
+        Known consequence for idempotent replays. That fallback is computed from
+        the policy's *entry point*, not from the status the original claim
+        started in, so it only reproduces the original answer when every
+        claimable status funnels into the same working status. A policy with two
+        claimable statuses whose working targets differ (``triage -> triaging``
+        and ``todo -> inprogress``, say) behaves like this:
+
+        * the first ``claim_task`` on a ``triage`` task records
+          ``to_status: triaging`` and leaves the task in ``triaging``;
+        * a replay of that same call re-derives the target from ``triaging``,
+          which is not claimable, so it falls back to the entry point ``todo``
+          and asks for ``inprogress``;
+        * ``to_status`` is part of the canonical event fingerprint, so the
+          replay is rejected as ``OrchestrationIdempotencyConflict`` ("already
+          used for different run metadata") even though it is a byte-identical
+          retry of a call that already succeeded.
+
+        Single-entry-point policies - including the default one - are
+        unaffected, because every fallback resolves to the same working status.
+        Fixing the general case means replaying against the status the original
+        claim started from (the recorded event's ``from_status``) instead of
+        re-deriving a target from the current one.
         """
         if from_status is not None and self.is_claimable(from_status):
             target = self._working_transition_target(from_status)
