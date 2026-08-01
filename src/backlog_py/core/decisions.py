@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import yaml
+from loguru import logger
 
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_numbered_id, ids_equivalent
@@ -54,6 +55,8 @@ class DecisionService:
             "status": _normalize_decision_status(status),
         }
         target = self._decision_path(decision_id, title)
+        if target.exists():
+            raise DecisionMutationError(f"Decision path already exists: {target.name}")
         source = _render_decision(frontmatter)
         parse_task_markdown(source)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -63,11 +66,17 @@ class DecisionService:
     def list_decisions(self) -> list[DecisionRecord]:
         if not self.decisions_dir.is_dir():
             return []
-        decisions = [
-            self._load_decision(path)
-            for path in sorted(self.decisions_dir.glob("decision-*.md"))
-            if path.name.casefold() != "readme.md"
-        ]
+        decisions: list[DecisionRecord] = []
+        for path in sorted(self.decisions_dir.glob("decision-*.md")):
+            try:
+                decisions.append(self._load_decision(path))
+            except DecisionMutationError:
+                # Containment failures are security signals, not bad content.
+                raise
+            except (ValueError, OSError) as exc:
+                # A single unparsable file must not disable every decision
+                # operation; skip it and warn, as the task repository does.
+                logger.warning("Skipping unreadable decision file {}: {}", path, exc)
         return sorted(decisions, key=_decision_sort_key)
 
     def search_decisions(self, query: str) -> list[DecisionRecord]:
@@ -104,7 +113,7 @@ class DecisionService:
 
 
 def _load_decision(base: Path, path: Path) -> DecisionRecord:
-    raw_source = path.read_text(encoding="utf-8")
+    raw_source = path.read_text(encoding="utf-8-sig")
     parsed = parse_task_markdown(raw_source)
     frontmatter = dict(parsed.frontmatter)
     body = parsed.body
@@ -156,9 +165,14 @@ def _slug_title(title: str) -> str:
     return slug or "Decision"
 
 
-def _decision_sort_key(decision: DecisionRecord) -> tuple[int, str]:
-    match = re.fullmatch(r"decision-(\d+)", decision.id.casefold())
-    return (int(match.group(1)) if match is not None else 0, decision.id)
+def _decision_sort_key(decision: DecisionRecord) -> tuple[int, int, str]:
+    # Conforming ids sort numerically first; anything else keeps a total,
+    # deterministic order behind them instead of collapsing onto the same key.
+    normalized = decision.id.casefold()
+    match = re.fullmatch(r"decision-(\d+)", normalized)
+    if match is None:
+        return (1, 0, normalized)
+    return (0, int(match.group(1)), normalized)
 
 
 def _decision_search_text(decision: DecisionRecord) -> str:

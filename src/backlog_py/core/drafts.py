@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Sequence
 
+from loguru import logger
+
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
@@ -117,7 +119,17 @@ class DraftService:
     def list_drafts(self) -> list[TaskRecord]:
         if not self.drafts_dir.is_dir():
             return []
-        drafts = [self._load_draft(path) for path in sorted(self.drafts_dir.glob("*.md"))]
+        drafts: list[TaskRecord] = []
+        for path in sorted(self.drafts_dir.glob("*.md")):
+            try:
+                drafts.append(self._load_draft(path))
+            except TaskMutationError:
+                # Containment failures are security signals, not bad content.
+                raise
+            except (ValueError, OSError) as exc:
+                # A single unparsable file must not disable every draft
+                # operation; skip it and warn, as the task repository does.
+                logger.warning("Skipping unreadable draft file {}: {}", path, exc)
         return sorted(drafts, key=_draft_sort_key)
 
     def view_draft(self, draft_id: str) -> TaskRecord:
@@ -142,7 +154,10 @@ class DraftService:
         )
         parse_task_markdown(source)
         _atomic_write_text(target, source)
-        _mutation_path(self.drafts_dir, draft.path).unlink()
+        # Write-then-unlink: the new file is durable before the old one goes, so
+        # no content can be lost. A failed unlink must not report the promotion
+        # as failed (the task exists) - retrying would create a second task.
+        _unlink_best_effort(_mutation_path(self.drafts_dir, draft.path), "promoted draft")
         return _load_task(target)
 
     def demote_task(self, task_id: str) -> TaskRecord:
@@ -165,7 +180,8 @@ class DraftService:
         )
         parse_task_markdown(source)
         _atomic_write_text(target, source)
-        _mutation_path(task.path.parent, task.path).unlink()
+        # See promote_draft: the draft is durable before the task is removed.
+        _unlink_best_effort(_mutation_path(self.project.backlog_dir, task.path), "demoted task")
         return _load_task(target)
 
     def archive_draft(self, draft_id: str) -> TaskRecord:
@@ -198,6 +214,13 @@ class DraftService:
 
     def _load_draft(self, path: Path) -> TaskRecord:
         return _load_task(_mutation_path(self.drafts_dir, path))
+
+
+def _unlink_best_effort(path: Path, description: str) -> None:
+    try:
+        path.unlink()
+    except OSError as exc:
+        logger.warning("Failed to remove {} {}: {}", description, path, exc)
 
 
 def _normalize_draft_id(draft_id: str) -> str:
