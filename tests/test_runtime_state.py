@@ -11,6 +11,7 @@ from backlog_py.runtime.state import (
     allocate_log_path,
     delete_runtime_record,
     ensure_state_layout,
+    prune_daemon_logs,
     read_runtime_record,
     resolve_state_dir,
     runtime_record_path,
@@ -154,6 +155,50 @@ def test_allocate_log_path_returns_daemon_log_path(tmp_path, monkeypatch):
     assert first.name.startswith("backlog-md-py-daemon-")
     assert first.suffix == ".log"
     assert second != first
+
+
+def test_prune_daemon_logs_keeps_only_the_newest_logs(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout = ensure_state_layout()
+    logs = [_daemon_log(layout, index) for index in range(6)]
+    foreground_log = layout.logs_dir / "backlog-md-py-daemon.log"
+    foreground_log.write_text("foreground", encoding="utf-8")
+    os.utime(foreground_log, (1_000, 1_000))
+
+    removed = prune_daemon_logs(layout, keep=2)
+
+    assert sorted(removed) == sorted(logs[:4])
+    assert [log.exists() for log in logs] == [False, False, False, False, True, True]
+    assert foreground_log.exists(), "pruned the unmanaged foreground daemon log"
+
+
+def test_prune_daemon_logs_never_removes_excluded_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout = ensure_state_layout()
+    logs = [_daemon_log(layout, index) for index in range(4)]
+
+    removed = prune_daemon_logs(layout, keep=1, exclude=[logs[0]])
+
+    assert logs[0].exists()
+    assert logs[3].exists()
+    assert sorted(removed) == sorted(logs[1:3])
+
+
+def test_prune_daemon_logs_is_a_noop_below_the_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout = ensure_state_layout()
+    logs = [_daemon_log(layout, index) for index in range(3)]
+
+    assert prune_daemon_logs(layout, keep=5) == []
+    assert all(log.exists() for log in logs)
+
+
+def _daemon_log(layout: StateLayout, index: int) -> Path:
+    path = layout.logs_dir / f"backlog-md-py-daemon-2026010{index}T000000Z-1-abcd{index}.log"
+    path.write_text(f"log {index}", encoding="utf-8")
+    stamp = 1_000_000 + index
+    os.utime(path, (stamp, stamp))
+    return path
 
 
 def _record(*, token: str = "token", log_path: Path) -> RuntimeRecord:

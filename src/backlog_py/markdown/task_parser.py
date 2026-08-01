@@ -34,11 +34,16 @@ class _OpenMarker:
     section_name: str
     content_lines: list[str]
     raw_lines: list[str]
+    start: int = -1
 
 
 def parse_task_markdown(source: str) -> ParsedTaskMarkdown:
+    # A UTF-8 BOM would otherwise hide the frontmatter delimiter, making the
+    # task parse as frontmatter-less and the next write prepend a second block.
+    source = source.lstrip("﻿")
     raw_frontmatter, frontmatter, body = _split_frontmatter(source)
-    sections, checklists = _parse_body(body)
+    body_offset = len(source) - len(body)
+    sections, checklists = _parse_body(body, body_offset)
     return ParsedTaskMarkdown(
         raw_source=source,
         raw_frontmatter=raw_frontmatter,
@@ -88,12 +93,17 @@ def _split_frontmatter(source: str) -> tuple[str | None, dict[str, Any], str]:
     return raw_frontmatter, loaded, body
 
 
-def _parse_body(body: str) -> tuple[dict[str, TaskMarkdownSection], dict[str, list[ChecklistItem]]]:
+def _parse_body(
+    body: str, body_offset: int = 0
+) -> tuple[dict[str, TaskMarkdownSection], dict[str, list[ChecklistItem]]]:
     sections: dict[str, TaskMarkdownSection] = {}
     checklists: dict[str, list[ChecklistItem]] = {}
     open_marker: _OpenMarker | None = None
+    cursor = body_offset
 
     for line in body.splitlines(keepends=True):
+        line_start = cursor
+        cursor += len(line)
         begin = _match_begin(line)
         if begin is not None and open_marker is None:
             marker, section_name = begin
@@ -102,6 +112,7 @@ def _parse_body(body: str) -> tuple[dict[str, TaskMarkdownSection], dict[str, li
                 section_name=section_name,
                 content_lines=[],
                 raw_lines=[line],
+                start=line_start,
             )
             continue
 
@@ -112,14 +123,22 @@ def _parse_body(body: str) -> tuple[dict[str, TaskMarkdownSection], dict[str, li
                 raw = "".join(open_marker.raw_lines)
                 content = "".join(open_marker.content_lines)
                 if open_marker.marker == "SECTION":
-                    sections[open_marker.section_name] = TaskMarkdownSection(
-                        name=open_marker.section_name,
-                        marker=open_marker.marker,
-                        raw=raw,
-                        content=content,
+                    # First block wins, matching the offset the writer splices at.
+                    sections.setdefault(
+                        open_marker.section_name,
+                        TaskMarkdownSection(
+                            name=open_marker.section_name,
+                            marker=open_marker.marker,
+                            raw=raw,
+                            content=content,
+                            start=open_marker.start,
+                            end=cursor,
+                        ),
                     )
                 else:
-                    checklists[open_marker.section_name] = _parse_checklist_items(open_marker.content_lines)
+                    checklists.setdefault(
+                        open_marker.section_name, _parse_checklist_items(open_marker.content_lines)
+                    )
                 open_marker = None
                 continue
             open_marker.content_lines.append(line)

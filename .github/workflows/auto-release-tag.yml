@@ -1,13 +1,28 @@
 name: Auto Release Tag
 
+# Creating a `v*` tag starts `release.yml`, which publishes to PyPI. PyPI
+# publishes are irreversible, so this workflow must never tag a commit whose CI
+# run failed. It therefore reacts to CI *completing* rather than to the push
+# itself.
+#
+# `workflow_run` always runs the copy of this file that lives on the default
+# branch, and `github.ref`/`github.sha` point at the default branch rather than
+# at the commit CI validated. Every step below resolves the commit from
+# `github.event.workflow_run.head_sha` instead of trusting the ambient ref.
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
+  # Manual escape hatch: retag a main commit whose automatic tagging was missed
+  # or failed. Run it from the `main` branch.
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -18,17 +33,43 @@ jobs:
   tag:
     name: Tag merged package version
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # Only tag when the full CI workflow (test matrix, bandit, lint, package
+    # build and smoke tests) concluded successfully for a push to this
+    # repository's `main`.
+    #
+    # `workflow_run` also fires for CI runs triggered by `pull_request`,
+    # including runs for fork pull requests whose head branch happens to be
+    # named `main`, so the event type and the head repository are checked too.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # The exact commit CI validated, not whatever `main` points at now.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Resolve package version
         id: version
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
+          set -euo pipefail
+
+          # Belt and braces for the `if:` gate above: refuse to tag anything that
+          # is not actually contained in the published history of `main`.
+          git fetch --no-tags --force origin "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor "${HEAD_SHA}" origin/main; then
+            echo "::error::${HEAD_SHA} is not contained in origin/main; refusing to tag."
+            exit 1
+          fi
+
           version="$(python - <<'PY'
           import ast
           from pathlib import Path
@@ -46,9 +87,28 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
 
+          # Secondary guard: automatic tagging only reacts to commits that
+          # actually changed the packaged version. This is deliberately *not* the
+          # only guard - the CI-success gate above is what protects PyPI.
+          # Manual dispatch bypasses it so a missed tag can still be created.
+          changed=false
+          if git rev-parse --verify --quiet "${HEAD_SHA}^" >/dev/null; then
+            if [ -n "$(git diff --name-only "${HEAD_SHA}^" "${HEAD_SHA}" -- src/backlog_py/__init__.py)" ]; then
+              changed=true
+            fi
+          else
+            changed=true
+          fi
+          echo "changed=${changed}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved ${HEAD_SHA} as v${version} (__version__ changed in this commit: ${changed})."
+
       - name: Create release tag
         id: tag
+        if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
+          set -euo pipefail
           tag="${{ steps.version.outputs.tag }}"
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
             echo "created=false" >> "${GITHUB_OUTPUT}"
@@ -58,10 +118,12 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${tag}" -m "backlog-md-py ${tag#v}"
+          git tag -a "${tag}" "${HEAD_SHA}" -m "backlog-md-py ${tag#v}"
           git push origin "${tag}"
           echo "created=true" >> "${GITHUB_OUTPUT}"
 
+      # Tags pushed with GITHUB_TOKEN do not trigger workflows, so release.yml is
+      # dispatched explicitly against the new tag.
       - name: Dispatch release workflow
         if: steps.tag.outputs.created == 'true'
         env:

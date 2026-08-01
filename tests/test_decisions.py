@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 import yaml
 from click.testing import CliRunner
+from loguru import logger
 
 from backlog_py.cli.main import main
 from backlog_py.core.decisions import DecisionMutationError, DecisionService
@@ -80,6 +82,86 @@ def test_decision_create_rejects_invalid_status_before_write(tmp_path):
         _service(repo).create_decision("Bad status", status="maybe")
 
     assert not (repo / "backlog" / "decisions").exists()
+
+
+@contextmanager
+def _captured_warnings():
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
+
+
+def _write_decision(repo: Path, filename: str, source: str) -> Path:
+    decisions_dir = repo / "backlog" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    path = decisions_dir / filename
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
+def test_malformed_decision_file_does_not_disable_decision_operations(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _service(repo).create_decision("Use PostgreSQL")
+    _write_decision(repo, "decision-9 - Broken.md", "---\nid: decision-9\ntitle: Broken\n\nNo closing fence.\n")
+
+    with _captured_warnings() as warnings:
+        listed = _service(repo).list_decisions()
+
+    assert [decision.id for decision in listed] == ["decision-1"]
+    assert any("Broken.md" in message for message in warnings), warnings
+    assert _service(repo).view_decision("1").title == "Use PostgreSQL"
+    assert _service(repo).create_decision("Another one").id == "decision-2"
+
+
+def test_decision_reader_tolerates_utf8_bom(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _write_decision(
+        repo,
+        "decision-3 - Bom.md",
+        "﻿---\nid: decision-3\ntitle: BOM decision\nstatus: accepted\n---\n\n## Context\n\nWith BOM.\n",
+    )
+
+    assert [decision.id for decision in _service(repo).list_decisions()] == ["decision-3"]
+    viewed = _service(repo).view_decision("3")
+    assert viewed.title == "BOM decision"
+    assert viewed.status == "accepted"
+    assert viewed.context == "With BOM."
+    assert not viewed.raw_source.startswith("﻿")
+
+
+def test_create_decision_refuses_to_overwrite_an_existing_file(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    squatter = _write_decision(
+        repo,
+        "decision-1 - Same-title.md",
+        "---\nid: adr-1\ntitle: Same title\n---\n\n## Context\n\nkeep me\n",
+    )
+
+    with pytest.raises(DecisionMutationError, match="already exists"):
+        _service(repo).create_decision("Same title")
+
+    assert "keep me" in squatter.read_text(encoding="utf-8")
+
+
+def test_list_decisions_orders_conforming_ids_numerically_then_others_lexicographically(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    for filename, decision_id in (
+        ("decision-10 - Ten.md", "decision-10"),
+        ("decision-2 - Two.md", "decision-2"),
+        ("decision-b - Bee.md", "adr-b"),
+        ("decision-a - Ay.md", "adr-a"),
+    ):
+        _write_decision(repo, filename, f"---\nid: {decision_id}\ntitle: T\n---\n\n## Context\n")
+
+    assert [decision.id for decision in _service(repo).list_decisions()] == [
+        "decision-2",
+        "decision-10",
+        "adr-a",
+        "adr-b",
+    ]
 
 
 def test_cli_decision_create_and_search_use_safe_service(tmp_path):

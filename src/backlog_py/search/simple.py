@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable
 from difflib import SequenceMatcher
 from typing import TypeVar
 
 
 T = TypeVar("T")
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# Word characters minus underscore, Unicode-aware.  The previous ``[a-z0-9]+``
+# pattern dropped every non-ASCII script, which made search silently return
+# nothing for CJK, Cyrillic, Greek, Hebrew, ... and truncated accented Latin
+# ("café" tokenised to "caf").
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def contains_query(text: str, query: str) -> bool:
@@ -31,8 +36,8 @@ def query_score(text: str, query: str) -> int | None:
     if not normalized_text:
         return None
 
-    query_tokens = _tokens(normalized_query)
-    text_tokens = _tokens(normalized_text)
+    query_tokens = _tokens_of_normalized(normalized_query)
+    text_tokens = _tokens_of_normalized(normalized_text)
     if not query_tokens or not text_tokens:
         return None
 
@@ -86,8 +91,34 @@ def _is_ordered_subsequence(needle: str, haystack: str) -> bool:
 
 
 def _normalize_text(value: str) -> str:
-    return " ".join(value.casefold().split())
+    """Case-fold, accent-fold and collapse whitespace.
+
+    Applied to both sides of a comparison so ``cafe`` matches ``Café`` and vice
+    versa.  NFKD additionally folds compatibility forms, which is what makes
+    half-width katakana match full-width katakana.
+    """
+    return " ".join(_fold(value).split())
 
 
-def _tokens(value: str) -> list[str]:
-    return _TOKEN_RE.findall(value.casefold())
+def _fold(value: str) -> str:
+    folded = value.casefold()
+    if folded.isascii():
+        # Fast path: ASCII is already NFKD-normalised and carries no combining
+        # marks, so the expensive work below would be a no-op.
+        return folded
+    decomposed = unicodedata.normalize("NFKD", folded)
+    stripped = "".join(char for char in decomposed if not unicodedata.combining(char))
+    # Recompose so scripts that decompose into non-mark components (Hangul
+    # syllables into jamo) keep their original length: several score tiers are
+    # length-sensitive.
+    return unicodedata.normalize("NFC", stripped)
+
+
+def _tokens_of_normalized(value: str) -> list[str]:
+    """Split text that has already been through :func:`_normalize_text`.
+
+    Ideographic scripts have no word separators, so a whole CJK run becomes a
+    single token and the prefix/substring tiers of :func:`_token_score` do the
+    matching work.
+    """
+    return _TOKEN_RE.findall(value)

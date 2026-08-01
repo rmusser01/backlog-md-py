@@ -162,3 +162,85 @@ def _create_draft(repo: Path) -> None:
     from backlog_py.core.drafts import DraftService
 
     DraftService(project).create_draft(title="Draft")
+
+
+def test_config_wizard_writes_once_under_a_single_lock(repo, monkeypatch):
+    seen = []
+
+    def fake_with_project_lock(project, op, fn):
+        seen.append(op)
+        return fn()
+
+    monkeypatch.setattr("backlog_py.cli.main.with_project_write_lock", fake_with_project_lock)
+    answers = "\n".join(["Renamed Project", *[""] * 16])
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "config"], input=f"{answers}\n")
+
+    assert result.exit_code == 0, result.output
+    assert len(seen) == 1, seen
+    config_text = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+    assert "Renamed Project" in config_text
+
+
+def test_config_wizard_skips_writes_when_nothing_changed(repo, monkeypatch):
+    seen = []
+
+    def fake_with_project_lock(project, op, fn):
+        seen.append(op)
+        return fn()
+
+    monkeypatch.setattr("backlog_py.cli.main.with_project_write_lock", fake_with_project_lock)
+    before = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "config"], input="\n" * 17)
+
+    assert result.exit_code == 0, result.output
+    assert seen == []
+    assert (repo / "backlog" / "config.yml").read_text(encoding="utf-8") == before
+
+
+def test_config_wizard_discovers_the_project_once(repo, monkeypatch):
+    from backlog_py.cli import main as cli_main
+
+    calls = {"count": 0}
+    real_discover_project = cli_main.discover_project
+
+    def counting_discover_project(*args, **kwargs):
+        calls["count"] += 1
+        return real_discover_project(*args, **kwargs)
+
+    monkeypatch.setattr(cli_main, "discover_project", counting_discover_project)
+    answers = "\n".join(["Renamed Project", *[""] * 16])
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "config"], input=f"{answers}\n")
+
+    assert result.exit_code == 0, result.output
+    assert calls["count"] == 1
+
+
+def test_cleanup_lists_the_tasks_it_moved_under_the_lock(repo, monkeypatch):
+    MutableRepository.from_path(repo).edit_task("TASK-1", status="Done")
+
+    def fake_with_project_lock(project, op, fn):
+        # A concurrent writer completes another task before the lock is granted.
+        MutableRepository.from_path(repo).create_task(title="Late done task", task_id="TASK-9", status="Done")
+        return fn()
+
+    monkeypatch.setattr("backlog_py.cli.main.with_project_write_lock", fake_with_project_lock)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "cleanup"])
+
+    assert result.exit_code == 0, result.output
+    assert "Moved 2 completed tasks to backlog/completed." in result.output
+    assert "TASK-9" in result.output
+
+
+def test_cleanup_confirms_through_the_shared_interactive_helper(repo, monkeypatch):
+    MutableRepository.from_path(repo).edit_task("TASK-1", status="Done")
+    monkeypatch.setattr("backlog_py.cli.main._stdin_is_interactive", lambda: True)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "cleanup"], input="n\n")
+
+    assert result.exit_code != 0
+    assert "Move these tasks?" in result.output
+    assert (repo / "backlog" / "tasks" / "task-1 - Example-task.md").is_file()

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from loguru import logger
 
 import backlog_py.core.milestones as milestones_module
 from backlog_py.cli.main import main
@@ -34,6 +36,16 @@ def _project(repo: Path):
 
 def _service(repo: Path) -> MilestoneService:
     return MilestoneService(_project(repo))
+
+
+@contextmanager
+def _captured_warnings():
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
 
 
 def _task_path(repo: Path, task_id: str = "task-1") -> Path:
@@ -170,6 +182,38 @@ def test_same_slug_rename_rolls_back_original_milestone_when_task_write_fails(tm
 
     assert milestone_path.read_text(encoding="utf-8") == original_milestone_source
     assert _task_path(repo).read_text(encoding="utf-8") == original_task_source
+
+
+def test_malformed_milestone_file_does_not_disable_milestone_operations(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Alpha")
+    broken = repo / "backlog" / "milestones" / "Broken.md"
+    broken.write_text("---\nname: Broken\n\nNo closing fence.\n", encoding="utf-8")
+
+    with _captured_warnings() as warnings:
+        listed = _service(repo).list_milestones()
+
+    assert [milestone.name for milestone in listed] == ["Alpha"]
+    assert any("Broken.md" in message for message in warnings), warnings
+    # unrelated milestones must still be renameable/removable
+    assert _service(repo).rename_milestone("Alpha", "Beta").name == "Beta"
+    assert _service(repo).remove_milestone("Beta").name == "Beta"
+
+
+def test_milestone_reader_tolerates_utf8_bom(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    milestones_dir.mkdir(parents=True)
+    (milestones_dir / "Beta.md").write_text(
+        "﻿---\nname: Alpha\n---\n\nBOM milestone.\n",
+        encoding="utf-8",
+    )
+
+    listed = _service(repo).list_milestones()
+
+    assert [milestone.name for milestone in listed] == ["Alpha"]
+    assert listed[0].content == "BOM milestone."
 
 
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):

@@ -17,6 +17,11 @@ from backlog_py.runtime.state import ensure_state_layout
 
 T = TypeVar("T")
 
+# Lock and metadata files accumulate one pair per project/init root ever locked.
+# Prune only long-idle pairs: a week of inactivity keeps the window in which a
+# waiter could be poised on a lock we are about to unlink vanishingly small.
+DEFAULT_LOCK_PRUNE_AGE_SECONDS = 7 * 24 * 60 * 60
+
 
 class LockTimeoutError(TimeoutError):
     """Raised when a runtime filesystem lock cannot be acquired before timeout."""
@@ -205,6 +210,122 @@ def list_runtime_locks() -> list[dict[str, object]]:
         metadata["active"] = _metadata_lock_is_active(metadata, lock_path)
         locks.append(metadata)
     return locks
+
+
+def prune_stale_locks(*, min_age_seconds: float = DEFAULT_LOCK_PRUNE_AGE_SECONDS) -> list[Path]:
+    """Remove lock/metadata pairs whose owner is provably gone and long idle.
+
+    Safety rules, in order:
+
+    * The metadata must parse and must not describe an owner that may still be
+      running (``active`` metadata whose pid is alive is always kept).
+    * The metadata must not have been touched within ``min_age_seconds``; it is
+      rewritten on every acquire and release, so it dates the last use.
+    * The lock file is unlinked only while this process itself holds its flock,
+      which proves no other process holds it, and only after re-checking that
+      the metadata did not change while we were taking that lock.
+
+    Anything that cannot be proven dead — unreadable metadata, a lock file with
+    no metadata, a flock we cannot take — is left in place. Returns the removed
+    paths.
+    """
+    layout = ensure_state_layout()
+    cutoff = time.time() - max(min_age_seconds, 0)
+    try:
+        metadata_paths = sorted(layout.locks_dir.glob("*.json"))
+    except OSError:
+        return []
+    removed: list[Path] = []
+    for metadata_path in metadata_paths:
+        metadata = _read_lock_metadata(metadata_path)
+        if metadata is None or _lock_owner_may_be_live(metadata):
+            continue
+        metadata_stat = _stat(metadata_path)
+        if metadata_stat is None or metadata_stat.st_mtime > cutoff:
+            continue
+        key = str(metadata.get("key") or metadata_path.stem)
+        lock_path = layout.locks_dir / f"{key}.lock"
+        removed.extend(_remove_dead_lock(lock_path, metadata_path, metadata_stat))
+    return removed
+
+
+def _lock_owner_may_be_live(metadata: dict[str, object]) -> bool:
+    if metadata.get("active") is not True:
+        return False  # the holder wrote its released marker before unlocking
+    pid = metadata.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        return True  # active with an unknown owner: assume it is live
+    return _process_may_be_alive(pid)
+
+
+def _process_may_be_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        # os.kill(pid, 0) terminates the target on Windows; never probe there.
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _remove_dead_lock(lock_path: Path, metadata_path: Path, metadata_stat: os.stat_result) -> list[Path]:
+    if not lock_path.exists():
+        # Metadata left behind without its lock file: nothing can be held.
+        return _unlink_if_unchanged(metadata_path, metadata_stat)
+    try:
+        handle = lock_path.open("a+", encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        _prepare_lock_file(handle)
+        try:
+            _try_lock(handle)
+        except OSError:
+            return []  # held (or unprobeable): leave it strictly alone
+        try:
+            current = _stat(metadata_path)
+            if (
+                current is None
+                or current.st_mtime_ns != metadata_stat.st_mtime_ns
+                or current.st_ino != metadata_stat.st_ino
+            ):
+                return []  # someone used this lock while we were taking it
+            # Unlink while still holding the flock so no acquirer can slip in.
+            removed = _unlink_if_unchanged(metadata_path, metadata_stat)
+            removed.extend(_unlink_path(lock_path))
+            return removed
+        finally:
+            with suppress(OSError):
+                _unlock(handle)
+    finally:
+        handle.close()
+
+
+def _unlink_if_unchanged(path: Path, expected: os.stat_result) -> list[Path]:
+    current = _stat(path)
+    if current is None or current.st_mtime_ns != expected.st_mtime_ns or current.st_ino != expected.st_ino:
+        return []
+    return _unlink_path(path)
+
+
+def _unlink_path(path: Path) -> list[Path]:
+    try:
+        path.unlink()
+    except OSError:
+        return []
+    return [path]
+
+
+def _stat(path: Path) -> os.stat_result | None:
+    try:
+        return path.stat()
+    except OSError:
+        return None
 
 
 def _read_lock_metadata(path: Path) -> dict[str, object] | None:

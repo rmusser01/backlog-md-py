@@ -1,3 +1,4 @@
+import re
 from importlib.metadata import metadata
 from importlib.resources import files
 from pathlib import Path
@@ -165,8 +166,16 @@ def test_release_workflow_publishes_github_release_assets_and_pypi():
 
     actions = {step["name"]: step["uses"] for step in steps if "uses" in step}
     assert actions["Upload distribution artifact"] == "actions/upload-artifact@v4"
-    assert actions["Create GitHub Release"] == "softprops/action-gh-release@v2"
-    assert actions["Publish to PyPI"] == "pypa/gh-action-pypi-publish@release/v1"
+
+    release_action, release_ref = actions["Create GitHub Release"].split("@")
+    publish_action, publish_ref = actions["Publish to PyPI"].split("@")
+    assert release_action == "softprops/action-gh-release"
+    assert publish_action == "pypa/gh-action-pypi-publish"
+    # This job holds contents:write and id-token:write (PyPI Trusted Publishing),
+    # so third-party actions must be pinned to an immutable commit, not a tag or
+    # a moving branch like release/v1.
+    assert re.fullmatch(r"[0-9a-f]{40}", release_ref)
+    assert re.fullmatch(r"[0-9a-f]{40}", publish_ref)
     assert steps[-1]["with"]["packages-dir"] == "dist/"
 
 
@@ -175,7 +184,12 @@ def test_auto_release_tag_workflow_tags_merged_main_versions():
 
     assert workflow["name"] == "Auto Release Tag"
     trigger = workflow[True]
-    assert trigger["push"]["branches"] == ["main"]
+    # Tagging must react to CI *completing*, never to the push itself: the tag
+    # starts release.yml, and a PyPI publish cannot be undone.
+    assert "push" not in trigger
+    assert trigger["workflow_run"]["workflows"] == ["CI"]
+    assert trigger["workflow_run"]["types"] == ["completed"]
+    assert trigger["workflow_run"]["branches"] == ["main"]
     assert "workflow_dispatch" in trigger
     assert workflow["permissions"] == {"actions": "write", "contents": "write"}
     assert workflow["concurrency"]["cancel-in-progress"] is False
@@ -183,7 +197,14 @@ def test_auto_release_tag_workflow_tags_merged_main_versions():
     tag_job = workflow["jobs"]["tag"]
     assert tag_job["name"] == "Tag merged package version"
     assert tag_job["runs-on"] == "ubuntu-latest"
-    assert tag_job["if"] == "github.ref == 'refs/heads/main'"
+    job_guard = " ".join(tag_job["if"].split())
+    assert "github.event.workflow_run.conclusion == 'success'" in job_guard
+    # workflow_run also fires for pull_request CI runs, including fork PRs whose
+    # head branch happens to be named main.
+    assert "github.event.workflow_run.event == 'push'" in job_guard
+    assert "github.event.workflow_run.head_branch == 'main'" in job_guard
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in job_guard
+    assert "github.event_name == 'workflow_dispatch'" in job_guard
 
     steps = tag_job["steps"]
     assert [step["name"] for step in steps] == [
@@ -194,6 +215,9 @@ def test_auto_release_tag_workflow_tags_merged_main_versions():
     ]
     assert steps[0]["uses"] == "actions/checkout@v4"
     assert steps[0]["with"]["fetch-depth"] == 0
+    # workflow_run runs in default-branch context, so the commit CI validated has
+    # to come from the event payload rather than the ambient ref.
+    assert steps[0]["with"]["ref"] == "${{ github.event.workflow_run.head_sha || github.sha }}"
 
     run_script = "\n".join(str(step.get("run", "")) for step in steps)
     assert "src/backlog_py/__init__.py" in run_script
@@ -205,7 +229,7 @@ def test_auto_release_tag_workflow_tags_merged_main_versions():
     assert steps[-1]["env"]["GH_TOKEN"] == "${{ github.token }}"
 
 
-def test_python_support_range_is_311_through_313():
+def test_python_support_range_is_311_through_314():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
     workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
 
@@ -214,8 +238,14 @@ def test_python_support_range_is_311_through_313():
     assert "Programming Language :: Python :: 3.11" in pyproject["project"]["classifiers"]
     assert "Programming Language :: Python :: 3.12" in pyproject["project"]["classifiers"]
     assert "Programming Language :: Python :: 3.13" in pyproject["project"]["classifiers"]
+    assert "Programming Language :: Python :: 3.14" in pyproject["project"]["classifiers"]
     assert "tomli>=2.0.0; python_version < '3.11'" not in pyproject["project"]["optional-dependencies"]["dev"]
-    assert workflow["jobs"]["tests"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12", "3.13"]
+    assert workflow["jobs"]["tests"]["strategy"]["matrix"]["python-version"] == [
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+    ]
     package_python_step = next(
         step for step in workflow["jobs"]["package"]["steps"] if step["name"] == "Set up Python"
     )

@@ -56,10 +56,18 @@ class MilestoneService:
     def list_milestones(self) -> list[MilestoneRecord]:
         if not self.active_dir.is_dir():
             return []
-        return [
-            self._load_milestone(path, archived=False)
-            for path in sorted(self.active_dir.glob("*.md"))
-        ]
+        milestones: list[MilestoneRecord] = []
+        for path in sorted(self.active_dir.glob("*.md")):
+            try:
+                milestones.append(self._load_milestone(path, archived=False))
+            except MilestoneMutationError:
+                # Containment failures are security signals, not bad content.
+                raise
+            except (ValueError, OSError) as exc:
+                # A single unparsable file must not disable every milestone
+                # operation; skip it and warn, as the task repository does.
+                logger.warning("Skipping unreadable milestone file {}: {}", path, exc)
+        return milestones
 
     def rename_milestone(self, old_name: str, new_name: str, *, update_tasks: bool = False) -> MilestoneRecord:
         existing = self._find_active(old_name)
@@ -160,7 +168,9 @@ class MilestoneService:
             source = f"---\n{yaml_text}\n---\n{task.parsed.body}"
             parse_task_markdown(source)
             try:
-                safe_task_path = _mutation_path(task.path.parent, task.path)
+                # Anchor on the backlog dir, not the file's own parent: a
+                # symlinked tasks/ directory would otherwise pass containment.
+                safe_task_path = _mutation_path(self.project.backlog_dir, task.path)
             except TaskMutationError as exc:
                 raise MilestoneMutationError(str(exc)) from exc
             updates.append(
@@ -182,7 +192,7 @@ class MilestoneService:
 
 
 def _load_milestone(project: BacklogProject, path: Path, *, archived: bool) -> MilestoneRecord:
-    raw_source = path.read_text(encoding="utf-8")
+    raw_source = path.read_text(encoding="utf-8-sig")
     parsed = parse_task_markdown(raw_source)
     frontmatter = dict(parsed.frontmatter)
     name = str(frontmatter.get("name") or _name_from_filename(path))

@@ -8,12 +8,69 @@
   title frontmatter and teaches generated agent instructions the conditional,
   incident-backed lesson workflow.
 
+### Changed
+
+- **Behaviour change:** an `onStatusChange` command carried in a *task file's own
+  frontmatter* is no longer executed by default. Task markdown travels in from
+  clones, branches, and pull requests, so a status change (including a board
+  drag-and-drop) could run attacker-authored shell. Set
+  `taskFrontmatterStatusCallbacks: true` in `backlog/config.yml` to restore the
+  previous behaviour. Config-level `onStatusChange` is unaffected, and a command
+  passed explicitly to `task create`/`task edit --on-status-change` still runs.
+- Automatic release tagging now waits for CI to succeed on the exact commit
+  before tagging and publishing to PyPI, rather than racing it.
+
 ### Fixed
 
 - Keep frontmatterless documents frontmatterless for content-only updates and
   preserve original CRLF bytes during directory-only moves.
 - Avoid rendering a duplicate document title in the browser when the body
   already begins with the displayed heading.
+
+- Parse task files that begin with a UTF-8 BOM. A BOM previously hid the
+  frontmatter delimiter, so the task parsed as frontmatter-less and the next edit
+  prepended a *second* frontmatter block, demoting the real id, title, and status
+  into the body and silently losing the task's status.
+- Refuse to create a task whose id differs from an existing one only by
+  zero-padding (`TASK-007` alongside `TASK-7`). Both forms resolve to the same
+  task on lookup, so the two files left the original unaddressable and made edits
+  land on the wrong file.
+- Keep an edit to a section visible when the file contains a duplicated section
+  block. Reader and writer disagreed on which block was authoritative, so the
+  write succeeded on disk but read back empty everywhere.
+- Allow dependencies and `parent_task_id` to reference completed tasks; a
+  completed task no longer retroactively breaks later edits that depend on it.
+  Circular-dependency detection now spans completed tasks too.
+- Preserve CRLF line endings when writing task sections instead of emitting mixed
+  endings into a CRLF file.
+- Warn and pick a deterministic winner when two files claim the same task id,
+  instead of silently hiding one behind an arbitrary ordering.
+- Make `--modified-files` require every requested value, matching every other
+  list filter, instead of matching any one of them.
+- Search now matches non-Latin scripts. The tokenizer was ASCII-only, so CJK,
+  Cyrillic, Greek, and Hebrew queries silently returned nothing and accented
+  Latin was truncated; queries are also accent-insensitive now (`cafe` matches
+  `Café`). Applies to the CLI, MCP `task_search`, the TUI, and the browser board.
+- Anchor task-path containment checks on the backlog directory rather than a
+  file's own parent, so a symlinked `tasks/` directory cannot escape the project,
+  while a project legitimately reached through a symlink still works.
+- Stop the TUI editor from holding the project write lock for the whole
+  interactive session, which blocked every CLI, MCP, and browser write for as
+  long as `$EDITOR` stayed open. The lock is now held only to apply the result,
+  and an edit is refused rather than silently overwriting a change that landed
+  while the editor was open.
+
+### Performance
+
+- A single `task create` on a 51-task project now runs 2 git subprocesses in
+  ~40 ms instead of 450 in ~6.2 s. The worktree probe is memoized, per-file
+  `git status`/`git log` calls are batched into one of each, and
+  `MutableRepository` no longer discards its own cache on every read. Because
+  this work ran while holding the project write lock, the old cost could exceed
+  the 5-second lock timeout and surface as spurious `LockTimeoutError`s in other
+  processes.
+- `GIT_OPTIONAL_LOCKS=0` keeps read-only git calls from taking the index lock and
+  colliding with the user's own git commands.
 
 ## 1.0.1 - 2026-07-03
 

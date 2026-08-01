@@ -1,6 +1,6 @@
 # Contributing
 
-`backlog-md-py` is a beta-stage Python compatibility implementation of
+`backlog-md-py` is a stable 1.x Python compatibility implementation of
 Backlog.md. Runtime code should stay free of Node/Bun dependencies; upstream
 Backlog.md tooling is only for fixture refresh or parity-generation work.
 
@@ -32,8 +32,8 @@ and TUI behavior aligned.
 
 ## Local Setup
 
-Use Python 3.11, 3.12, or 3.13. The canonical local setup uses `uv` to create
-and populate a project-local virtual environment:
+Use Python 3.11, 3.12, 3.13, or 3.14. CI tests all four. The canonical local
+setup uses `uv` to create and populate a project-local virtual environment:
 
 ```bash
 uv venv --python 3.13 .venv
@@ -69,9 +69,23 @@ Run the full local gate before opening a pull request:
 ```bash
 uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src
+uv run --extra dev python -m ruff check src tests
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
 ```
+
+`ruff check` blocks CI. Its rule set and the per-rule ignore ratchet live in
+`[tool.ruff.lint]` in `pyproject.toml`; each ignored rule records how many
+violations the tree had when the ignore was added, so entries can be burned down
+and deleted.
+
+```bash
+uv run --extra dev python -m mypy
+```
+
+`mypy` is advisory. It runs in CI with `continue-on-error: true` against a known
+baseline of pre-existing errors. Do not add new ones; see the ratchet plan in
+`[tool.mypy]` in `pyproject.toml`.
 
 For focused agent-cutover work, also run:
 
@@ -93,13 +107,18 @@ changed.
 
 ## Release Process
 
-Releases are tag-driven. Pushing a `v*` tag runs `.github/workflows/release.yml`,
-which builds the source distribution and wheel, runs `twine check`, smoke-tests
-the installed wheel and SDK-free MCP entry point, attaches `dist/*` to the
-GitHub Release, and publishes the same artifacts to PyPI through trusted
-publishing.
+Releases are tag-driven, and the tag is created automatically. When a commit on
+`main` changes `src/backlog_py/__init__.py` and the CI workflow for that commit
+concludes successfully, `.github/workflows/auto-release-tag.yml` pushes
+`v<version>` and dispatches `.github/workflows/release.yml`, which builds the
+source distribution and wheel, runs `twine check`, smoke-tests the installed
+wheel and SDK-free MCP entry point, attaches `dist/*` to the GitHub Release, and
+publishes the same artifacts to PyPI through trusted publishing.
 
-Before pushing a release tag:
+A failing CI run on `main` blocks tagging and therefore blocks publishing.
+Manual tagging is a fallback only; see `RELEASE.md`.
+
+Before merging a version bump, or pushing a release tag by hand:
 
 - Confirm `src/backlog_py/__init__.py` has the intended `__version__`.
 - Confirm `pyproject.toml`, `CHANGELOG.md`, and `docs/stability-policy.md`
@@ -113,8 +132,9 @@ Before pushing a release tag:
 
 ## Compatibility Scope
 
-The beta supported contract is defined in `docs/stability-policy.md`. In short,
-the current cutover target covers:
+The supported 1.x contract is defined in `docs/stability-policy.md`. Breaking
+changes to it need a major version bump. In short, the current cutover target
+covers:
 
 - Plain CLI task, document, milestone, board, search, and config operations.
 - Pure Python MCP helper functions and workflow resources.

@@ -1,7 +1,9 @@
+import json
 import os
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,7 @@ from backlog_py.runtime.locks import (
     ProjectWriteLock,
     init_lock_key,
     project_lock_key,
+    prune_stale_locks,
     with_init_lock,
     with_project_write_lock,
 )
@@ -158,6 +161,92 @@ def test_with_init_lock_runs_callback_under_lock(tmp_path, monkeypatch):
     result = with_init_lock(tmp_path / "repo", "init_project", lambda: "initialized")
 
     assert result == "initialized"
+
+
+def test_prune_stale_locks_removes_old_released_locks(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    lock = ProjectWriteLock(project_root, operation="task_create")
+    with lock.acquire(timeout=0.1):
+        pass
+    _backdate(lock.metadata_path, days=30)
+
+    removed = prune_stale_locks(min_age_seconds=7 * 24 * 60 * 60)
+
+    assert sorted(removed) == sorted([lock.lock_path, lock.metadata_path])
+    assert not lock.lock_path.exists()
+    assert not lock.metadata_path.exists()
+
+
+def test_prune_stale_locks_keeps_recently_released_locks(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    lock = ProjectWriteLock(project_root, operation="task_create")
+    with lock.acquire(timeout=0.1):
+        pass
+
+    assert prune_stale_locks(min_age_seconds=7 * 24 * 60 * 60) == []
+    assert lock.lock_path.exists()
+    assert lock.metadata_path.exists()
+
+
+def test_prune_stale_locks_never_removes_a_held_lock(tmp_path, monkeypatch):
+    """Even metadata claiming the lock is long released cannot condemn it."""
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    lock = ProjectWriteLock(project_root, operation="task_create")
+
+    with lock.acquire(timeout=0.1):
+        metadata = json.loads(lock.metadata_path.read_text(encoding="utf-8"))
+        metadata["active"] = False
+        metadata["pid"] = 999_999
+        lock.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        _backdate(lock.metadata_path, days=30)
+
+        removed = prune_stale_locks(min_age_seconds=0)
+
+        assert removed == []
+        assert lock.lock_path.exists()
+        assert lock.metadata_path.exists()
+
+
+def test_prune_stale_locks_removes_locks_whose_owner_crashed(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    lock = ProjectWriteLock(project_root, operation="task_create")
+    with lock.acquire(timeout=0.1):
+        pass
+    # A crashed holder leaves active metadata behind; the kernel released flock.
+    metadata = json.loads(lock.metadata_path.read_text(encoding="utf-8"))
+    metadata["active"] = True
+    metadata["pid"] = 999_999
+    lock.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _backdate(lock.metadata_path, days=30)
+
+    removed = prune_stale_locks(min_age_seconds=7 * 24 * 60 * 60)
+
+    assert sorted(removed) == sorted([lock.lock_path, lock.metadata_path])
+
+
+def test_prune_stale_locks_keeps_lock_files_without_metadata(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout_locks = tmp_path / "state" / "locks"
+    layout_locks.mkdir(parents=True, exist_ok=True)
+    orphan = layout_locks / "project-orphan.lock"
+    orphan.write_text("", encoding="utf-8")
+    _backdate(orphan, days=30)
+
+    assert prune_stale_locks(min_age_seconds=0) == []
+    assert orphan.exists(), "removed a lock whose state could not be proven dead"
+
+
+def _backdate(path: Path, *, days: float) -> None:
+    stamp = time.time() - days * 24 * 60 * 60
+    os.utime(path, (stamp, stamp))
 
 
 def _project(root: Path) -> BacklogProject:

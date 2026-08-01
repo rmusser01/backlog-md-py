@@ -326,6 +326,37 @@ class OrchestrationPolicy:
                 return _normalize_key(key)
         return None
 
+    def claim_target_status(self, from_status: str | None = None) -> str | None:
+        """Return the status a claim moves a task into, per this policy.
+
+        Claiming takes a task out of the queue and into work, so the target is
+        the first declared transition target of ``from_status`` that is neither
+        claimable (that would leave it in the queue) nor terminal (that would
+        finish it without any work). When ``from_status`` is omitted, is not
+        claimable, or has no such target, the policy's own entry point (the
+        first claimable status) is used instead, so the answer stays stable for
+        a task that is already claimed and callers can still report the status
+        a claim would have aimed for. Returns None when the policy defines no
+        working state at all.
+        """
+        if from_status is not None and self.is_claimable(from_status):
+            target = self._working_transition_target(from_status)
+            if target is not None:
+                return target
+        entry_status = self.first_claimable_status()
+        if entry_status is None:
+            return None
+        return self._working_transition_target(entry_status)
+
+    def _working_transition_target(self, from_status: str) -> str | None:
+        states = _normalized_states(self)
+        for target in _normalized_transitions(self).get(_normalize_key(from_status), ()):
+            state = states.get(target)
+            if state is None or state.claimable or state.terminal:
+                continue
+            return target
+        return None
+
     def is_terminal(self, status_key: str) -> bool:
         state = _normalized_states(self).get(_normalize_key(status_key))
         return state is not None and state.terminal

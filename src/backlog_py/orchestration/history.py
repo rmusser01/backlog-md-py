@@ -19,6 +19,21 @@ MAX_RUN_HISTORY_SUMMARY_CHARS = 4000
 MAX_RUN_HISTORY_METADATA_CHARS = 1000
 MAX_RUN_HISTORY_FILES = 50
 MAX_RUN_HISTORY_VERIFICATION_COMMANDS = 50
+# Run history is append-only, so without a cap a long-lived task file grows
+# forever and every mutation pays to parse and rewrite it. Older entries are
+# dropped in place (rather than archived to a sidecar) so the task file stays
+# the single atomically-rewritten source of truth, and a marker entry records
+# how many entries were dropped plus the most recent idempotency keys that went
+# with them.
+MAX_RUN_HISTORY_ENTRIES = 50
+MAX_RUN_HISTORY_DROPPED_KEYS = 25
+
+RUN_HISTORY_TRUNCATION_TYPE = "run_history_truncated"
+RUN_HISTORY_TRUNCATION_EVENT_ID = "run-history-truncated"
+RUN_HISTORY_TRUNCATION_ACTOR = "backlog-md"
+RUN_HISTORY_TRUNCATION_RESULT = "truncated"
+RUN_HISTORY_DROPPED_ENTRIES_KEY = "dropped_entries"
+RUN_HISTORY_DROPPED_KEYS_KEY = "dropped_idempotency_keys"
 
 SECTION_BEGIN = "<!-- SECTION:RUN_HISTORY:BEGIN -->"
 SECTION_END = "<!-- SECTION:RUN_HISTORY:END -->"
@@ -77,8 +92,18 @@ def render_run_history_entry(event: OrchestrationRunEvent) -> str:
     return f"{ENTRY_BEGIN}\n```yaml\n{yaml_text}\n```\n{body}{ENTRY_END}\n"
 
 
-def append_run_history_entry(source: str, event: OrchestrationRunEvent) -> str:
-    parsed = parse_run_history(source)
+def append_run_history_entry(
+    source: str,
+    event: OrchestrationRunEvent,
+    *,
+    history: RunHistoryParseResult | None = None,
+) -> str:
+    """Append one run history entry, dropping the oldest entries past the cap.
+
+    Callers that already parsed ``source`` should pass the result as
+    ``history`` so the section is not parsed twice per mutation.
+    """
+    parsed = parse_run_history(source) if history is None else history
     if parsed.issues:
         issue = parsed.issues[0]
         raise RunHistoryParseError(issue.code, issue.message, issue.location)
@@ -88,12 +113,29 @@ def append_run_history_entry(source: str, event: OrchestrationRunEvent) -> str:
         separator = "\n" if source.endswith("\n") else "\n\n"
         return f"{source}{separator}## Run History\n{SECTION_BEGIN}\n{rendered}{SECTION_END}\n"
 
+    source = _apply_retention(source, parsed.events, event)
     insert_at = source.find(SECTION_END)
     prefix = source[:insert_at]
     suffix = source[insert_at:]
     if not prefix.endswith("\n"):
         prefix = f"{prefix}\n"
     return f"{prefix}{rendered}{suffix}"
+
+
+def dropped_idempotency_keys(event: OrchestrationRunEvent) -> tuple[str, ...]:
+    """Idempotency keys recorded on a truncation marker, newest last."""
+    if event.type != RUN_HISTORY_TRUNCATION_TYPE:
+        return ()
+    raw_value = event.metadata.get(RUN_HISTORY_DROPPED_KEYS_KEY, "")
+    if not raw_value:
+        return ()
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(_as_string(value) for value in parsed)
 
 
 def canonical_event_fingerprint(event: OrchestrationRunEvent) -> str:
@@ -122,6 +164,18 @@ def find_idempotency_match(
 
     candidate_fingerprint = canonical_event_fingerprint(candidate)
     for event in events:
+        if event.type == RUN_HISTORY_TRUNCATION_TYPE:
+            # A replay whose entry aged out cannot be verified, so refuse it
+            # loudly instead of silently re-running the operation. Keys older
+            # than the marker's retained window are not remembered and are
+            # treated as new work.
+            if idempotency_key in dropped_idempotency_keys(event):
+                raise OrchestrationIdempotencyConflict(
+                    idempotency_key,
+                    f"Idempotency key {idempotency_key!r} belongs to a run history entry that was "
+                    "truncated, so the original result can no longer be replayed",
+                )
+            continue
         if event.idempotency_key != idempotency_key:
             continue
         if canonical_event_fingerprint(event) == candidate_fingerprint:
@@ -131,6 +185,124 @@ def find_idempotency_match(
             f"Idempotency key {idempotency_key!r} was already used for different run metadata",
         )
     return None
+
+
+def _apply_retention(
+    source: str,
+    events: Sequence[OrchestrationRunEvent],
+    incoming: OrchestrationRunEvent,
+) -> str:
+    """Drop the oldest entries so the section stays within its entry cap.
+
+    The truncation marker lives at the top of the section (the oldest
+    position) and occupies one of the retained slots, so appending past the cap
+    for the first time costs two entries: the marker plus room for the new one.
+    """
+    marker = events[0] if events and events[0].type == RUN_HISTORY_TRUNCATION_TYPE else None
+    reserved = 1 if marker is not None else 0
+    retained = list(events[reserved:])
+    if len(retained) + 1 + reserved <= MAX_RUN_HISTORY_ENTRIES:
+        return source
+
+    spans = _entry_spans(source)
+    if len(spans) != len(events):
+        # The parsed events and the rendered entries disagree; leave the file
+        # alone rather than cutting the wrong text.
+        return source
+
+    drop_count = max(len(retained) + 2 - MAX_RUN_HISTORY_ENTRIES, 1)
+    dropped = retained[:drop_count]
+    rendered_marker = render_run_history_entry(_truncation_marker(marker, dropped, incoming))
+    dropped_indexes = set(range(reserved, reserved + drop_count))
+
+    pieces: list[str] = []
+    cursor = 0
+    for index, (start, end) in enumerate(spans):
+        pieces.append(source[cursor:start])
+        if index == 0:
+            pieces.append(rendered_marker)
+        if index >= reserved and index not in dropped_indexes:
+            pieces.append(source[start:end])
+        cursor = end
+    pieces.append(source[cursor:])
+    return "".join(pieces)
+
+
+def _entry_spans(source: str) -> list[tuple[int, int]]:
+    begin_index = source.find(SECTION_BEGIN)
+    end_index = source.find(SECTION_END)
+    if begin_index == -1 or end_index == -1 or end_index < begin_index:
+        return []
+    spans: list[tuple[int, int]] = []
+    cursor = begin_index + len(SECTION_BEGIN)
+    while True:
+        entry_begin = source.find(ENTRY_BEGIN, cursor, end_index)
+        if entry_begin == -1:
+            break
+        entry_end = source.find(ENTRY_END, entry_begin, end_index)
+        if entry_end == -1:
+            break
+        stop = entry_end + len(ENTRY_END)
+        if source.startswith("\n", stop):
+            stop += 1
+        spans.append((entry_begin, stop))
+        cursor = stop
+    return spans
+
+
+def _truncation_marker(
+    previous: OrchestrationRunEvent | None,
+    dropped: Sequence[OrchestrationRunEvent],
+    incoming: OrchestrationRunEvent,
+) -> OrchestrationRunEvent:
+    previous_total = _positive_int(previous.metadata.get(RUN_HISTORY_DROPPED_ENTRIES_KEY)) if previous else 0
+    total_dropped = previous_total + len(dropped)
+    keys = [
+        *(dropped_idempotency_keys(previous) if previous is not None else ()),
+        *(_as_string(event.idempotency_key) for event in dropped if _as_string(event.idempotency_key)),
+    ]
+    timestamp = _as_string(incoming.timestamp) or (_as_string(dropped[-1].timestamp) if dropped else "")
+    return OrchestrationRunEvent(
+        event_id=RUN_HISTORY_TRUNCATION_EVENT_ID,
+        type=RUN_HISTORY_TRUNCATION_TYPE,
+        actor=RUN_HISTORY_TRUNCATION_ACTOR,
+        timestamp=timestamp or _UNKNOWN_TIMESTAMP,
+        result=RUN_HISTORY_TRUNCATION_RESULT,
+        summary=(
+            f"{total_dropped} older run history entries were dropped to keep this task file bounded "
+            f"at {MAX_RUN_HISTORY_ENTRIES} entries."
+        ),
+        task_id=_as_string(incoming.task_id),
+        metadata={
+            RUN_HISTORY_DROPPED_ENTRIES_KEY: str(total_dropped),
+            RUN_HISTORY_DROPPED_KEYS_KEY: _dropped_keys_json(_bounded_dropped_keys(keys)),
+        },
+    )
+
+
+def _bounded_dropped_keys(keys: Sequence[str]) -> list[str]:
+    unique = list(dict.fromkeys(keys))
+    bounded = unique[-MAX_RUN_HISTORY_DROPPED_KEYS:]
+    # Metadata values are capped on render; a truncated JSON string would not
+    # parse back, so shrink the window until it fits whole.
+    while bounded and len(_dropped_keys_json(bounded)) > MAX_RUN_HISTORY_METADATA_CHARS:
+        bounded = bounded[1:]
+    return bounded
+
+
+def _dropped_keys_json(keys: Sequence[str]) -> str:
+    return json.dumps(list(keys), separators=(",", ":"), ensure_ascii=True)
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        parsed = int(_as_string(value))
+    except ValueError:
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+_UNKNOWN_TIMESTAMP = "1970-01-01T00:00:00Z"
 
 
 class _SectionResult:

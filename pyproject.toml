@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Utilities",
 ]
@@ -42,8 +43,12 @@ Documentation = "https://github.com/rmusser01/backlog-md-py/tree/main/docs"
 dev = [
   "bandit>=1.7.0",
   "build>=1.2.0",
+  "mypy>=1.11.0",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+  # Upper bound keeps the blocking lint gate deterministic: new ruff minors can
+  # add rules to the selected E/F/W/I/UP/B sets. Raise it deliberately.
+  "ruff>=0.16.1,<0.17.0",
   "twine>=5.0.0",
 ]
 tui = [
@@ -62,9 +67,71 @@ backlog_py = [
   "py.typed",
   "browser/assets/*.css",
   "browser/assets/*.js",
+  # Vendored third-party notices (e.g. mermaid.min.js.VENDOR.md) must ship with
+  # the code they cover; the vendored Mermaid bundle is MIT licensed.
+  "browser/assets/*.md",
   "browser/templates/*.html",
   "tui/styles.tcss",
 ]
 
 [tool.setuptools.dynamic]
 version = { attr = "backlog_py.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# Ratchet list. Every entry below is a rule the tree genuinely violates today,
+# with the violation count measured at the commit that introduced this config
+# (ruff 0.16.1, `ruff check src tests`). Fix the code, then delete the entry.
+ignore = [
+  # 45 lines over the 120-char limit (1778 over ruff's 88-char default);
+  # the longest single line is 777 chars in src/backlog_py/compat/inventory.py.
+  "E501",
+  # 68 files with unsorted/ungrouped imports (36 in src, 32 in tests).
+  # `ruff check --select I001 --fix src tests` clears this in one pass.
+  "I001",
+  # 32 uses of `datetime.timezone.utc` instead of `datetime.UTC` (21 src, 11 tests).
+  "UP017",
+  # 20 deprecated `typing` imports (typing.Iterable/Sequence/... vs collections.abc).
+  "UP035",
+  # 13 quoted annotations that no longer need quoting under PEP 563.
+  "UP037",
+  # 4 `raise` statements inside `except` without `from err` / `from None`.
+  "B904",
+  # 2 `getattr()` calls with a constant attribute name.
+  "B009",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `_build_indexed_task_sources` returns `list["IndexedTaskSource"]` where the
+# name comes from a deliberate function-local import (circular-import break).
+"src/backlog_py/core/repository.py" = ["F821"]
+# 5 unused imports left in place; remove them and drop these entries.
+"src/backlog_py/indexing/sqlite.py" = ["F401"]
+"src/backlog_py/mcp/protocol.py" = ["F401"]
+"src/backlog_py/orchestration/service.py" = ["F401"]
+"src/backlog_py/search/simple.py" = ["F401"]
+# Test modules: 18 unused imports, 1 redefinition, and 5 late imports guarded by
+# an optional-dependency `pytest.importorskip`.
+"tests/**" = ["E402", "F401", "F811"]
+
+[tool.mypy]
+# Deliberately lenient: this is the first type-checking pass over ~19k lines that
+# were never type checked. No strict flags, third-party stubs are not required.
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_unused_configs = true
+# Ratchet plan: `mypy` currently reports 60 errors across 14 files (mostly
+# [arg-type] in browser/service.py, tui/data.py, and mcp/protocol.py), so the CI
+# step runs with `continue-on-error: true`. Burn the list down file by file,
+# then drop `continue-on-error` from .github/workflows/ci.yml and start enabling
+# strict flags here.

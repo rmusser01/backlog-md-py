@@ -1,10 +1,15 @@
+import json
+
 import pytest
 
 from backlog_py.orchestration import (
+    MAX_RUN_HISTORY_DROPPED_KEYS,
+    MAX_RUN_HISTORY_ENTRIES,
     MAX_RUN_HISTORY_FILES,
     MAX_RUN_HISTORY_METADATA_CHARS,
     MAX_RUN_HISTORY_SUMMARY_CHARS,
     MAX_RUN_HISTORY_VERIFICATION_COMMANDS,
+    RUN_HISTORY_TRUNCATION_TYPE,
     OrchestrationIdempotencyConflict,
     OrchestrationRunEvent,
     RunHistoryParseError,
@@ -309,3 +314,117 @@ def test_render_run_history_entry_uses_stable_type_key_not_event_type():
 
     assert "type: record_run" in rendered
     assert "event_type:" not in rendered
+
+
+# --- retention: run history must not grow without bound ---------------------
+
+def _history_with_entries(count: int, *, key_prefix: str | None = None) -> str:
+    source = "---\nid: TASK-1\ntitle: Task\nstatus: To Do\n---\n\n## Description\n\nBody\n"
+    for index in range(count):
+        source = append_run_history_entry(
+            source,
+            _event(
+                event_id=f"run-{index}",
+                summary=f"run {index}",
+                idempotency_key="" if key_prefix is None else f"{key_prefix}-{index}",
+            ),
+        )
+    return source
+
+
+def test_append_run_history_entry_caps_retained_entries_with_truncation_marker():
+    source = _history_with_entries(MAX_RUN_HISTORY_ENTRIES + 1)
+
+    parsed = parse_run_history(source)
+
+    assert parsed.issues == []
+    assert len(parsed.events) == MAX_RUN_HISTORY_ENTRIES
+    marker = parsed.events[0]
+    assert marker.type == RUN_HISTORY_TRUNCATION_TYPE
+    # One append over the cap costs two slots: one for the new entry and one
+    # for the marker itself.
+    assert marker.metadata["dropped_entries"] == "2"
+    assert [event.summary for event in parsed.events[1:]][0] == "run 2"
+    assert parsed.events[-1].summary == f"run {MAX_RUN_HISTORY_ENTRIES}"
+
+
+def test_append_run_history_entry_accumulates_dropped_count_across_truncations():
+    total = MAX_RUN_HISTORY_ENTRIES + 4
+
+    parsed = parse_run_history(_history_with_entries(total))
+
+    assert len(parsed.events) == MAX_RUN_HISTORY_ENTRIES
+    assert parsed.events.count(parsed.events[0]) == 1
+    assert parsed.events[0].metadata["dropped_entries"] == str(total - MAX_RUN_HISTORY_ENTRIES + 1)
+    assert parsed.events[1].summary == f"run {total - MAX_RUN_HISTORY_ENTRIES + 1}"
+
+
+def test_append_run_history_entry_keeps_body_markdown_outside_capped_section():
+    source = (
+        "---\nid: TASK-1\n---\n\nIntro before section.\n\n"
+        "## Run History\n"
+        "<!-- SECTION:RUN_HISTORY:BEGIN -->\n"
+        "<!-- SECTION:RUN_HISTORY:END -->\n\n"
+        "Notes after section.\n"
+    )
+    for index in range(MAX_RUN_HISTORY_ENTRIES + 2):
+        source = append_run_history_entry(source, _event(event_id=f"run-{index}", summary=f"run {index}"))
+
+    assert source.startswith("---\nid: TASK-1\n---\n\nIntro before section.\n\n## Run History\n")
+    assert source.endswith("\n\nNotes after section.\n")
+    assert parse_run_history(source).issues == []
+
+
+def test_append_run_history_entry_reuses_provided_parsed_history(monkeypatch):
+    import backlog_py.orchestration.history as history_module
+
+    source = _history_with_entries(2)
+    parsed = parse_run_history(source)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        history_module,
+        "parse_run_history",
+        lambda text: calls.append(text) or parsed,
+    )
+
+    updated = history_module.append_run_history_entry(source, _event(event_id="run-next"), history=parsed)
+
+    assert calls == []
+    assert "run-next" in updated
+
+
+def test_find_idempotency_match_reports_conflict_for_key_dropped_by_truncation():
+    source = _history_with_entries(MAX_RUN_HISTORY_ENTRIES + 1, key_prefix="idem")
+    events = parse_run_history(source).events
+
+    with pytest.raises(OrchestrationIdempotencyConflict) as error:
+        find_idempotency_match(events, _event(event_id="retry", idempotency_key="idem-0", summary="run 0"))
+
+    assert "idem-0" in str(error.value)
+    assert "truncat" in str(error.value).casefold()
+
+
+def test_find_idempotency_match_allows_unknown_key_after_truncation():
+    source = _history_with_entries(MAX_RUN_HISTORY_ENTRIES + 1, key_prefix="idem")
+    events = parse_run_history(source).events
+
+    assert find_idempotency_match(events, _event(event_id="fresh", idempotency_key="never-used")) is None
+
+
+def test_truncation_marker_bounds_retained_dropped_idempotency_keys():
+    total = MAX_RUN_HISTORY_ENTRIES + MAX_RUN_HISTORY_DROPPED_KEYS + 10
+    source = _history_with_entries(total, key_prefix="idem")
+
+    events = parse_run_history(source).events
+    marker = events[0]
+    dropped_keys = json.loads(marker.metadata["dropped_idempotency_keys"])
+    # Keys older than the retained window are forgotten, so a replay that old
+    # is treated as new work instead of being reported as a conflict.
+    assert "idem-0" not in dropped_keys
+    assert find_idempotency_match(events, _event(event_id="retry", idempotency_key="idem-0", summary="run 0")) is None
+
+    assert len(dropped_keys) == MAX_RUN_HISTORY_DROPPED_KEYS
+    assert len(marker.metadata["dropped_idempotency_keys"]) <= MAX_RUN_HISTORY_METADATA_CHARS
+    # The most recently dropped keys are the ones worth remembering.
+    dropped_total = int(marker.metadata["dropped_entries"])
+    assert dropped_keys[-1] == f"idem-{dropped_total - 1}"

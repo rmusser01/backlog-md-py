@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 import yaml
 from click.testing import CliRunner
+from loguru import logger
 
 from backlog_py.cli.main import main
 from backlog_py.core.documents import DocumentMutationError, DocumentService
 from backlog_py.mcp.tools import document_create, document_list, document_update, document_view
 from backlog_py.storage.project import discover_project
+
+
+@contextmanager
+def _captured_warnings():
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
@@ -342,6 +354,90 @@ def test_update_document_path_traversal_is_rejected_before_write(tmp_path):
 
     assert _snapshot_docs(repo) == before
     assert _snapshot_markdown(repo) == before_repo_markdown
+
+
+def test_malformed_document_file_does_not_disable_document_operations(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.create_document("guides/setup.md", title="Setup Guide", content="Good body.", metadata={"id": "DOC-1"})
+    broken = repo / "backlog" / "docs" / "broken.md"
+    broken.write_text("---\nid: DOC-BAD\ntitle: Broken\n\nNo closing fence.\n", encoding="utf-8")
+
+    with _captured_warnings() as warnings:
+        listed = _service(repo).list_documents()
+
+    assert [document.id for document in listed] == ["DOC-1"]
+    assert any("broken.md" in message for message in warnings), warnings
+    # ids, lookups and follow-up writes must all still work
+    assert _service(repo).view_document("DOC-1").title == "Setup Guide"
+    assert _service(repo).create_document("guides/next.md", title="Next", content="More").id == "DOC-2"
+    assert _service(repo).update_document("DOC-1", title="Setup Handbook").title == "Setup Handbook"
+
+
+def test_document_reader_tolerates_utf8_bom(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    docs_dir = repo / "backlog" / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "bom.md").write_text(
+        "﻿---\nid: DOC-BOM\ntitle: BOM Document\n---\n\nBody with BOM.\n",
+        encoding="utf-8",
+    )
+
+    listed = _service(repo).list_documents()
+
+    assert [document.id for document in listed] == ["DOC-BOM"]
+    assert listed[0].title == "BOM Document"
+    assert not listed[0].raw_source.startswith("﻿")
+    assert _service(repo).view_document("DOC-BOM").content == "Body with BOM."
+
+
+def test_update_document_move_does_not_leave_shadow_when_unlink_is_unavailable(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.create_document(
+        "notes/setup.md",
+        title="Setup Guide",
+        content="Original body.",
+        metadata={"id": "DOC-SETUP"},
+    )
+
+    def _no_unlink(self, *args, **kwargs):
+        raise OSError("unlink is unavailable")
+
+    monkeypatch.setattr(Path, "unlink", _no_unlink)
+
+    updated = service.update_document("DOC-SETUP", title="Setup Handbook", directory="guides")
+
+    assert updated.path_relative == "guides/setup.md"
+    assert not (repo / "backlog" / "docs" / "notes" / "setup.md").exists()
+    assert [document.id for document in _service(repo).list_documents()] == ["DOC-SETUP"]
+
+
+def test_update_document_move_falls_back_and_logs_when_rename_is_unavailable(tmp_path, monkeypatch):
+    import backlog_py.core.documents as documents_module
+
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.create_document(
+        "notes/setup.md",
+        title="Setup Guide",
+        content="Original body.",
+        metadata={"id": "DOC-SETUP"},
+    )
+    source_path = repo / "backlog" / "docs" / "notes" / "setup.md"
+    real_replace = documents_module.os.replace
+
+    def _fake_replace(src, dst, *args, **kwargs):
+        if Path(src) == source_path:
+            raise OSError("cross-device link")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(documents_module.os, "replace", _fake_replace)
+
+    updated = service.update_document("DOC-SETUP", directory="guides")
+
+    assert updated.path_relative == "guides/setup.md"
+    assert not source_path.exists()
 
 
 def test_cli_document_commands_use_safe_service(tmp_path):

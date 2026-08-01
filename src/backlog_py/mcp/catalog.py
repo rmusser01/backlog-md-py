@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -28,6 +29,20 @@ class ToolDefinition:
     description: str
     input_schema: dict[str, Any]
     handler: Callable[..., Any]
+
+    def __post_init__(self) -> None:
+        # Keep the advertised schema honest about extra arguments. A handler
+        # with a fixed signature rejects unknown keys with -32602, so its schema
+        # must not promise additionalProperties; only **kwargs handlers may.
+        self.input_schema["additionalProperties"] = _handler_accepts_extra_arguments(self.handler)
+
+
+def _handler_accepts_extra_arguments(handler: Callable[..., Any]) -> bool:
+    try:
+        parameters = inspect.signature(handler).parameters.values()
+    except (TypeError, ValueError):  # pragma: no cover - builtins have no signature
+        return True
+    return any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters)
 
 
 RESOURCE_DEFINITIONS: tuple[ResourceDefinition, ...] = (
@@ -62,11 +77,12 @@ def _project_schema(
     }
     if properties:
         schema_properties.update(properties)
+    # additionalProperties is stamped by ToolDefinition from the handler
+    # signature so the schema can never disagree with what the handler accepts.
     return {
         "type": "object",
         "properties": schema_properties,
         "required": [field for field in required if field != "project"],
-        "additionalProperties": True,
     }
 
 
@@ -551,6 +567,15 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "path_or_id": {"type": "string"},
                 "title": {"type": "string", "description": "Replacement document title."},
                 "content": {"type": "string", "description": "Replacement document content."},
+                "directory": {"type": "string", "description": "Docs-relative directory to move the document into."},
+                "path": {"type": "string", "description": "Alias for directory."},
+                "metadata": _metadata_schema(
+                    "Frontmatter metadata to merge; a null value deletes that key.",
+                ),
+                "type": {"type": "string", "description": "Replacement document type metadata."},
+                "tags": _string_or_string_array_schema(
+                    "Replacement document tags metadata, as an array or comma-separated string.",
+                ),
             },
             required=("project", "path_or_id"),
         ),

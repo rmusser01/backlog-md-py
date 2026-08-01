@@ -4,7 +4,6 @@ import json
 import os
 import shlex
 import subprocess  # nosec B404
-import sys
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -89,11 +88,42 @@ _CLI_DOMAIN_ERRORS = (
 )
 
 
+_TASK_USAGE = (
+    "Usage: task <task-id> | task list | task create TITLE | "
+    "task edit TASK_ID | task archive TASK_ID | task demote TASK_ID"
+)
+
+# Hosts the daemon may bind without an explicit remote-exposure opt-in.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0:0:0:0:0:0:0:1"})
+
+
 def _clean_error_message(exc: Exception) -> str:
     if isinstance(exc, KeyError) and exc.args:
         return str(exc.args[0])
     message = str(exc).strip()
     return message or exc.__class__.__name__
+
+
+def _validate_bind_host(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """Reject non-loopback bind hosts unless --allow-remote was passed.
+
+    The daemon serves the full MCP JSON-RPC surface, so binding 0.0.0.0 hands
+    project write access to anyone on the network. --allow-remote is eager, so
+    it is always parsed before this callback runs.
+    """
+    if value is None:
+        return value
+    normalized = value.strip()
+    if ctx.params.get("allow_remote"):
+        return normalized
+    if normalized.casefold() in _LOOPBACK_HOSTS:
+        return normalized
+    raise click.BadParameter(
+        f"{value} is not a loopback host. The daemon exposes the MCP JSON-RPC surface, so it must bind "
+        "127.0.0.1, localhost, or ::1. Pass --allow-remote to bind a non-loopback host deliberately.",
+        ctx=ctx,
+        param=param,
+    )
 
 
 class _BacklogGroup(click.Group):
@@ -462,7 +492,9 @@ def task_command(
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
-    if args == ("list",):
+    if args and args[0] == "list":
+        if len(args) != 1:
+            raise click.UsageError(f"Unexpected extra arguments for 'task list': {' '.join(args[1:])}")
         for task_record in _repository(ctx).list_tasks(
             status=status,
             assignee=assignees,
@@ -473,8 +505,10 @@ def task_command(
         ):
             click.echo(_format_task_line(task_record, plain=plain))
         return
+    if not args:
+        raise click.UsageError(f"Missing task id. {_TASK_USAGE}")
     if len(args) != 1:
-        raise click.UsageError("Missing task id.")
+        raise click.UsageError(f"Unknown task command: '{args[0]}'. {_TASK_USAGE}")
     task_id = args[0]
     task_record = _repository(ctx).get_task(task_id)
     if plain:
@@ -939,20 +973,26 @@ def browser_command(ctx: click.Context, port: int | None, no_open: bool) -> None
 @click.pass_context
 def cleanup_command(ctx: click.Context, dry_run: bool, yes: bool) -> None:
     """Move active Done tasks into backlog/completed."""
-    candidates = [task for task in _mutable_repository(ctx).list_tasks() if _is_completed_status(task.status)]
-    if not candidates:
+    prompted = False
+    if dry_run or (not yes and _stdin_is_interactive()):
+        # Only the confirmation preview reads outside the lock; the tasks that
+        # actually move are re-scanned while the project write lock is held.
+        candidates = [task for task in _mutable_repository(ctx).list_tasks() if _is_completed_status(task.status)]
+        if not candidates:
+            click.echo("No completed tasks to move.")
+            return
+        _echo_cleanup_candidates(candidates)
+        if dry_run:
+            click.echo("Dry run: no changes made.")
+            return
+        click.confirm("Move these tasks?", abort=True)
+        prompted = True
+    done_tasks = _locked_write(ctx, "cleanup_complete_done", lambda: _cleanup_completed_tasks(ctx))
+    if not done_tasks:
         click.echo("No completed tasks to move.")
         return
-    noun = "task" if len(candidates) == 1 else "tasks"
-    click.echo(f"{len(candidates)} completed {noun} will be moved to backlog/completed:")
-    for task in candidates:
-        click.echo(f"  {task.id} - {task.title}")
-    if dry_run:
-        click.echo("Dry run: no changes made.")
-        return
-    if not yes and sys.stdin.isatty():
-        click.confirm("Move these tasks?", abort=True)
-    done_tasks = _locked_write(ctx, "cleanup_complete_done", lambda: _cleanup_completed_tasks(ctx))
+    if not prompted:
+        _echo_cleanup_candidates(done_tasks)
     count = len(done_tasks)
     noun = "task" if count == 1 else "tasks"
     click.echo(f"Moved {count} completed {noun} to backlog/completed.")
@@ -1087,7 +1127,7 @@ def orchestration_record_run_command(
             expected_version=expected_version,
             state_update=state_update,
         )
-        payload = _orchestration_record_run_payload(project, task_id, result)
+        payload = _orchestration_record_run_payload(project, task_id, result, detailed=as_json)
     except RunHistoryParseError as exc:
         location = exc.location or "run_history"
         raise click.ClickException(
@@ -1100,16 +1140,16 @@ def orchestration_record_run_command(
         ) from exc
     except OrchestrationError as exc:
         raise click.ClickException(_format_orchestration_error(task_id, exc)) from exc
-    except KeyError as exc:
-        raise click.ClickException(str(exc)) from exc
+    # NotFoundError (a KeyError subclass) is mapped to a clean "Error: ..."
+    # message by _BacklogGroup; catching it here would print the KeyError repr.
 
-    if as_json:
-        click.echo(json.dumps(payload, sort_keys=True))
-        return
-    if plain:
-        click.echo(f"{payload['taskId']} recorded run {payload['eventId']}")
-        return
-    click.echo(f"{payload['taskId']} recorded run {payload['eventId']}")
+    _echo_orchestration_mutation(
+        payload,
+        as_json=as_json,
+        plain=plain,
+        verb="recorded",
+        human_line=f"{payload['taskId']} recorded run {payload['eventId']}",
+    )
 
 
 @orchestration_group.command("status")
@@ -1124,7 +1164,7 @@ def orchestration_status_command(ctx: click.Context, include_completed: bool, as
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True))
         return
-    _echo_orchestration_counts(payload)
+    _echo_orchestration_counts(payload, plain=plain)
 
 
 @orchestration_group.command("queue")
@@ -1139,7 +1179,7 @@ def orchestration_queue_command(ctx: click.Context, include_completed: bool, as_
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True))
         return
-    _echo_orchestration_items(payload["items"])
+    _echo_orchestration_items(payload["items"], plain=plain)
 
 
 @orchestration_group.command("eligible")
@@ -1153,7 +1193,7 @@ def orchestration_eligible_command(ctx: click.Context, as_json: bool, plain: boo
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True))
         return
-    _echo_orchestration_items(items)
+    _echo_orchestration_items(items, plain=plain)
 
 
 @orchestration_group.command("claims")
@@ -1167,7 +1207,7 @@ def orchestration_claims_command(ctx: click.Context, as_json: bool, plain: bool)
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True))
         return
-    _echo_orchestration_items(items)
+    _echo_orchestration_items(items, plain=plain)
 
 
 @orchestration_group.command("stale-leases")
@@ -1181,7 +1221,7 @@ def orchestration_stale_leases_command(ctx: click.Context, as_json: bool, plain:
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True))
         return
-    _echo_orchestration_items(items)
+    _echo_orchestration_items(items, plain=plain)
 
 
 @orchestration_group.command("split")
@@ -1237,7 +1277,7 @@ def orchestration_split_command(
             transition_to_status=transition_to_status,
             reason=reason,
         )
-        payload = _orchestration_record_run_payload(project, task_id, result)
+        payload = _orchestration_record_run_payload(project, task_id, result, detailed=as_json)
     except OrchestrationIdempotencyConflict as exc:
         raise click.ClickException(
             f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original split metadata."
@@ -1281,7 +1321,7 @@ def orchestration_claim_command(
             lease_ttl_seconds=lease_ttl_seconds,
             reason=reason,
         )
-        payload = _orchestration_record_run_payload(project, task_id, result)
+        payload = _orchestration_record_run_payload(project, task_id, result, detailed=as_json)
     except OrchestrationIdempotencyConflict as exc:
         raise click.ClickException(
             f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original mutation metadata."
@@ -1322,7 +1362,7 @@ def orchestration_release_command(
             idempotency_key=idempotency_key,
             reason=reason,
         )
-        payload = _orchestration_record_run_payload(project, task_id, result)
+        payload = _orchestration_record_run_payload(project, task_id, result, detailed=as_json)
     except OrchestrationIdempotencyConflict as exc:
         raise click.ClickException(
             f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original mutation metadata."
@@ -1366,7 +1406,7 @@ def orchestration_transition_command(
             idempotency_key=idempotency_key,
             reason=reason,
         )
-        payload = _orchestration_record_run_payload(project, task_id, result)
+        payload = _orchestration_record_run_payload(project, task_id, result, detailed=as_json)
     except OrchestrationIdempotencyConflict as exc:
         raise click.ClickException(
             f"{task_id}: {exc}. Use a new --idempotency-key or repeat the original mutation metadata."
@@ -1403,12 +1443,24 @@ def daemon_ensure_command(as_json: bool) -> None:
 
 
 @daemon_group.command("start")
-@click.option("--host", default=DEFAULT_HOST, show_default=True, help="Loopback host to bind.")
+@click.option(
+    "--allow-remote",
+    is_flag=True,
+    is_eager=True,
+    help="Allow binding a non-loopback host (exposes the MCP JSON-RPC surface to the network).",
+)
+@click.option(
+    "--host",
+    default=DEFAULT_HOST,
+    show_default=True,
+    callback=_validate_bind_host,
+    help="Loopback host to bind.",
+)
 @click.option("--port", default=DEFAULT_PORT, show_default=True, type=int, help="Loopback port to bind.")
 @click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
-def daemon_start_command(host: str, port: int, as_json: bool) -> None:
+def daemon_start_command(allow_remote: bool, host: str, port: int, as_json: bool) -> None:
     """Start the singleton daemon."""
-    status = daemon_start(host=host, port=port)
+    status = daemon_start(host=host, port=port, allow_remote=allow_remote)
     _echo_daemon_status(status.record, as_json=as_json)
 
 
@@ -1428,15 +1480,27 @@ def daemon_stop_command(force: bool) -> None:
 
 @daemon_group.command("run")
 @click.option("--foreground", is_flag=True, help="Run the daemon in the foreground.")
-@click.option("--host", default=DEFAULT_HOST, show_default=True, help="Loopback host to bind.")
+@click.option(
+    "--allow-remote",
+    is_flag=True,
+    is_eager=True,
+    help="Allow binding a non-loopback host (exposes the MCP JSON-RPC surface to the network).",
+)
+@click.option(
+    "--host",
+    default=DEFAULT_HOST,
+    show_default=True,
+    callback=_validate_bind_host,
+    help="Loopback host to bind.",
+)
 @click.option("--port", default=DEFAULT_PORT, show_default=True, type=int, help="Loopback port to bind.")
-def daemon_run_command(foreground: bool, host: str, port: int) -> None:
+def daemon_run_command(foreground: bool, allow_remote: bool, host: str, port: int) -> None:
     """Run the singleton daemon service."""
     if not foreground:
         raise click.UsageError("Usage: daemon run --foreground")
     from backlog_py.daemon.service import run_foreground_service
 
-    run_foreground_service(host=host, port=port)
+    run_foreground_service(host=host, port=port, allow_remote=allow_remote)
 
 
 @main.group("compat")
@@ -1613,11 +1677,9 @@ def config_list(ctx: click.Context) -> None:
 @click.pass_context
 def config_get(ctx: click.Context, key: str) -> None:
     """Print one effective config value."""
-    try:
-        value = get_config_value(_project(ctx), key)
-    except KeyError as exc:
-        raise click.ClickException(str(exc)) from exc
-    click.echo(_format_config_value(value))
+    # NotFoundError (a KeyError subclass) is mapped to a clean "Error: ..."
+    # message by _BacklogGroup; catching it here would print the KeyError repr.
+    click.echo(_format_config_value(get_config_value(_project(ctx), key)))
 
 
 @config_group.command("set")
@@ -1667,64 +1729,100 @@ def _run_config_wizard(ctx: click.Context) -> None:
 
 
 def _run_config_wizard_inner(ctx: click.Context) -> None:
+    """Prompt for every config key, then persist the changed ones under one lock."""
     project = _project(ctx)
     config = project.config
     click.echo("Interactive Backlog.md configuration")
 
-    _prompt_config_text(ctx, "projectName", "Project name", config.project_name)
-    _prompt_config_text(ctx, "defaultAssignee", "Default assignee", config.default_assignee or "")
-    _prompt_config_text(ctx, "defaultStatus", "Default status", config.default_status)
-    _prompt_config_text(ctx, "dateFormat", "Date format", config.date_format)
-    _prompt_config_bool(
-        ctx,
-        "includeDatetimeInDates",
-        "Include time in dates",
-        config.include_datetime_in_dates,
-    )
-    _prompt_config_text(ctx, "defaultEditor", "Default editor", config.default_editor or "")
-    _prompt_config_text(ctx, "defaultPort", "Browser port", str(config.default_port))
-    _prompt_config_bool(ctx, "autoOpenBrowser", "Auto-open browser", config.auto_open_browser)
-    _prompt_config_bool(ctx, "remoteOperations", "Enable remote git operations", config.remote_operations)
-    _prompt_config_bool(ctx, "autoCommit", "Enable auto-commit", config.auto_commit)
-    _prompt_config_bool(ctx, "bypassGitHooks", "Bypass git hooks", config.bypass_git_hooks)
-    _prompt_config_text(
-        ctx,
-        "onStatusChange",
-        "Status change hook command",
-        config.on_status_change or "",
-    )
-    _prompt_config_text(
-        ctx,
-        "zeroPaddedIds",
-        "Zero-padded ID width (0 disables)",
-        str(config.zero_padded_ids or 0),
-    )
-    _prompt_config_bool(ctx, "checkActiveBranches", "Check active branches", config.check_active_branches)
-    _prompt_config_text(ctx, "activeBranchDays", "Active branch days", str(config.active_branch_days))
-    _prompt_config_text(ctx, "statuses", "Statuses (comma-separated)", ",".join(config.statuses or []))
+    answers: list[tuple[str, str]] = []
 
-    defaults = get_definition_of_done_defaults(project)
+    def text(key: str, label: str, default: str) -> None:
+        _prompt_config_text(answers, key, label, default)
+
+    def boolean(key: str, label: str, default: bool) -> None:
+        _prompt_config_bool(answers, key, label, default)
+
+    text("projectName", "Project name", config.project_name)
+    text("defaultAssignee", "Default assignee", config.default_assignee or "")
+    text("defaultStatus", "Default status", config.default_status)
+    text("dateFormat", "Date format", config.date_format)
+    boolean("includeDatetimeInDates", "Include time in dates", config.include_datetime_in_dates)
+    text("defaultEditor", "Default editor", config.default_editor or "")
+    text("defaultPort", "Browser port", str(config.default_port))
+    boolean("autoOpenBrowser", "Auto-open browser", config.auto_open_browser)
+    boolean("remoteOperations", "Enable remote git operations", config.remote_operations)
+    boolean("autoCommit", "Enable auto-commit", config.auto_commit)
+    boolean("bypassGitHooks", "Bypass git hooks", config.bypass_git_hooks)
+    text("onStatusChange", "Status change hook command", config.on_status_change or "")
+    text("zeroPaddedIds", "Zero-padded ID width (0 disables)", str(config.zero_padded_ids or 0))
+    boolean("checkActiveBranches", "Check active branches", config.check_active_branches)
+    text("activeBranchDays", "Active branch days", str(config.active_branch_days))
+    text("statuses", "Statuses (comma-separated)", ",".join(config.statuses or []))
+
+    dod_defaults = get_definition_of_done_defaults(project)
     dod_text = click.prompt(
         "Definition of Done defaults (comma-separated)",
-        default=",".join(defaults),
-        show_default=bool(defaults),
+        default=",".join(dod_defaults),
+        show_default=bool(dod_defaults),
     )
-    _locked_write(
-        ctx,
-        "config_wizard_definition_of_done",
-        lambda: replace_definition_of_done_defaults(_project(ctx), _split_csv_items(dod_text)),
-    )
+    dod_items = _split_csv_items(dod_text)
+    dod_changed = dod_items != dod_defaults
+
+    if answers or dod_changed:
+        _locked_write(
+            ctx,
+            "config_wizard",
+            lambda: _write_config_wizard_answers(project, answers, dod_items if dod_changed else None),
+        )
     click.echo(f"Updated config at {project.config_path}")
 
 
-def _prompt_config_text(ctx: click.Context, key: str, label: str, default: str) -> None:
+def _write_config_wizard_answers(
+    project: BacklogProject,
+    answers: list[tuple[str, str]],
+    dod_items: list[str] | None,
+) -> None:
+    for key, value in answers:
+        set_config_value(project, key, value)
+    if dod_items is not None:
+        replace_definition_of_done_defaults(project, dod_items)
+
+
+def _prompt_config_text(answers: list[tuple[str, str]], key: str, label: str, default: str) -> None:
     value = click.prompt(label, default=default, show_default=bool(default))
-    _locked_write(ctx, f"config_wizard_{key}", lambda: set_config_value(_project(ctx), key, value))
+    _validate_config_wizard_value(key, value)
+    if value != default:
+        answers.append((key, value))
 
 
-def _prompt_config_bool(ctx: click.Context, key: str, label: str, default: bool) -> None:
+def _prompt_config_bool(answers: list[tuple[str, str]], key: str, label: str, default: bool) -> None:
     value = click.confirm(label, default=default)
-    _locked_write(ctx, f"config_wizard_{key}", lambda: set_config_value(_project(ctx), key, _bool_text(value)))
+    if value != default:
+        answers.append((key, _bool_text(value)))
+
+
+# Numeric wizard keys validated at the prompt so a bad answer fails immediately
+# instead of after every remaining question. storage.config re-validates on write.
+_WIZARD_NUMERIC_KEYS = {
+    "defaultPort": ("default_port", "port"),
+    "zeroPaddedIds": ("zero_padded_ids", "non_negative"),
+    "activeBranchDays": ("active_branch_days", "integer"),
+}
+
+
+def _validate_config_wizard_value(key: str, value: str) -> None:
+    entry = _WIZARD_NUMERIC_KEYS.get(key)
+    if entry is None:
+        return
+    normalized_key, kind = entry
+    try:
+        parsed = int(value.strip(), 10)
+    except ValueError as exc:
+        raise ValueError(f"Backlog config value {normalized_key} must be an integer") from exc
+    if kind == "port" and not 1 <= parsed <= 65535:
+        raise ValueError(f"Backlog config value {normalized_key} must be a valid port number (1-65535)")
+    if kind == "non_negative" and parsed < 0:
+        raise ValueError(f"Backlog config value {normalized_key} must be a non-negative number")
 
 
 def _split_csv_items(value: str) -> list[str]:
@@ -2006,6 +2104,25 @@ def milestone_archive_command(ctx: click.Context, name: str) -> None:
 
 
 def _project(ctx: click.Context) -> BacklogProject:
+    """Resolve the project once per CLI invocation.
+
+    Project discovery walks parent directories and parses the YAML config, so
+    the result is memoized on ``ctx.obj`` (shared by every sub-context of one
+    invocation). Config mutations stay correct because the storage layer
+    re-reads the raw config file from ``project.config_path`` on every write.
+    """
+    cache = ctx.obj if isinstance(ctx.obj, dict) else None
+    if cache is not None:
+        cached_project = cache.get("project")
+        if isinstance(cached_project, BacklogProject):
+            return cached_project
+    project = _discover_project(ctx)
+    if cache is not None:
+        cache["project"] = project
+    return project
+
+
+def _discover_project(ctx: click.Context) -> BacklogProject:
     try:
         return discover_project(Path.cwd(), explicit_cwd=_explicit_cwd(ctx))
     except FileNotFoundError as exc:
@@ -2074,6 +2191,13 @@ def _initialize_project(
     )
     instruction_updates = update_agent_instruction_files(result.project) if agent_instructions else []
     return result, instruction_updates
+
+
+def _echo_cleanup_candidates(tasks: list[TaskRecord]) -> None:
+    noun = "task" if len(tasks) == 1 else "tasks"
+    click.echo(f"{len(tasks)} completed {noun} will be moved to backlog/completed:")
+    for task in tasks:
+        click.echo(f"  {task.id} - {task.title}")
 
 
 def _cleanup_completed_tasks(ctx: click.Context) -> list[TaskRecord]:
@@ -2397,22 +2521,34 @@ def _orchestration_record_run_payload(
     project: BacklogProject,
     task_id: str,
     result: OrchestrationMutationResult,
+    *,
+    detailed: bool = True,
 ) -> dict[str, object]:
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
-    task = repository.get_task(task_id)
-    history = parse_run_history(task.raw_source)
-    queue_item = _orchestration_queue_item(project, task.id)
+    """Build the mutation response payload.
+
+    The service already resolved the task and returned its id, project-relative
+    path and version, so nothing here re-fetches the task to look those up
+    again. The queue decoration (category, validation issues) plus the run
+    history ids cost a full project scan and a task read, so they are only
+    computed for --json output, which is the only rendering that shows them.
+    """
     payload: dict[str, object] = {
-        "taskId": task.id,
-        "path": queue_item.path if queue_item is not None else _project_relative_path(project, task.path),
-        "version": queue_item.version if queue_item is not None else result.version,
+        "taskId": result.task_id,
+        "path": result.path,
+        "version": result.version,
         "eventId": result.event.event_id,
-        "runHistoryEventIds": [event.event_id for event in history.events],
-        "queueCategory": queue_item.category if queue_item is not None else None,
-        "validationIssues": _orchestration_validation_issues_payload(
-            queue_item.validation_issues if queue_item is not None else []
-        ),
     }
+    if detailed:
+        queue_item = _orchestration_queue_item(project, result.task_id)
+        if queue_item is not None:
+            payload["path"] = queue_item.path
+            payload["version"] = queue_item.version
+        history = parse_run_history(_read_task_source(project, result.task_id, str(payload["path"])))
+        payload["runHistoryEventIds"] = [event.event_id for event in history.events]
+        payload["queueCategory"] = queue_item.category if queue_item is not None else None
+        payload["validationIssues"] = _orchestration_validation_issues_payload(
+            queue_item.validation_issues if queue_item is not None else []
+        )
     created_task_ids = getattr(result, "created_task_ids", None)
     if created_task_ids is not None:
         payload["createdTaskIds"] = list(created_task_ids)
@@ -2450,6 +2586,17 @@ def _orchestration_items_by_category(project: BacklogProject, category: str) -> 
     return [_orchestration_queue_item_payload(item) for item in report.items if item.category == category]
 
 
+def _read_task_source(project: BacklogProject, task_id: str, relative_path: str) -> str:
+    """Read one known task file instead of re-scanning the project for its id."""
+    path = Path(relative_path)
+    if not path.is_absolute():
+        path = project.root / path
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise click.ClickException(f"{task_id}: could not read task file at {relative_path}: {exc}") from exc
+
+
 def _orchestration_queue_item(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
     report = OrchestrationService(project).queue(include_completed=True)
     normalized = task_id.casefold()
@@ -2469,13 +2616,6 @@ def _orchestration_validation_issues_payload(issues: list[ValidationIssue]) -> l
         }
         for issue in issues
     ]
-
-
-def _project_relative_path(project: BacklogProject, path: Path) -> str:
-    try:
-        return path.relative_to(project.root).as_posix()
-    except ValueError:
-        return path.as_posix()
 
 
 def _format_orchestration_error(task_id: str, error: OrchestrationError) -> str:
@@ -2500,29 +2640,55 @@ def _echo_orchestration_mutation(
     as_json: bool,
     plain: bool,
     verb: str,
+    human_line: str | None = None,
 ) -> None:
     if as_json:
         click.echo(json.dumps(payload, sort_keys=True))
         return
-    click.echo(f"{payload['taskId']} {verb} via {payload['eventId']}")
+    if plain:
+        # Tab-separated so agents can parse it: taskId, verb, eventId, version.
+        click.echo(f"{payload['taskId']}\t{verb}\t{payload['eventId']}\t{payload['version']}")
+        return
+    click.echo(human_line if human_line is not None else f"{payload['taskId']} {verb} via {payload['eventId']}")
 
 
-def _echo_orchestration_counts(payload: dict[str, object]) -> None:
+def _echo_orchestration_counts(payload: dict[str, object], *, plain: bool = False) -> None:
     by_category = payload["byCategory"]
     if isinstance(by_category, dict):
         for category, count in sorted(by_category.items()):
-            click.echo(f"{category}: {count}")
+            click.echo(f"{category}\t{count}" if plain else f"{category}: {count}")
 
 
-def _echo_orchestration_items(items: object) -> None:
+def _echo_orchestration_items(items: object, *, plain: bool = False) -> None:
     if not isinstance(items, list):
         return
     for item in items:
         if isinstance(item, dict):
-            click.echo(
-                f"{item['taskId']} [{item['queueCategory']}] v{item['version']} "
-                f"{item['title']} ({item['path']})"
-            )
+            click.echo(_plain_orchestration_item_line(item) if plain else _orchestration_item_line(item))
+
+
+def _orchestration_item_line(item: dict[str, object]) -> str:
+    return (
+        f"{item['taskId']} [{item['queueCategory']}] v{item['version']} "
+        f"{item['title']} ({item['path']})"
+    )
+
+
+def _plain_orchestration_item_line(item: dict[str, object]) -> str:
+    """Tab-separated queue record for agents that parse orchestration output.
+
+    Fields: taskId, queueCategory, version, effectiveStatus, leaseOwner, path, title.
+    """
+    fields = [
+        item["taskId"],
+        item["queueCategory"],
+        item["version"],
+        item["effectiveStatus"],
+        item["leaseOwner"] or "",
+        item["path"],
+        item["title"],
+    ]
+    return "\t".join("" if field is None else str(field) for field in fields)
 
 
 def _echo_daemon_status(record: RuntimeRecord, *, as_json: bool) -> None:
@@ -2594,14 +2760,21 @@ def _search_result_types(values: tuple[str, ...]) -> set[str] | None:
     if not values:
         return None
     allowed_types = {"task", "document", "decision"}
+    supported = ", ".join(sorted(allowed_types))
     selected: set[str] = set()
+    unsupported: list[str] = []
     for value in _split_csv_values(values):
         normalized = value.casefold()
         if normalized not in allowed_types:
-            supported = ", ".join(sorted(allowed_types))
+            unsupported.append(value)
             click.echo(f"Ignoring unsupported type '{value}'. Supported: {supported}", err=True)
             continue
         selected.add(normalized)
+    if not selected:
+        # Every requested type was unsupported: searching nothing and exiting 0
+        # would look like "no matches", so fail as a usage error instead.
+        rejected = ", ".join(f"'{value}'" for value in unsupported) or "(empty)"
+        raise click.UsageError(f"No supported --type values: {rejected}. Supported types: {supported}.")
     return selected
 
 

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 from click.testing import CliRunner
+from loguru import logger
 
 from backlog_py.cli.main import main
 from backlog_py.core.drafts import DraftService
@@ -41,6 +43,54 @@ def _archived_draft_file(repo: Path, draft_id: str = "draft-1") -> Path:
     matches = sorted((repo / "backlog" / "archive" / "drafts").glob(f"{draft_id} -*.md"))
     assert len(matches) == 1
     return matches[0]
+
+
+@contextmanager
+def _captured_warnings():
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
+
+
+def test_malformed_draft_file_does_not_disable_draft_operations(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = DraftService(_project(repo))
+    service.create_draft(title="Good draft")
+    broken = repo / "backlog" / "drafts" / "draft-9 - Broken.md"
+    broken.write_text("---\nid: draft-9\ntitle: Broken\n\nNo closing fence.\n", encoding="utf-8")
+
+    with _captured_warnings() as warnings:
+        listed = DraftService(_project(repo)).list_drafts()
+
+    assert [record.id for record in listed] == ["draft-1"]
+    assert any("Broken.md" in message for message in warnings), warnings
+    assert DraftService(_project(repo)).view_draft("1").title == "Good draft"
+    assert DraftService(_project(repo)).create_draft(title="Another draft").id == "draft-2"
+
+
+def test_promote_draft_reports_success_and_logs_when_draft_unlink_fails(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = DraftService(_project(repo))
+    draft = service.create_draft(title="Promotable draft")
+    draft_path = _draft_file(repo)
+    real_unlink = Path.unlink
+
+    def _flaky_unlink(self, *args, **kwargs):
+        if self == draft_path:
+            raise OSError("unlink is unavailable")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+
+    with _captured_warnings() as warnings:
+        promoted = service.promote_draft(draft.id)
+
+    assert promoted.id == "TASK-2"
+    assert _task_file(repo, "task-2").exists()
+    assert any("draft-1" in message for message in warnings), warnings
 
 
 def test_create_list_and_view_draft(tmp_path):

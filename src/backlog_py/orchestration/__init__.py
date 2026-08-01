@@ -37,12 +37,16 @@ from backlog_py.orchestration.models import (
     validate_policy,
 )
 from backlog_py.orchestration.history import (
+    MAX_RUN_HISTORY_DROPPED_KEYS,
+    MAX_RUN_HISTORY_ENTRIES,
     MAX_RUN_HISTORY_FILES,
     MAX_RUN_HISTORY_METADATA_CHARS,
     MAX_RUN_HISTORY_SUMMARY_CHARS,
     MAX_RUN_HISTORY_VERIFICATION_COMMANDS,
+    RUN_HISTORY_TRUNCATION_TYPE,
     append_run_history_entry,
     canonical_event_fingerprint,
+    dropped_idempotency_keys,
     find_idempotency_match,
     parse_run_history,
     render_run_history_entry,
@@ -60,10 +64,13 @@ from backlog_py.orchestration.reports import (
 from backlog_py.orchestration.service import OrchestrationService, resolve_orchestration_actor
 
 __all__ = [
+    "MAX_RUN_HISTORY_DROPPED_KEYS",
+    "MAX_RUN_HISTORY_ENTRIES",
     "MAX_RUN_HISTORY_FILES",
     "MAX_RUN_HISTORY_METADATA_CHARS",
     "MAX_RUN_HISTORY_SUMMARY_CHARS",
     "MAX_RUN_HISTORY_VERIFICATION_COMMANDS",
+    "RUN_HISTORY_TRUNCATION_TYPE",
     "OrchestrationActorContext",
     "OrchestrationClaimTaskRequest",
     "OrchestrationIdempotencyConflict",
@@ -101,6 +108,7 @@ __all__ = [
     "append_run_history_entry",
     "categorize_task",
     "canonical_event_fingerprint",
+    "dropped_idempotency_keys",
     "effective_status_key",
     "find_idempotency_match",
     "list_active_claims",

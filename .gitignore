@@ -10,3 +10,6 @@ build/
 dist/
 .venv/
 .worktrees/
+# uv is the documented local workflow, but this is a setuptools-published
+# library whose CI installs with pip, so the resolved lockfile is local state.
+uv.lock

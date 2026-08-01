@@ -200,3 +200,99 @@ def test_load_orchestration_policy_preserves_defaults_when_optional_values_omitt
     default_policy = OrchestrationPolicy.default()
     assert policy.default_lease_ttl_seconds == default_policy.default_lease_ttl_seconds
     assert policy.default_review_max_attempts == default_policy.default_review_max_attempts
+
+
+# --- claim target derivation (claim must not hardcode "inprogress") ---------
+
+def test_default_policy_claim_target_status_is_inprogress():
+    policy = OrchestrationPolicy.default()
+
+    assert policy.claim_target_status("todo") == "inprogress"
+
+
+def test_claim_target_status_uses_custom_working_state(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "backlog" / "orchestration.yml").write_text(
+        "\n".join(
+            [
+                "states:",
+                "  todo:",
+                "    claimable: true",
+                "  doing: {}",
+                "  review: {}",
+                "  done:",
+                "    terminal: true",
+                "transitions:",
+                "  todo: [doing]",
+                "  doing: [review, todo]",
+                "  review: [done, doing]",
+                "  done: []",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    policy = load_orchestration_policy(discover_project(repo))
+
+    assert policy.claim_target_status("todo") == "doing"
+    assert policy.claim_target_status() == "doing"
+
+
+def test_claim_target_status_skips_claimable_and_terminal_targets(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "backlog" / "orchestration.yml").write_text(
+        "\n".join(
+            [
+                "states:",
+                "  triage:",
+                "    claimable: true",
+                "  todo:",
+                "    claimable: true",
+                "  active: {}",
+                "  done:",
+                "    terminal: true",
+                "transitions:",
+                "  triage: [todo, done, active]",
+                "  todo: [active]",
+                "  active: [done]",
+                "  done: []",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    policy = load_orchestration_policy(discover_project(repo))
+
+    # "todo" is claimable and "done" is terminal, so neither is a claim target.
+    assert policy.claim_target_status("triage") == "active"
+
+
+def test_claim_target_status_falls_back_to_first_claimable_target_for_other_statuses():
+    policy = OrchestrationPolicy.default()
+
+    # "complete" has no outgoing transitions; the reported target still comes
+    # from the policy's claimable entry point so errors stay actionable.
+    assert policy.claim_target_status("complete") == "inprogress"
+
+
+def test_claim_target_status_returns_none_when_policy_has_no_working_state(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "backlog" / "orchestration.yml").write_text(
+        "\n".join(
+            [
+                "states:",
+                "  todo:",
+                "    claimable: true",
+                "  done:",
+                "    terminal: true",
+                "transitions:",
+                "  todo: [done]",
+                "  done: []",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    policy = load_orchestration_policy(discover_project(repo))
+
+    assert policy.claim_target_status("todo") is None

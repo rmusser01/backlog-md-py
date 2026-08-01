@@ -4,7 +4,109 @@ import urllib.request
 
 import pytest
 
-from backlog_py.mcp.http_server import start_mcp_http_server
+from backlog_py.mcp.http_server import create_mcp_http_server, start_mcp_http_server
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10", "example.test"])
+def test_create_mcp_http_server_rejects_non_loopback_hosts(host):
+    with pytest.raises(ValueError, match="loopback"):
+        create_mcp_http_server(host=host, port=0, token="secret")
+
+
+def test_create_mcp_http_server_allows_non_loopback_only_on_explicit_opt_in():
+    # TEST-NET-1 is never assigned locally, so getting past the loopback guard
+    # surfaces as a bind error rather than a ValueError (and binds nothing).
+    with pytest.raises(OSError) as exc:
+        create_mcp_http_server(host="192.0.2.1", port=0, token="secret", allow_remote=True)
+
+    assert not isinstance(exc.value, ValueError)
+
+
+def test_create_mcp_http_server_still_requires_a_token():
+    with pytest.raises(ValueError, match="token"):
+        create_mcp_http_server(host="127.0.0.1", port=0, token="")
+
+
+def test_http_responses_carry_security_headers():
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = urllib.request.urlopen(f"http://{service.host}:{service.port}/health")
+
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["Referrer-Policy"] == "no-referrer"
+    finally:
+        service.shutdown()
+
+
+def test_http_endpoint_rejects_foreign_host_header():
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_request(
+            service.host,
+            service.port,
+            "GET",
+            "/health",
+            host_header="backlog.example.com",
+        )
+
+        assert _status_code(response) == 403
+    finally:
+        service.shutdown()
+
+
+def test_http_endpoint_rejects_host_header_with_a_foreign_port():
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_request(
+            service.host,
+            service.port,
+            "GET",
+            "/status",
+            host_header=f"127.0.0.1:{service.port + 1}",
+            token="secret",
+        )
+
+        assert _status_code(response) == 403
+    finally:
+        service.shutdown()
+
+
+def test_http_endpoint_accepts_loopback_host_header():
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_request(
+            service.host,
+            service.port,
+            "GET",
+            "/status",
+            host_header=f"localhost:{service.port}",
+            token="secret",
+        )
+
+        assert _status_code(response) == 200
+    finally:
+        service.shutdown()
+
+
+def _raw_request(host, port, method, path, *, host_header=None, token=None, timeout=5.0):
+    import socket
+
+    lines = [f"{method} {path} HTTP/1.1", f"Host: {host_header if host_header is not None else f'{host}:{port}'}"]
+    if token is not None:
+        lines.append(f"Authorization: Bearer {token}")
+    lines.append("Connection: close")
+    request = ("\r\n".join(lines) + "\r\n\r\n").encode("ascii")
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        sock.sendall(request)
+        chunks = []
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+    return b"".join(chunks).decode("latin1")
 
 
 def test_http_endpoint_requires_daemon_token():

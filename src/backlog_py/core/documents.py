@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 import yaml
+from loguru import logger
 
 from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.errors import NotFoundError
@@ -77,7 +79,17 @@ class DocumentService:
     def list_documents(self) -> list[DocumentRecord]:
         if not self.docs_dir.is_dir():
             return []
-        documents = [self._load_document(path) for path in sorted(self.docs_dir.rglob("*.md"))]
+        documents: list[DocumentRecord] = []
+        for path in sorted(self.docs_dir.rglob("*.md")):
+            try:
+                documents.append(self._load_document(path))
+            except DocumentMutationError:
+                # Containment failures are security signals, not bad content.
+                raise
+            except (ValueError, OSError) as exc:
+                # A single unparsable file must not disable every document
+                # operation; skip it and warn, as the task repository does.
+                logger.warning("Skipping unreadable document file {}: {}", path, exc)
         return sorted(documents, key=lambda document: document.path_relative)
 
     def search_documents(self, query: str) -> list[DocumentRecord]:
@@ -126,9 +138,10 @@ class DocumentService:
         if target != document.path and target.exists():
             raise DocumentMutationError(f"Document already exists: {target.relative_to(self.docs_dir).as_posix()}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_text(target, source)
-        if target != document.path:
-            document.path.unlink()
+        if target == document.path:
+            _atomic_write_text(target, source)
+        else:
+            _move_document(document.path, target, source)
         return _load_document(self.docs_dir, target)
 
     def _try_view_by_path(self, path_or_id: str) -> DocumentRecord | None:
@@ -200,8 +213,32 @@ class DocumentService:
         )
 
 
+def _move_document(source_path: Path, target: Path, source: str) -> None:
+    """Move a document to ``target`` without ever leaving a duplicate-id shadow.
+
+    The updated content is written in place first and then renamed, so an
+    interrupted move leaves exactly one intact file rather than the same
+    document id in two places.
+    """
+    _atomic_write_text(source_path, source)
+    try:
+        os.replace(source_path, target)
+        return
+    except OSError as exc:
+        logger.warning("Atomic move of document {} to {} failed: {}", source_path, target, exc)
+    # Cross-device (or otherwise non-atomic) move: write the new location first
+    # so content can never be lost, then drop the old file best effort.
+    _atomic_write_text(target, source)
+    try:
+        source_path.unlink()
+    except OSError as exc:
+        logger.warning("Failed to remove moved document {}: {}", source_path, exc)
+
+
 def _load_document(base: Path, path: Path) -> DocumentRecord:
-    with path.open("r", encoding="utf-8", newline="") as source_file:
+    # newline="" keeps original CRLF bytes intact through directory-only moves;
+    # utf-8-sig drops a BOM that would otherwise hide the frontmatter.
+    with path.open("r", encoding="utf-8-sig", newline="") as source_file:
         raw_source = source_file.read()
     parsed = parse_task_markdown(raw_source)
     frontmatter = dict(parsed.frontmatter)

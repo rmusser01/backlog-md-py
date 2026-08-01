@@ -40,6 +40,7 @@ from backlog_py.storage.config import (
 )
 
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+_DEFAULT_HTTP_PORT = 80
 # Cap request bodies so an oversized Content-Length cannot exhaust memory, and
 # bound the socket so a slow/idle client cannot pin a handler thread forever.
 _MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
@@ -51,6 +52,13 @@ _REQUEST_TIMEOUT_SECONDS = 30
 _BROWSER_MERMAID_ASSET_PATH = "/assets/mermaid.min.js"
 _BROWSER_MERMAID_DEFAULT_URL = _BROWSER_MERMAID_ASSET_PATH
 _BROWSER_MERMAID_URL_ENV = "BACKLOG_PY_BROWSER_MERMAID_URL"
+# Optional subresource-integrity digest (e.g. "sha384-...") applied only when a
+# remote Mermaid URL is configured; the CSP is widened to that origin too.
+_BROWSER_MERMAID_SRI_ENV = "BACKLOG_PY_BROWSER_MERMAID_SRI"
+# Hosts/ports that may appear verbatim in a Content-Security-Policy source.
+_CSP_SOURCE_PATTERN = re.compile(r"[A-Za-z0-9.\-]+(:[0-9]+)?")
+# One or more space-separated `sha(256|384|512)-<base64>` integrity digests.
+_SRI_PATTERN = re.compile(r"sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}(?: sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2})*")
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
@@ -267,12 +275,27 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
+            if not self._host_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
             self._handle_get()
         except Exception:
             # A single unreadable file or bad config must not drop the
             # connection with a bare traceback; return a 500 error page.
             logger.exception("Unhandled error serving GET {}", self.path)
             self._safe_send_error()
+
+    def _send_readonly_listing_error(self, subject: str, exc: BaseException) -> None:
+        """Return a well-formed error for a readonly route instead of a bare 500.
+
+        A single unreadable or malformed file should describe itself rather
+        than turning the whole panel into an opaque "Internal server error".
+        """
+        logger.warning("Failed to render browser {} view: {}", subject, exc)
+        self._send_json(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            {"error": f"Unable to read {subject}: {exc}"},
+        )
 
     def _safe_send_error(self) -> None:
         try:
@@ -326,7 +349,12 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             )
             return
         if path in {"/api/docs", "/api/docs/"}:
-            self._send_json(HTTPStatus.OK, _document_list_payload(self.server.project))
+            try:
+                payload = _document_list_payload(self.server.project)
+            except Exception as exc:  # defence in depth: one bad doc must not kill the panel
+                self._send_readonly_listing_error("documents", exc)
+                return
+            self._send_json(HTTPStatus.OK, payload)
             return
         document_id = _document_endpoint_id(path)
         if document_id is not None:
@@ -338,10 +366,18 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Document not found: {document_id}"})
                 return
+            except Exception as exc:
+                self._send_readonly_listing_error(f"document {document_id}", exc)
+                return
             self._send_json(HTTPStatus.OK, _document_detail_payload(document))
             return
         if path in {"/api/decisions", "/api/decisions/"}:
-            self._send_json(HTTPStatus.OK, _decision_list_payload(self.server.project))
+            try:
+                payload = _decision_list_payload(self.server.project)
+            except Exception as exc:
+                self._send_readonly_listing_error("decisions", exc)
+                return
+            self._send_json(HTTPStatus.OK, payload)
             return
         decision_id = _decision_endpoint_id(path)
         if decision_id is not None:
@@ -349,6 +385,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 decision = DecisionService(self.server.project).view_decision(decision_id)
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Decision not found: {decision_id}"})
+                return
+            except Exception as exc:
+                self._send_readonly_listing_error(f"decision {decision_id}", exc)
                 return
             self._send_json(HTTPStatus.OK, _decision_detail_payload(decision))
             return
@@ -373,6 +412,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
+        if not self._host_allowed():
+            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+            return
         path = urlparse(self.path).path
         if path == "/api/markdown/preview":
             if not self._origin_allowed():
@@ -568,10 +610,36 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body too large")
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
+    def _host_allowed(self) -> bool:
+        """Reject requests whose Host is not this service's loopback authority.
+
+        Browsers never send Origin on GET, so the Host header is the only
+        defence against DNS rebinding: a page on ``attacker.example.com`` that
+        resolves to 127.0.0.1 would otherwise be able to read the whole
+        backlog. The hostname must be a loopback literal and the port must be
+        the bound port (an absent port means the HTTP default, port 80).
+        """
+        header = self.headers.get("Host")
+        if header is None:
+            return False
+        parsed = _parse_host_header(header)
+        if parsed is None:
+            return False
+        hostname, port = parsed
+        if hostname.casefold() not in _LOOPBACK_HOSTS:
+            return False
+        return (_DEFAULT_HTTP_PORT if port is None else port) == int(self.server.server_address[1])
+
     def _origin_allowed(self) -> bool:
+        """Require a same-origin loopback Origin on every mutating request.
+
+        Browsers always send Origin on POST, so requiring it costs the board
+        nothing while denying unauthenticated local processes (and any tool
+        that forgets the header) write access to the project.
+        """
         origin = self.headers.get("Origin")
         if origin is None:
-            return True
+            return False
         host = self.headers.get("Host")
         if host is None:
             return False
@@ -629,6 +697,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy", _content_security_policy())
 
     def _send_cached_asset(self, text: str, *, content_type: str) -> None:
         data = text.encode("utf-8")
@@ -717,7 +786,8 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
         categories=list(payload.get("queueCategories") or []),
         selected=_metadata_string(payload.get("queueCategoryFilter")),
     )
-    return _load_browser_text_resource("templates", "board.html").format_map(
+    escaped_mermaid_url = escape(_resolve_mermaid_url(), quote=True)
+    html = _load_browser_text_resource("templates", "board.html").format_map(
         {
             "project_name": project_name,
             "board_revision": board_revision,
@@ -731,9 +801,41 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
             "queue_filter": queue_filter,
             "board_css": _load_browser_text_resource("assets", "board.css").rstrip("\n"),
             "board_js": _load_browser_text_resource("assets", "board.js").rstrip("\n"),
-            "mermaid_url": escape(_resolve_mermaid_url(), quote=True),
+            "mermaid_url": escaped_mermaid_url,
         }
     )
+    return _with_mermaid_integrity_attribute(html, escaped_url=escaped_mermaid_url)
+
+
+def _with_mermaid_integrity_attribute(html: str, *, escaped_url: str) -> str:
+    """Attach ``data-mermaid-sri`` next to ``data-mermaid-url`` when configured.
+
+    The board template only exposes a ``{mermaid_url}`` placeholder, so the
+    optional integrity value is attached to the same element here; the default
+    (local, same-origin) asset renders exactly as before.
+    """
+    if _mermaid_script_origin() is None:
+        # Integrity only means something for a third-party build: gating the
+        # same-origin vendored asset (or the disabled/empty URL) on a digest
+        # the operator never set for it would silently break diagrams.
+        return html
+    integrity = _resolve_mermaid_integrity()
+    if not integrity:
+        return html
+    marker = f'data-mermaid-url="{escaped_url}"'
+    return html.replace(marker, f'{marker} data-mermaid-sri="{escape(integrity, quote=True)}"', 1)
+
+
+def _resolve_mermaid_integrity() -> str:
+    """Return a validated subresource-integrity value for a remote Mermaid URL.
+
+    Malformed values are ignored rather than emitted, so a bad env var can
+    never break the attribute or inject markup.
+    """
+    value = (os.environ.get(_BROWSER_MERMAID_SRI_ENV) or "").strip()
+    if not value or not _SRI_PATTERN.fullmatch(value):
+        return ""
+    return value
 
 
 def _resolve_mermaid_url() -> str:
@@ -742,6 +844,50 @@ def _resolve_mermaid_url() -> str:
     if value is None:
         return _BROWSER_MERMAID_DEFAULT_URL
     return value.strip()
+
+
+def _mermaid_script_origin() -> str | None:
+    """Return the CSP source for a remotely configured Mermaid build.
+
+    The default (and any other same-origin path) needs no extra source because
+    ``script-src 'self'`` already covers it.
+    """
+    url = _resolve_mermaid_url()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if not _CSP_SOURCE_PATTERN.fullmatch(parsed.netloc):
+        # Never let a hostile env value inject extra directives or sources.
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _content_security_policy() -> str:
+    """Build the board's CSP, widened only for a configured remote Mermaid.
+
+    The board inlines its own CSS/JS (``format_map`` into board.html), fetches
+    same-origin JSON, opens an EventSource on /api/board/events and loads the
+    vendored Mermaid build from /assets, so 'self' plus 'unsafe-inline' is the
+    tightest policy that keeps the page working without a nonce pipeline.
+    """
+    script_sources = ["'self'", "'unsafe-inline'"]
+    remote_origin = _mermaid_script_origin()
+    if remote_origin is not None:
+        script_sources.append(remote_origin)
+    directives = (
+        "default-src 'none'",
+        f"script-src {' '.join(script_sources)}",
+        "style-src 'unsafe-inline'",
+        "connect-src 'self'",
+        "img-src 'self' data:",
+        "font-src 'self' data:",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    )
+    return "; ".join(directives)
 
 
 def _render_markdown_toolbar() -> str:
@@ -1246,78 +1392,93 @@ def _root_url(host: str, port: int) -> str:
     return f"http://{host}:{port}/"
 
 
+def _parse_host_header(value: str) -> tuple[str, int | None] | None:
+    """Split a Host header into ``(hostname, port)``; ``None`` when malformed.
+
+    Handles the IPv6 bracket form (``[::1]:8080``/``[::1]``) and the common
+    port-less form (``localhost``).
+    """
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.startswith("["):
+        end = raw.find("]")
+        if end == -1:
+            return None
+        hostname = raw[1:end]
+        remainder = raw[end + 1 :]
+    elif raw.count(":") > 1:
+        # An unbracketed IPv6 literal is not a valid Host header.
+        return None
+    else:
+        hostname, separator, port_text = raw.partition(":")
+        remainder = f":{port_text}" if separator else ""
+    if not hostname:
+        return None
+    if not remainder:
+        return hostname, None
+    if not remainder.startswith(":"):
+        return None
+    port_text = remainder[1:]
+    if not port_text.isdigit():
+        return None
+    return hostname, int(port_text)
+
+
+def _endpoint_segment(path: str, prefix: str, suffix: str = "", *, allow_separators: bool = False) -> str | None:
+    """Extract and percent-decode a single endpoint id from a request path.
+
+    The decoded value is validated (decode first, *then* check), so an encoded
+    separator such as ``%2F`` can never slip past the check the way it does
+    with the classic check-then-decode ordering.
+    """
+    if not path.startswith(prefix):
+        return None
+    if suffix:
+        if not path.endswith(suffix):
+            return None
+        encoded = path[len(prefix) : -len(suffix)]
+    else:
+        encoded = path[len(prefix) :]
+    if not encoded or "/" in encoded:
+        return None
+    identifier = unquote(encoded)
+    if not identifier or "\x00" in identifier:
+        return None
+    if not allow_separators and ("/" in identifier or "\\" in identifier):
+        return None
+    return identifier
+
+
 def _status_endpoint_task_id(path: str) -> str | None:
-    prefix = "/api/tasks/"
-    suffix = "/status"
-    if not path.startswith(prefix) or not path.endswith(suffix):
-        return None
-    encoded_task_id = path[len(prefix) : -len(suffix)]
-    if not encoded_task_id:
-        return None
-    return unquote(encoded_task_id)
+    return _endpoint_segment(path, "/api/tasks/", "/status")
 
 
 def _task_edit_endpoint_task_id(path: str) -> str | None:
-    prefix = "/api/tasks/"
-    suffix = "/edit"
-    if not path.startswith(prefix) or not path.endswith(suffix):
-        return None
-    encoded_task_id = path[len(prefix) : -len(suffix)]
-    if not encoded_task_id or "/" in encoded_task_id:
-        return None
-    return unquote(encoded_task_id)
+    return _endpoint_segment(path, "/api/tasks/", "/edit")
 
 
 def _task_archive_endpoint_task_id(path: str) -> str | None:
-    prefix = "/api/tasks/"
-    suffix = "/archive"
-    if not path.startswith(prefix) or not path.endswith(suffix):
-        return None
-    encoded_task_id = path[len(prefix) : -len(suffix)]
-    if not encoded_task_id or "/" in encoded_task_id:
-        return None
-    return unquote(encoded_task_id)
+    return _endpoint_segment(path, "/api/tasks/", "/archive")
 
 
 def _task_checklist_endpoint_task_id(path: str) -> str | None:
-    prefix = "/api/tasks/"
-    suffix = "/checklist"
-    if not path.startswith(prefix) or not path.endswith(suffix):
-        return None
-    encoded_task_id = path[len(prefix) : -len(suffix)]
-    if not encoded_task_id or "/" in encoded_task_id:
-        return None
-    return unquote(encoded_task_id)
+    return _endpoint_segment(path, "/api/tasks/", "/checklist")
 
 
 def _document_endpoint_id(path: str) -> str | None:
-    prefix = "/api/docs/"
-    if not path.startswith(prefix):
-        return None
-    encoded_document_id = path[len(prefix):]
-    if not encoded_document_id or "/" in encoded_document_id:
-        return None
-    return unquote(encoded_document_id)
+    # Documents are addressable by id *or* by their backlog-relative path
+    # (``/api/docs/guides%2Fsetup.md``), so decoded separators stay legal here;
+    # containment is enforced by DocumentService._document_path.
+    return _endpoint_segment(path, "/api/docs/", allow_separators=True)
 
 
 def _decision_endpoint_id(path: str) -> str | None:
-    prefix = "/api/decisions/"
-    if not path.startswith(prefix):
-        return None
-    encoded_decision_id = path[len(prefix):]
-    if not encoded_decision_id or "/" in encoded_decision_id:
-        return None
-    return unquote(encoded_decision_id)
+    return _endpoint_segment(path, "/api/decisions/")
 
 
 def _task_detail_endpoint_task_id(path: str) -> str | None:
-    prefix = "/api/tasks/"
-    if not path.startswith(prefix):
-        return None
-    encoded_task_id = path[len(prefix):]
-    if not encoded_task_id or "/" in encoded_task_id:
-        return None
-    return unquote(encoded_task_id)
+    return _endpoint_segment(path, "/api/tasks/")
 
 
 def _status_from_payload(payload: object) -> str:

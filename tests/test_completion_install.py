@@ -67,3 +67,16 @@ def test_completion_install_rejects_unsupported_shell(tmp_path: Path, monkeypatc
 
     assert result.exit_code != 0
     assert "Unsupported shell" in result.output
+
+
+def test_pwsh_completion_script_lists_every_top_level_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    result = CliRunner().invoke(main, ["completion", "install", "--shell", "pwsh"])
+
+    assert result.exit_code == 0, result.output
+    script = (tmp_path / "Documents/PowerShell/Completions/backlog-py-completion.ps1").read_text(encoding="utf-8")
+    for command_name in main.commands:
+        assert f'"{command_name}"' in script, command_name
+    for expected in ("browser", "orchestration", "tui"):
+        assert f'"{expected}"' in script

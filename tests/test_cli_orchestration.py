@@ -355,3 +355,197 @@ def test_orchestration_claim_conflict_reports_actionable_error(tmp_path):
     assert "TASK-1" in conflict.output
     assert "lease_owner=agent-a" in conflict.output
     assert "actual_version=1" in conflict.output
+
+
+def test_orchestration_status_plain_prints_tab_separated_counts(tmp_path):
+    repo = _repo(tmp_path)
+
+    default = _invoke(repo, "orchestration", "status")
+    plain = _invoke(repo, "orchestration", "status", "--plain")
+
+    assert default.exit_code == 0, default.output
+    assert plain.exit_code == 0, plain.output
+    assert default.output == "eligible: 1\n"
+    assert plain.output == "eligible\t1\n"
+
+
+def test_orchestration_queue_plain_prints_tab_separated_records(tmp_path):
+    repo = _repo(tmp_path)
+
+    default = _invoke(repo, "orchestration", "queue")
+    plain = _invoke(repo, "orchestration", "queue", "--plain")
+
+    assert default.exit_code == 0, default.output
+    assert plain.exit_code == 0, plain.output
+    assert default.output == "TASK-1 [eligible] v0 Example (backlog/tasks/task-1 - Example.md)\n"
+    assert plain.output == "TASK-1\teligible\t0\ttodo\t\tbacklog/tasks/task-1 - Example.md\tExample\n"
+
+
+def test_orchestration_eligible_claims_and_stale_leases_support_plain(tmp_path):
+    repo = _repo(tmp_path)
+
+    eligible = _invoke(repo, "orchestration", "eligible", "--plain")
+    assert eligible.exit_code == 0, eligible.output
+    assert eligible.output.split("\t")[:2] == ["TASK-1", "eligible"]
+
+    claim = _invoke(
+        repo,
+        "orchestration",
+        "claim",
+        "TASK-1",
+        "--actor",
+        "codex",
+        "--expected-version",
+        "0",
+    )
+    assert claim.exit_code == 0, claim.output
+
+    claims = _invoke(repo, "orchestration", "claims", "--plain")
+    assert claims.exit_code == 0, claims.output
+    fields = claims.output.rstrip("\n").split("\t")
+    assert fields[0] == "TASK-1"
+    assert fields[1] == "claimed"
+    assert fields[4] == "codex"
+
+    _set_orchestration(
+        repo,
+        "  status_key: inprogress\n"
+        "  version: 2\n"
+        "  lease_owner: old-agent\n"
+        "  lease_expires_at: '2026-01-01T00:00:00Z'\n",
+    )
+    stale = _invoke(repo, "orchestration", "stale-leases", "--plain")
+    assert stale.exit_code == 0, stale.output
+    assert stale.output.rstrip("\n").split("\t")[1] == "stale_claim"
+
+
+def test_orchestration_mutation_plain_differs_from_default_and_reports_version(tmp_path):
+    repo = _repo(tmp_path)
+
+    record = _invoke(
+        repo,
+        "orchestration",
+        "record-run",
+        "TASK-1",
+        "--actor",
+        "codex",
+        "--result",
+        "succeeded",
+        "--summary",
+        "done",
+        "--plain",
+    )
+    assert record.exit_code == 0, record.output
+    record_fields = record.output.rstrip("\n").split("\t")
+    assert record_fields[0] == "TASK-1"
+    assert record_fields[1] == "recorded"
+    assert record_fields[2].startswith("run-")
+    assert record_fields[3] == "0"
+
+    claim = _invoke(
+        repo,
+        "orchestration",
+        "claim",
+        "TASK-1",
+        "--actor",
+        "codex",
+        "--expected-version",
+        "0",
+        "--plain",
+    )
+    assert claim.exit_code == 0, claim.output
+    claim_fields = claim.output.rstrip("\n").split("\t")
+    assert claim_fields[0] == "TASK-1"
+    assert claim_fields[1] == "claimed"
+    assert claim_fields[3] == "1"
+
+    default_claim = _invoke(
+        repo,
+        "orchestration",
+        "release",
+        "TASK-1",
+        "--actor",
+        "codex",
+        "--expected-version",
+        "1",
+    )
+    assert default_claim.exit_code == 0, default_claim.output
+    assert "\t" not in default_claim.output
+    assert "released via" in default_claim.output
+
+
+def test_orchestration_mutation_payload_scans_the_project_once(tmp_path, monkeypatch):
+    from backlog_py.cli import main as cli_main
+    from backlog_py.orchestration import OrchestrationService
+
+    repo = _repo(tmp_path)
+    counts = {"repository": 0, "queue": 0}
+    real_repository_cls = cli_main.ReadOnlyRepository
+    real_queue = OrchestrationService.queue
+
+    class CountingReadOnlyRepository(real_repository_cls):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):
+            counts["repository"] += 1
+            super().__init__(*args, **kwargs)
+
+    def counting_queue(self, **kwargs):
+        counts["queue"] += 1
+        return real_queue(self, **kwargs)
+
+    monkeypatch.setattr(cli_main, "ReadOnlyRepository", CountingReadOnlyRepository)
+    monkeypatch.setattr(OrchestrationService, "queue", counting_queue)
+
+    result = _invoke(
+        repo,
+        "orchestration",
+        "record-run",
+        "TASK-1",
+        "--actor",
+        "codex",
+        "--result",
+        "succeeded",
+        "--summary",
+        "done",
+        "--json",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["queueCategory"] == "eligible"
+    assert payload["runHistoryEventIds"] == [payload["eventId"]]
+    # The CLI decorates the mutation result without re-fetching the task itself.
+    assert counts == {"repository": 0, "queue": 1}
+
+
+def test_orchestration_plain_mutation_skips_the_decorating_queue_scan(tmp_path, monkeypatch):
+    from backlog_py.orchestration import OrchestrationService
+
+    repo = _repo(tmp_path)
+    counts = {"queue": 0}
+    real_queue = OrchestrationService.queue
+
+    def counting_queue(self, **kwargs):
+        counts["queue"] += 1
+        return real_queue(self, **kwargs)
+
+    monkeypatch.setattr(OrchestrationService, "queue", counting_queue)
+
+    result = _invoke(
+        repo,
+        "orchestration",
+        "claim",
+        "TASK-1",
+        "--actor",
+        "codex",
+        "--expected-version",
+        "0",
+        "--plain",
+    )
+
+    assert result.exit_code == 0, result.output
+    fields = result.output.rstrip("\n").split("\t")
+    assert fields[0] == "TASK-1"
+    assert fields[1] == "claimed"
+    assert fields[3] == "1"
+    # Plain output needs nothing from the queue report, so it must not scan for it.
+    assert counts["queue"] == 0

@@ -23,6 +23,10 @@ class BacklogConfig:
     zero_padded_ids: int | None = None
     task_prefix: str = "task"
     check_active_branches: bool = True
+    # onStatusChange carried in a task file's own frontmatter executes a shell
+    # command. Task markdown arrives from clones, branches, and PRs, so that is
+    # opt-in; config-level onStatusChange is reviewed by its owner and stays on.
+    task_frontmatter_status_callbacks: bool = False
     active_branch_days: int = 30
     definition_of_done: list[str] | None = None
 
@@ -49,6 +53,11 @@ class TaskMarkdownSection:
     marker: str
     raw: str
     content: str
+    # Offsets of ``raw`` within the full task source. Writers splice by offset
+    # rather than searching for ``raw``, so duplicated identical blocks cannot
+    # make an edit land in a block the parser does not read back.
+    start: int = -1
+    end: int = -1
 
 
 @dataclass(frozen=True)

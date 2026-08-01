@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import posixpath
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import inf
@@ -17,6 +19,9 @@ from backlog_py.storage.config import load_config
 # Upper bound for any single git invocation so an unreachable remote or a
 # hanging credential helper cannot pin a caller (CLI command, TUI refresh).
 GIT_COMMAND_TIMEOUT_SECONDS = 30
+
+# work_dir -> (".git" existed when probed, is-inside-work-tree result)
+_WORKTREE_CACHE: dict[str, tuple[bool, bool]] = {}
 
 
 @dataclass(frozen=True)
@@ -99,21 +104,97 @@ def maybe_fetch_remote_refs(project: BacklogProject) -> None:
 
 def current_task_snapshot_timestamp(project: BacklogProject, path: Path) -> float:
     """Return the current checkout timestamp for one task file."""
+    return current_task_snapshot_timestamps(project, [path])[path]
+
+
+def current_task_snapshot_timestamps(
+    project: BacklogProject, paths: Sequence[Path]
+) -> dict[Path, float]:
+    """Checkout timestamps for many task files using a bounded number of git calls.
+
+    The per-file form cost three subprocesses each (worktree probe, status, log),
+    so a scan of N tasks forked O(3N) git processes while holding the project
+    write lock. This resolves the whole set with one status call and one log walk.
+    """
+    results: dict[Path, float] = {path: inf for path in paths}
+    if not paths:
+        return results
     work_dir = project.root
     if not _is_git_worktree(work_dir):
-        return inf
-    relative_path = _relative_path(project.root, path)
-    if relative_path is None:
-        return inf
-    if _has_path_changes(project.root, relative_path):
-        return inf
-    result = _run_git(work_dir, "log", "-1", "--format=%ct", "HEAD", "--", relative_path)
+        return results
+
+    relative_paths: dict[Path, str] = {}
+    for path in paths:
+        relative = _relative_path(project.root, path)
+        if relative is not None:
+            relative_paths[path] = relative
+    if not relative_paths:
+        return results
+
+    scope = sorted({posixpath.dirname(value) or "." for value in relative_paths.values()})
+    dirty = _dirty_relative_paths(work_dir, scope)
+    if dirty is None:
+        # Status failed: every path stays ``inf``, matching the per-file
+        # implementation's fail-closed behaviour.
+        return results
+    committed = _last_commit_timestamps(work_dir, scope)
+
+    for path, relative in relative_paths.items():
+        if relative in dirty:
+            continue
+        results[path] = committed.get(relative, inf)
+    return results
+
+
+def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | None:
+    """Repository-relative paths with uncommitted changes under ``scope``.
+
+    Returns ``None`` when git status fails, so callers can fail closed.
+    """
+    result = _run_git(
+        work_dir, "status", "--porcelain", "-z", "--untracked-files=all", "--", *scope
+    )
     if result.returncode != 0:
-        return inf
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return inf
+        return None
+    entries = [entry for entry in result.stdout.split("\0") if entry]
+    dirty: set[str] = set()
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        status, name = entry[:2], entry[3:]
+        dirty.add(name)
+        if status[0] in {"R", "C"} and index < len(entries):
+            # Renames and copies carry the source path as a second record.
+            dirty.add(entries[index])
+            index += 1
+    return dirty
+
+
+def _last_commit_timestamps(work_dir: Path, scope: Sequence[str]) -> dict[str, float]:
+    """Most recent commit timestamp per path under ``scope``, in one log walk."""
+    result = _run_git(
+        work_dir, "log", "--format=%x00%ct", "--name-only", "HEAD", "--", *scope
+    )
+    if result.returncode != 0:
+        return {}
+    timestamps: dict[str, float] = {}
+    for chunk in result.stdout.split("\0"):
+        if not chunk.strip():
+            continue
+        lines = [line for line in chunk.splitlines() if line.strip()]
+        if not lines:
+            continue
+        try:
+            committed_at = float(lines[0].strip())
+        except ValueError:
+            continue
+        for name in lines[1:]:
+            # log walks newest-first, so the first sighting is the latest commit.
+            timestamps.setdefault(name, committed_at)
+    return timestamps
 
 
 def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSnapshot]:
@@ -183,8 +264,22 @@ def _auto_commit_config(project: BacklogProject) -> BacklogConfig:
 
 
 def _is_git_worktree(work_dir: Path) -> bool:
+    """Memoized worktree probe.
+
+    This runs once per task file on every repository scan, so the subprocess cost
+    dominates large projects. The cached answer is keyed on whether a ``.git``
+    entry exists, so a directory that gets ``git init``-ed mid-process is
+    re-probed rather than serving a stale ``False``.
+    """
+    key = str(work_dir)
+    marker = (work_dir / ".git").exists()
+    cached = _WORKTREE_CACHE.get(key)
+    if cached is not None and cached[0] == marker:
+        return cached[1]
     result = _run_git(work_dir, "rev-parse", "--is-inside-work-tree")
-    return result.returncode == 0 and result.stdout.strip() == "true"
+    value = result.returncode == 0 and result.stdout.strip() == "true"
+    _WORKTREE_CACHE[key] = (marker, value)
+    return value
 
 
 def _has_project_changes(work_dir: Path) -> bool:
@@ -337,7 +432,9 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on an
     # interactive credential prompt; the timeout bounds a slow/unreachable
     # remote so read commands and the TUI refresh cannot hang indefinitely.
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    # GIT_OPTIONAL_LOCKS=0 keeps the frequent read-only `status` calls from taking
+    # the index lock, so they cannot collide with the user's own git commands.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
     try:
         return subprocess.run(  # nosec B603
             command,
