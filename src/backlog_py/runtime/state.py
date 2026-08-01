@@ -8,7 +8,14 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Iterable, Mapping
+
+# Every daemon start allocates its own log file, so the logs directory would
+# otherwise grow without bound. Keep a small, useful tail of recent starts.
+DEFAULT_RETAINED_DAEMON_LOGS = 10
+# Only per-start logs (allocate_log_path) are rotated; the fixed-name log an
+# unmanaged foreground daemon appends to is deliberately excluded.
+_DAEMON_LOG_GLOB = "backlog-md-py-daemon-*.log"
 
 
 @dataclass(frozen=True)
@@ -153,6 +160,48 @@ def allocate_log_path(layout: StateLayout) -> Path:
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return layout.logs_dir / f"backlog-md-py-daemon-{stamp}-{os.getpid()}-{secrets.token_hex(4)}.log"
+
+
+def prune_daemon_logs(
+    layout: StateLayout,
+    *,
+    keep: int = DEFAULT_RETAINED_DAEMON_LOGS,
+    exclude: Iterable[Path] = (),
+) -> list[Path]:
+    """Delete all but the `keep` most recent per-start daemon logs.
+
+    Returns the paths that were removed. Deleting a log a running daemon still
+    holds open is harmless on POSIX (it keeps writing to the open inode); on
+    Windows the delete simply fails and the log is retained.
+    """
+    if keep < 0:
+        raise ValueError("keep must not be negative")
+    kept = {_normalized(path) for path in exclude}
+    try:
+        candidates = [path for path in layout.logs_dir.glob(_DAEMON_LOG_GLOB) if path.is_file()]
+    except OSError:
+        return []
+    candidates = [path for path in candidates if _normalized(path) not in kept]
+    candidates.sort(key=_modified_at, reverse=True)
+    removed: list[Path] = []
+    for path in candidates[keep:]:
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed.append(path)
+    return removed
+
+
+def _normalized(path: Path) -> str:
+    return str(Path(path).expanduser().resolve(strict=False))
+
+
+def _modified_at(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _write_private_json(path: Path, data: dict[str, object]) -> None:

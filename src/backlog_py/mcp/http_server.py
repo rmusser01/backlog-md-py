@@ -13,6 +13,12 @@ from urllib.parse import urlparse
 from backlog_py.mcp.protocol import McpRequestContext, handle_jsonrpc_text
 
 
+# The daemon exposes the whole MCP surface, including every write tool, behind a
+# bearer token over cleartext HTTP. Binding anything but loopback would publish
+# it to the network, so the address is restricted exactly like the browser
+# service (see backlog_py.browser.service.create_browser_server).
+LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+
 # Cap a single JSON-RPC request body so a malicious/oversized Content-Length
 # cannot exhaust daemon memory. 10 MiB is far above any legitimate tool call.
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
@@ -55,13 +61,21 @@ def create_mcp_http_server(
     port: int,
     token: str,
     context: McpRequestContext | None = None,
+    allow_remote: bool = False,
 ) -> "McpThreadingHTTPServer":
-    """Create a loopback SDK-free MCP HTTP server without starting it."""
+    """Create a loopback SDK-free MCP HTTP server without starting it.
+
+    Non-loopback binds require `allow_remote=True`: they publish every MCP tool,
+    including writes, over cleartext to the network.
+    """
     if not token:
         raise ValueError("MCP HTTP daemon token is required")
+    if not allow_remote and host not in LOOPBACK_HOSTS:
+        raise ValueError("MCP HTTP daemon only supports loopback hosts")
     server = McpThreadingHTTPServer((host, port), _McpHttpHandler)
     server.daemon_token = token
     server.mcp_context = context or McpRequestContext()
+    server.allow_remote = bool(allow_remote)
     return server
 
 
@@ -71,9 +85,12 @@ def start_mcp_http_server(
     port: int,
     token: str,
     context: McpRequestContext | None = None,
+    allow_remote: bool = False,
 ) -> McpHttpService:
     """Start a background SDK-free MCP HTTP server."""
-    server = create_mcp_http_server(host=host, port=port, token=token, context=context)
+    server = create_mcp_http_server(
+        host=host, port=port, token=token, context=context, allow_remote=allow_remote
+    )
     thread = threading.Thread(target=server.serve_forever, name="backlog-md-py-mcp-http", daemon=True)
     thread.start()
     actual_host, actual_port = server.server_address[:2]
@@ -98,6 +115,7 @@ class McpThreadingHTTPServer(ThreadingHTTPServer):
 
     daemon_token: str
     mcp_context: McpRequestContext
+    allow_remote: bool = False
 
 
 class _McpHttpHandler(BaseHTTPRequestHandler):
@@ -105,6 +123,9 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
     timeout = REQUEST_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:
+        if not self._host_header_allowed():
+            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+            return
         path = urlparse(self.path).path
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True})
@@ -118,6 +139,9 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
+        if not self._host_header_allowed():
+            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+            return
         path = urlparse(self.path).path
         if path != "/mcp":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
@@ -146,6 +170,28 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         _ = format, args
+
+    def _host_header_allowed(self) -> bool:
+        """Reject Host headers that do not name this loopback listener.
+
+        Blocks DNS rebinding: a browser lured to an attacker domain that resolves
+        to 127.0.0.1 still sends that domain in Host, so it never matches.
+        """
+        if getattr(self.server, "allow_remote", False):
+            return True  # explicitly published off-loopback; Host cannot be pinned
+        header = self.headers.get("Host")
+        if header is None:
+            return True  # HTTP/1.0 client; no browser-originated rebinding risk
+        try:
+            parsed = urlparse(f"//{header}")
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            return False
+        if hostname is None or hostname not in LOOPBACK_HOSTS:
+            return False
+        bound_port = int(self.server.server_address[1])
+        return bound_port == (80 if port is None else port)
 
     def _is_authorized(self) -> bool:
         header = self.headers.get("Authorization", "")
@@ -195,6 +241,7 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         for key, value in (headers or {}).items():
             self.send_header(key, value)
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
 
@@ -203,7 +250,15 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         for key, value in (headers or {}).items():
             self.send_header(key, value)
+        self._send_security_headers()
         self.end_headers()
+
+    def _send_security_headers(self) -> None:
+        # Purely defensive, additive headers: block MIME sniffing, framing, and
+        # referrer leakage, mirroring the browser service.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
 
 
 def _contains_initialize(text: str) -> bool:
