@@ -25,6 +25,7 @@ jobs:
           - "3.11"
           - "3.12"
           - "3.13"
+          - "3.14"
 
     steps:
       - name: Checkout
@@ -46,6 +47,37 @@ jobs:
 
       - name: Run Bandit
         run: python -m bandit -r src
+
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package and lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run Ruff
+        run: python -m ruff check src tests
+
+      - name: Run mypy
+        # Advisory only. mypy reports 60 pre-existing errors across 14 files on a
+        # codebase that was never type checked; see the ratchet plan in
+        # [tool.mypy] in pyproject.toml. Drop continue-on-error once the baseline
+        # is clean, so that a green CI run keeps meaning "safe to tag and
+        # publish".
+        continue-on-error: true
+        run: python -m mypy
 
   package:
     name: Package build

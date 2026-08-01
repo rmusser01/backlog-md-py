@@ -76,13 +76,16 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      # Third-party actions in this job see `contents: write` and `id-token:
+      # write`, so they are pinned to full commit SHAs rather than to mutable
+      # tags or branches. Update the SHA and the trailing comment together.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/*
           generate_release_notes: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/

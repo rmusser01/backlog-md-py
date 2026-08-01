@@ -6,26 +6,60 @@ replaced after upload.
 
 ## What Triggers A Release
 
-PyPI publishing is tag-gated. A normal push to `main` does not publish a
-package.
+PyPI publishing is tag-gated, and the release tag is created automatically once
+CI passes. A version bump merged to `main` therefore does publish a package.
 
-The release workflow runs for:
+The normal flow is:
 
-- `v*` tag pushes, such as `v1.0.0`.
-- Manual workflow dispatches, but the release job still only runs when the ref
-  is a `v*` tag.
+1. A release-prep PR that bumps `src/backlog_py/__init__.py` merges to `main`.
+2. `.github/workflows/ci.yml` runs for that commit.
+3. Only after that CI run concludes successfully,
+   `.github/workflows/auto-release-tag.yml` runs, creates the annotated tag
+   `v<__version__>` on the exact commit CI validated, and dispatches
+   `.github/workflows/release.yml` against that tag.
+4. `.github/workflows/release.yml` builds the sdist and wheel, runs
+   `twine check`, smoke-tests the wheel and the SDK-free MCP entry point,
+   attaches `dist/*` to the GitHub Release, and publishes to PyPI through
+   Trusted Publishing.
 
-The release workflow does not publish for:
+Auto-tagging is gated. `auto-release-tag.yml` triggers on CI completion, not on
+the push itself, and only tags when all of the following hold:
 
-- commits pushed to `main`;
-- pull request merges;
-- manual workflow dispatches against `main`.
+- the CI run for that commit concluded `success` (the full test matrix, Bandit,
+  Ruff, and the package build and smoke jobs);
+- the CI run was for a `push` event on `main` in this repository, so pull
+  request runs and fork runs never tag;
+- the commit is contained in `origin/main`;
+- the commit changed `src/backlog_py/__init__.py`;
+- the `v<version>` tag does not already exist on `origin`.
 
-The workflow is `.github/workflows/release.yml`. Its release job is guarded by:
+The job guard is:
+
+```yaml
+if: >-
+  github.event_name == 'workflow_dispatch' ||
+  (github.event.workflow_run.conclusion == 'success' &&
+  github.event.workflow_run.event == 'push' &&
+  github.event.workflow_run.head_branch == 'main' &&
+  github.event.workflow_run.head_repository.full_name == github.repository)
+```
+
+Nothing is published when CI fails on the release commit, when the merge does
+not change `__version__`, or when the tag already exists.
+
+The release workflow itself still runs only for `v*` tags. Its release job is
+guarded by:
 
 ```yaml
 if: startsWith(github.ref, 'refs/tags/v')
 ```
+
+so a manual dispatch of `release.yml` against `main` does not publish.
+
+Because `workflow_run` executes the default-branch copy of the workflow with
+`github.ref` pointing at the default branch, `auto-release-tag.yml` resolves the
+commit and the version from `github.event.workflow_run.head_sha` rather than
+from the ambient ref.
 
 ## One-Time PyPI Setup
 
@@ -53,7 +87,9 @@ Required updates:
 3. Confirm `pyproject.toml` classifiers match the intended release status.
 4. Update release docs if workflow behavior, validation gates, or supported
    contract changed.
-5. Ensure CI is green on the exact `main` commit that will be tagged.
+5. Ensure CI is green on the exact `main` commit that will be tagged. Merging a
+   version bump to `main` is the publish decision: CI success on that commit is
+   what releases the package.
 
 See `docs/release-checklist.md` for the detailed validation gate.
 
@@ -65,10 +101,15 @@ Run from a clean release-candidate checkout:
 uv run --extra dev python -m pytest tests -v
 uv run --extra dev --extra tui python -m pytest tests -q
 uv run --extra dev python -m bandit -r src
+uv run --extra dev python -m ruff check src tests
 git diff --check
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
 ```
+
+`ruff check` is a blocking CI gate, so it must pass before the release commit
+merges. `uv run --extra dev python -m mypy` is advisory: it currently reports a
+known baseline of pre-existing errors and does not block CI or the release.
 
 Smoke the built wheel in a fresh environment:
 
@@ -118,7 +159,37 @@ python -m venv /tmp/backlog-md-py-testpypi-smoke
 
 ## Production Publish
 
-After the release-prep PR is merged and `origin/main` is green:
+### Primary path: automatic
+
+Merging the release-prep PR is the publish action. Once CI passes on that `main`
+commit, `Auto Release Tag` pushes `vX.Y.Z` and dispatches `Release`. Watch it:
+
+```bash
+gh run list --repo rmusser01/backlog-md-py --workflow CI --branch main --limit 3
+gh run list --repo rmusser01/backlog-md-py --workflow "Auto Release Tag" --limit 3
+gh run list --repo rmusser01/backlog-md-py --workflow Release --limit 3
+```
+
+If CI fails on the release commit, nothing is tagged and nothing is published.
+Fix forward on a new PR; the next successful CI run on `main` tags the version
+that is then in `src/backlog_py/__init__.py`.
+
+### Fallback: manual tagging
+
+Use this only when auto-tagging did not run or could not complete, for example
+when the version bump landed in a commit that did not touch
+`src/backlog_py/__init__.py`, or when the `Auto Release Tag` run itself failed
+after CI was green.
+
+Prefer rerunning the automation first:
+
+```bash
+gh workflow run "Auto Release Tag" --repo rmusser01/backlog-md-py --ref main
+```
+
+A manual dispatch skips the "commit changed `__version__`" guard but still
+refuses to tag a commit that is not contained in `origin/main`, and still skips
+an existing tag. If that is not usable, tag by hand:
 
 ```bash
 git fetch origin main --tags
@@ -128,16 +199,19 @@ git tag -a vX.Y.Z -m "backlog-md-py vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag starts the Release workflow. The workflow builds the sdist and wheel,
-runs `twine check`, smoke-tests the wheel and SDK-free MCP entry point, attaches
-the artifacts to the GitHub Release, and publishes the same artifacts to PyPI
-through Trusted Publishing.
+A hand-pushed tag starts the Release workflow directly. Confirm CI is green on
+that exact commit before pushing the tag: hand tagging bypasses the CI gate.
 
-Manual dispatch is only useful when rerunning an existing release tag:
+To rerun an existing release tag:
 
 ```bash
 gh workflow run Release --repo rmusser01/backlog-md-py --ref vX.Y.Z
 ```
+
+In every path the Release workflow builds the sdist and wheel, runs
+`twine check`, smoke-tests the wheel and SDK-free MCP entry point, attaches the
+artifacts to the GitHub Release, and publishes the same artifacts to PyPI
+through Trusted Publishing.
 
 ## Post-Publish Verification
 
