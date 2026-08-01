@@ -1,6 +1,7 @@
 import json
 import shutil
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -2251,6 +2252,28 @@ def test_browser_status_move_endpoint_rejects_cross_origin_without_mutation(tmp_
     assert _task_file(repo).read_text(encoding="utf-8") == before
 
 
+def test_browser_status_move_endpoint_requires_origin_header_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/status",
+                {"status": "Done"},
+                omit_origin=True,
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 403
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+
+
 def test_browser_board_html_exposes_drag_and_drop_controls(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -2393,12 +2416,23 @@ def _get_response_bytes(url: str) -> dict[str, object]:
         }
 
 
-def _post_json(url: str, payload: object, *, origin: str | None = None) -> object:
-    return _post_json_response(url, payload, origin=origin)["body"]
+def _post_json(url: str, payload: object, *, origin: str | None = None, omit_origin: bool = False) -> object:
+    return _post_json_response(url, payload, origin=origin, omit_origin=omit_origin)["body"]
 
 
-def _post_json_response(url: str, payload: object, *, origin: str | None = None) -> dict[str, object]:
+def _post_json_response(
+    url: str,
+    payload: object,
+    *,
+    origin: str | None = None,
+    omit_origin: bool = False,
+) -> dict[str, object]:
     headers = {"Content-Type": "application/json"}
+    if origin is None and not omit_origin:
+        # Browsers always send Origin on POST; mirror that by default so tests
+        # exercise the same code path the board does.
+        parsed = urllib.parse.urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
     if origin is not None:
         headers["Origin"] = origin
     request = urllib.request.Request(

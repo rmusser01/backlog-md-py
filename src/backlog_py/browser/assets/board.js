@@ -56,6 +56,7 @@
     }
 
     const mermaidModuleUrl = (boardElement?.dataset.mermaidUrl || "").trim();
+    const mermaidIntegrity = (boardElement?.dataset.mermaidSri || "").trim();
     let mermaidLoadPromise = null;
 
     function loadMermaidModule() {
@@ -70,6 +71,10 @@
           }
           const script = document.createElement("script");
           script.src = mermaidModuleUrl;
+          if (mermaidIntegrity) {
+            script.integrity = mermaidIntegrity;
+            script.crossOrigin = "anonymous";
+          }
           script.addEventListener("load", () => {
             window.mermaid ? resolve(window.mermaid) : reject(new Error("mermaid global not found"));
           });

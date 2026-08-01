@@ -14,8 +14,15 @@ class PathContainmentError(ValueError):
 
 
 def assert_path_within_base(base: Path, candidate: Path) -> Path:
-    """Resolve candidate and reject paths outside the lexical base path."""
-    resolved_base = base.absolute()
+    """Resolve both paths and reject candidates outside the real base directory.
+
+    Both sides must be resolved the same way: comparing an unresolved base
+    against a resolved candidate rejects every legitimate path whenever the
+    project is reached through a symlink (macOS ``/tmp`` -> ``/private/tmp``, a
+    symlinked checkout, a container bind mount). Resolving the candidate still
+    defeats symlinks planted inside the tree that point outside it.
+    """
+    resolved_base = base.resolve()
     resolved_candidate = candidate.resolve()
     if resolved_candidate == resolved_base or resolved_candidate.is_relative_to(resolved_base):
         return resolved_candidate
