@@ -449,7 +449,7 @@ def test_task_view_editor_keeps_an_unchanged_copy_even_when_the_editor_was_slow(
     """
     from backlog_py.cli import main as cli_main
 
-    monkeypatch.setattr(cli_main, "NON_BLOCKING_EDITOR_SECONDS", 0.0)
+    monkeypatch.setattr("backlog_py.core.editing.NON_BLOCKING_EDITOR_SECONDS", 0.0)
 
     def fake_editor(command, path):
         return None

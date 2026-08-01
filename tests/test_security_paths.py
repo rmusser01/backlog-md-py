@@ -299,3 +299,52 @@ def test_milestone_directory_symlink_cannot_redirect_writes(tmp_path):
         MilestoneService(project).add_milestone(name="Escaped")
 
     assert list(outside.iterdir()) == [], "a milestone write escaped the project"
+
+
+def test_task_reads_do_not_follow_a_symlink_out_of_the_project(tmp_path):
+    """A planted symlink must not have its contents surfaced as a task.
+
+    Writes are containment-checked, reads were not: `backlog/tasks/leak.md`
+    pointing anywhere readable was parsed and surfaced on the board, in
+    `task list`, in search, and through the MCP read tools.
+    """
+    from loguru import logger as loguru_logger
+
+    from backlog_py.core.init import init_project
+    from backlog_py.core.repository import ReadOnlyRepository
+
+    project = init_project(tmp_path / "proj", no_git=True).project
+    secret = tmp_path / "secret.md"
+    secret.write_text(
+        "---\nid: TASK-99\ntitle: Exfiltrated\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n\n"
+        "## Description\n\ntop secret\n",
+        encoding="utf-8",
+    )
+    tasks_dir = project.backlog_dir / "tasks"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (tasks_dir / "leak.md").symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    messages: list[str] = []
+    sink = loguru_logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        tasks = ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
+    finally:
+        loguru_logger.remove(sink)
+
+    assert [task.id for task in tasks] == [], "a symlinked file outside the project was surfaced as a task"
+    assert any("leak.md" in message for message in messages), "the skip was silent"
+
+
+def test_task_reads_still_work_for_ordinary_files(tmp_path):
+    """The containment check must not make a normal project unreadable."""
+    from backlog_py.core.init import init_project
+    from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
+
+    project = init_project(tmp_path / "proj", no_git=True).project
+    MutableRepository(project, refresh_remote_refs=False).create_task(title="Ordinary")
+
+    tasks = ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
+    assert [task.title for task in tasks] == ["Ordinary"]

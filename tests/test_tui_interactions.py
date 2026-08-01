@@ -417,7 +417,7 @@ def test_default_editor_runner_takes_no_lock_when_nothing_changed(monkeypatch):
         lambda p, o, fn: operations.append(o) or fn(),
     )
     # Treat the instant return as a blocking editor the user closed untouched.
-    monkeypatch.setattr("backlog_py.tui.app.NON_BLOCKING_EDITOR_SECONDS", 0.0)
+    monkeypatch.setattr("backlog_py.core.editing.NON_BLOCKING_EDITOR_SECONDS", 0.0)
 
     # Unchanged content is never applied, and the copy is kept rather than raced
     # against an editor that may still be open on it.
@@ -1087,7 +1087,7 @@ def test_default_editor_runner_keeps_the_copy_when_a_slow_editor_returns_unchang
         lambda p, o, fn: operations.append(o) or fn(),
     )
     # Every return counts as "slow", i.e. past any wall-clock threshold.
-    monkeypatch.setattr("backlog_py.tui.app.NON_BLOCKING_EDITOR_SECONDS", 0.0)
+    monkeypatch.setattr("backlog_py.core.editing.NON_BLOCKING_EDITOR_SECONDS", 0.0)
 
     with pytest.raises(EditorConflictError) as excinfo:
         default_editor_runner(project, path)
@@ -1207,7 +1207,7 @@ def test_default_editor_runner_warns_when_the_editor_does_not_block(monkeypatch)
     monkeypatch.setattr("backlog_py.tui.app.with_project_write_lock", lambda p, o, fn: fn())
     # Pin the threshold instead of racing the real clock: any elapsed time is
     # "instant" here, so the wording under test never depends on machine load.
-    monkeypatch.setattr("backlog_py.tui.app.NON_BLOCKING_EDITOR_SECONDS", float("inf"))
+    monkeypatch.setattr("backlog_py.core.editing.NON_BLOCKING_EDITOR_SECONDS", float("inf"))
 
     with pytest.raises(EditorConflictError) as excinfo:
         default_editor_runner(project, path)
