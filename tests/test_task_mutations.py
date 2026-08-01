@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.mcp.tools import task_create, task_edit
 from backlog_py.storage.config import replace_definition_of_done_defaults, set_config_value
@@ -823,7 +824,11 @@ def test_symlinked_task_file_escape_is_rejected_without_outside_write(tmp_path):
     except OSError as exc:
         pytest.skip(f"symlink creation unavailable: {exc}")
 
-    with pytest.raises(TaskMutationError, match="outside allowed base"):
+    # The read layer now skips a task file that resolves outside its bucket, so
+    # the escape is refused before the write-side containment check is reached:
+    # the task is not visible at all rather than visible-but-unwritable. The
+    # property under test is unchanged — nothing outside the project is written.
+    with pytest.raises((TaskMutationError, NotFoundError)):
         _repository(repo).edit_task("TASK-1", description="Escaped edit.")
 
     assert outside_task.read_text(encoding="utf-8") == original

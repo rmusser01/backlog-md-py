@@ -409,8 +409,32 @@ def _sqlite_index_enabled() -> bool:
 def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
     if not task_dir.is_dir():
         return []
+    # Anchor on the directory as it actually resolves, so relocating the whole
+    # bucket onto another volume keeps working while a single planted link does
+    # not. Deliberately laxer than `assert_trusted_subpath`, which refuses even
+    # an in-project symlink: that guards a *write* anchor, where a redirect
+    # silently corrupts another managed directory. Here the only risk is reading
+    # a file the project does not own, so a link staying inside the bucket
+    # discloses nothing new.
+    resolved_dir = task_dir.resolve()
     records: list[TaskRecord] = []
     for path in sorted(task_dir.glob("*.md")):
+        try:
+            resolved = path.resolve()
+        except OSError as exc:
+            logger.warning("Skipping unreadable task file {}: {}", path, exc)
+            continue
+        if resolved != resolved_dir and not resolved.is_relative_to(resolved_dir):
+            # A symlink out of the bucket would otherwise have its contents
+            # parsed and surfaced as a task on the board, in search, and through
+            # the MCP read tools.
+            logger.warning(
+                "Skipping task file {}: it resolves to {}, outside {}",
+                path,
+                resolved,
+                resolved_dir,
+            )
+            continue
         try:
             records.append(_load_task(path))
         except (ValueError, OSError) as exc:

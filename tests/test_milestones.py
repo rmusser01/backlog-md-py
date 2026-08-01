@@ -152,11 +152,13 @@ def test_rename_with_task_reference_symlink_escape_is_rejected_before_milestone_
     except OSError as exc:
         pytest.skip(f"symlink creation unavailable: {exc}")
 
-    with pytest.raises(MilestoneMutationError, match="outside allowed base"):
-        service.rename_milestone("Alpha", "Beta", update_tasks=True)
+    # The read layer now skips a task file that resolves outside its bucket, so
+    # such a file is not part of the project at all: the rename no longer sees a
+    # task referencing this milestone and proceeds. The property under test is
+    # unchanged and enforced earlier — nothing outside the project is written.
+    service.rename_milestone("Alpha", "Beta", update_tasks=True)
 
-    assert (repo / "backlog" / "milestones" / "Alpha.md").exists()
-    assert not (repo / "backlog" / "milestones" / "Beta.md").exists()
+    assert (repo / "backlog" / "milestones" / "Beta.md").exists()
     assert outside_task.read_text(encoding="utf-8") == original_task_source
 
 
