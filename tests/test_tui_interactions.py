@@ -391,6 +391,8 @@ def test_default_editor_runner_takes_no_lock_when_nothing_changed(monkeypatch):
         "backlog_py.tui.app.with_project_write_lock",
         lambda p, o, fn: operations.append(o) or fn(),
     )
+    # Treat the instant return as a blocking editor the user closed untouched.
+    monkeypatch.setattr("backlog_py.tui.app.NON_BLOCKING_EDITOR_SECONDS", 0.0)
 
     default_editor_runner(project, path)
 
@@ -946,3 +948,48 @@ def test_default_editor_runner_refuses_to_clobber_a_concurrent_write(monkeypatch
         default_editor_runner(project, path)
 
     assert path.read_text(encoding="utf-8") == "concurrent version\n"
+
+
+def test_default_editor_runner_preserves_bytes_when_a_conflict_blocks_the_apply(monkeypatch):
+    """A refused apply must not delete the user's authored content."""
+    project = _project()
+    path = project.root / "backlog" / "tasks" / "task-1.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._configured_editor_command", lambda project: ["fake-editor"])
+
+    def fake_editor(command, edited_path):
+        Path(edited_path).write_text("my hard work\n", encoding="utf-8")
+        path.write_text("concurrent\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", fake_editor)
+    monkeypatch.setattr("backlog_py.tui.app.with_project_write_lock", lambda p, o, fn: fn())
+
+    with pytest.raises(EditorConflictError) as excinfo:
+        default_editor_runner(project, path)
+
+    message = str(excinfo.value)
+    preserved = Path(message.split("preserved at ")[1].strip().rstrip("."))
+    assert preserved.read_text(encoding="utf-8") == "my hard work\n", "the user's edit was destroyed"
+
+
+def test_default_editor_runner_warns_when_the_editor_does_not_block(monkeypatch):
+    """A GUI editor returns instantly; deleting the scratch file would lose the edit."""
+    project = _project()
+    path = project.root / "backlog" / "tasks" / "task-1.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._configured_editor_command", lambda project: ["gui-editor"])
+    # Returns immediately without touching the file, exactly like `code` or `subl`.
+    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", lambda command, edited: None)
+    monkeypatch.setattr("backlog_py.tui.app.with_project_write_lock", lambda p, o, fn: fn())
+
+    with pytest.raises(EditorConflictError) as excinfo:
+        default_editor_runner(project, path)
+
+    message = str(excinfo.value)
+    assert "not waiting" in message
+    scratch = Path(message.split("copy is at ")[1].split(" —")[0].strip())
+    assert scratch.exists(), "the scratch file was deleted while the editor was still open"

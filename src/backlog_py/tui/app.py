@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -710,8 +712,16 @@ def run_tui_app(project: BacklogProject) -> None:
     BacklogTuiApp(project).run()
 
 
+# Below this, an editor that reports "done" without changing anything almost
+# certainly did not wait for the user — GUI editors return as soon as they hand
+# the file to an already-running instance. A terminal editor that the user really
+# did open and close untouched trips this too; the cost is a kept scratch file and
+# a message, which is the right trade against silently deleting their work.
+NON_BLOCKING_EDITOR_SECONDS = 0.5
+
+
 class EditorConflictError(RuntimeError):
-    """Raised when a task file changed while it was open in the editor."""
+    """Raised when an edit could not be applied and the user's bytes were kept."""
 
 
 def default_editor_runner(project: BacklogProject, path: Path) -> None:
@@ -729,17 +739,33 @@ def default_editor_runner(project: BacklogProject, path: Path) -> None:
     command = _configured_editor_command(project)
     original = path.read_bytes() if path.exists() else None
 
-    with tempfile.TemporaryDirectory(prefix="backlog-py-edit-") as scratch:
-        scratch_path = Path(scratch) / path.name
+    # Not a TemporaryDirectory: the scratch file must outlive this function
+    # whenever the user's bytes are not safely applied, otherwise their work is
+    # deleted out from under them.
+    scratch = Path(tempfile.mkdtemp(prefix="backlog-py-edit-"))
+    scratch_path = scratch / path.name
+    keep_scratch = False
+    try:
         if original is not None:
             scratch_path.write_bytes(original)
 
+        started = time.monotonic()
         _run_editor_command(command, scratch_path)
+        elapsed = time.monotonic() - started
 
-        if not scratch_path.exists():
-            return
-        edited = scratch_path.read_bytes()
+        edited = scratch_path.read_bytes() if scratch_path.exists() else None
         if edited == original:
+            if elapsed < NON_BLOCKING_EDITOR_SECONDS:
+                # A GUI editor (code, subl, gedit, open -a) returns immediately and
+                # the user is probably still typing. Deleting the scratch file now
+                # would silently destroy the edit they are about to save.
+                keep_scratch = True
+                raise EditorConflictError(
+                    f"{command[0]} returned immediately, so it is probably not waiting for the "
+                    f"editor to close. Your copy is at {scratch_path} — save it there and it will "
+                    "not be applied automatically. Configure a blocking editor (for example "
+                    "'code --wait') to edit tasks in place."
+                )
             return
 
         def apply_edit() -> None:
@@ -748,9 +774,17 @@ def default_editor_runner(project: BacklogProject, path: Path) -> None:
             current = path.read_bytes() if path.exists() else None
             if current != original:
                 raise EditorConflictError(
-                    f"{path.name} changed while it was open in the editor; "
-                    "your edit was not applied. Reopen the task and redo it."
+                    f"{path.name} changed while it was open in the editor, so your edit was not "
+                    f"applied. It is preserved at {scratch_path}."
                 )
             path.write_bytes(edited)
 
-        with_project_write_lock(project, "tui_task_editor", apply_edit)
+        try:
+            with_project_write_lock(project, "tui_task_editor", apply_edit)
+        except EditorConflictError:
+            # Keep the user's authored bytes; the message points at them.
+            keep_scratch = True
+            raise
+    finally:
+        if not keep_scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
