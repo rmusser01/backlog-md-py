@@ -22,6 +22,8 @@ GIT_COMMAND_TIMEOUT_SECONDS = 30
 
 # work_dir -> (".git" existed when probed, is-inside-work-tree result)
 _WORKTREE_CACHE: dict[str, tuple[bool, bool]] = {}
+# work_dir -> path of work_dir relative to the repository root ("" or "pkg/")
+_PREFIX_CACHE: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,15 @@ def current_task_snapshot_timestamps(
     if not relative_paths:
         return results
 
+    # git reports paths relative to the REPOSITORY root, which is not necessarily
+    # the project root — `discover_project` stops at the first backlog/config.yml,
+    # so <repo>/pkg/backlog/config.yml gives project.root == <repo>/pkg. Translate
+    # into git's path-space before comparing, or every task silently reports inf.
+    prefix = _repository_prefix(work_dir)
+    git_paths = {path: f"{prefix}{relative}" for path, relative in relative_paths.items()}
+
+    # Pathspecs are resolved relative to cwd (the project root), while the output
+    # above is repo-relative — the two path-spaces must not be mixed.
     scope = sorted({posixpath.dirname(value) or "." for value in relative_paths.values()})
     dirty = _dirty_relative_paths(work_dir, scope)
     if dirty is None:
@@ -139,11 +150,23 @@ def current_task_snapshot_timestamps(
         return results
     committed = _last_commit_timestamps(work_dir, scope)
 
-    for path, relative in relative_paths.items():
-        if relative in dirty:
+    for path, git_path in git_paths.items():
+        if git_path in dirty:
             continue
-        results[path] = committed.get(relative, inf)
+        results[path] = committed.get(git_path, inf)
     return results
+
+
+def _repository_prefix(work_dir: Path) -> str:
+    """Path of ``work_dir`` relative to the repository root, with a trailing slash."""
+    key = str(work_dir)
+    cached = _PREFIX_CACHE.get(key)
+    if cached is not None:
+        return cached
+    result = _run_git(work_dir, "rev-parse", "--show-prefix")
+    prefix = result.stdout.strip() if result.returncode == 0 else ""
+    _PREFIX_CACHE[key] = prefix
+    return prefix
 
 
 def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | None:
@@ -176,7 +199,7 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
 def _last_commit_timestamps(work_dir: Path, scope: Sequence[str]) -> dict[str, float]:
     """Most recent commit timestamp per path under ``scope``, in one log walk."""
     result = _run_git(
-        work_dir, "log", "--format=%x00%ct", "--name-only", "HEAD", "--", *scope
+        work_dir, "-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only", "HEAD", "--", *scope
     )
     if result.returncode != 0:
         return {}
