@@ -14,6 +14,17 @@ class MutationSurface:
     entrypoints: tuple[str, ...]
     lock_scope: LockScope
     rationale: str
+    operations: tuple[str, ...] = ()
+    """Lock operation ids callers actually pass to ``with_project_write_lock``.
+
+    These land in lock diagnostics and auto-commit messages, so they must be
+    resolvable here; when a surface's runtime id differs from its registry
+    name, record it explicitly instead of letting the two drift apart.
+    """
+
+    def operation_names(self) -> tuple[str, ...]:
+        """Every operation id that maps to this surface."""
+        return self.operations or (self.name,)
 
 
 MUTATION_SURFACES: tuple[MutationSurface, ...] = (
@@ -58,30 +69,35 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
         ("backlog_py.cli.main", "backlog_py.mcp.tools"),
         "project",
         "Claims task orchestration ownership in active task frontmatter.",
+        operations=("orchestration_claim_task",),
     ),
     MutationSurface(
         "orchestration_release",
         ("backlog_py.cli.main", "backlog_py.mcp.tools"),
         "project",
         "Releases task orchestration ownership in active task frontmatter.",
+        operations=("orchestration_release_task",),
     ),
     MutationSurface(
         "orchestration_transition",
         ("backlog_py.cli.main", "backlog_py.mcp.tools"),
         "project",
         "Transitions task orchestration state in active task frontmatter.",
+        operations=("orchestration_transition_task",),
     ),
     MutationSurface(
         "orchestration_record_run",
         ("backlog_py.cli.main", "backlog_py.mcp.tools"),
         "project",
         "Appends orchestration run history and may update orchestration frontmatter.",
+        operations=("orchestration_record_run",),
     ),
     MutationSurface(
         "orchestration_split",
         ("backlog_py.cli.main", "backlog_py.mcp.tools"),
         "project",
         "Creates follow-up orchestration tasks and may update source task frontmatter.",
+        operations=("orchestration_split_task",),
     ),
     MutationSurface(
         "cleanup_complete_done",
@@ -189,8 +205,8 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
 
 
 def mutation_by_name(name: str) -> MutationSurface:
-    """Return mutation metadata by stable operation name."""
+    """Return mutation metadata by surface name or runtime lock operation id."""
     for surface in MUTATION_SURFACES:
-        if surface.name == name:
+        if surface.name == name or name in surface.operation_names():
             return surface
     raise KeyError(f"Unknown mutation surface: {name}")

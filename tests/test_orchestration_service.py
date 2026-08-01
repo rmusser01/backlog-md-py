@@ -244,6 +244,10 @@ def test_record_run_with_state_update_increments_version_when_expected_version_m
         state_update=OrchestrationStateUpdate(
             status_key="inprogress",
             lease_owner="codex",
+            # A lease owner without an expiry is invalid metadata, and
+            # record_run now refuses to persist it (see
+            # test_record_run_rejects_lease_owner_without_expiry).
+            lease_expires_at="2026-06-26T19:04:00Z",
             correlation_id="run-1",
             review_state="not_started",
             reviewer="human",
@@ -258,6 +262,7 @@ def test_record_run_with_state_update_increments_version_when_expected_version_m
     assert orchestration.version == 1
     assert orchestration.status_key == "inprogress"
     assert orchestration.lease_owner == "codex"
+    assert orchestration.lease_expires_at == "2026-06-26T19:04:00Z"
     assert orchestration.correlation_id == "run-1"
     assert orchestration.review is not None
     assert orchestration.review.state == "not_started"

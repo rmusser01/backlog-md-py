@@ -6,7 +6,7 @@ import json
 import os
 import socket
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -44,6 +44,7 @@ from backlog_py.orchestration.models import (
     TaskSplitItem,
     TaskSplitRequest,
     TaskSplitResult,
+    ValidationIssue,
     parse_orchestration,
     validate_orchestration,
 )
@@ -246,10 +247,11 @@ class OrchestrationService:
             if updated_orchestration != current_orchestration:
                 next_version = current_version + 1
                 updated_orchestration["version"] = next_version
+                _validate_updated_orchestration(task, updated_orchestration, policy)
                 source = _replace_frontmatter_value(source, task.parsed, "orchestration", updated_orchestration)
                 task = _task_from_source(task, source)
 
-        source = append_run_history_entry(source, candidate)
+        source = append_run_history_entry(source, candidate, history=parsed_history)
         updated = repository.replace_task_source(task.id, source)
         return OrchestrationMutationResult(
             task_id=updated.id,
@@ -321,7 +323,12 @@ class OrchestrationService:
         current_version = state.version if state is not None and state.version is not None else 0
         current_status = _state_status_key(task, state)
         candidate = self._split_task_event(task, request, current_status)
-        existing_event = _find_split_idempotency_match(repository, candidate)
+        existing_event = _find_split_idempotency_match(
+            repository,
+            candidate,
+            current_task=task,
+            current_events=parsed_history.events,
+        )
         if existing_event is not None:
             created_task_ids = _created_task_ids_from_event(existing_event)
             return TaskSplitResult(
@@ -383,7 +390,7 @@ class OrchestrationService:
         next_orchestration["version"] = next_version
         try:
             source = _replace_frontmatter_value(task.raw_source, task.parsed, "orchestration", next_orchestration)
-            source = append_run_history_entry(source, event)
+            source = append_run_history_entry(source, event, history=parsed_history)
             updated = repository.replace_task_source(task.id, source)
         except TaskMutationError as exc:
             _rollback_created_tasks(created_tasks)
@@ -512,8 +519,9 @@ class OrchestrationService:
                     details={"field": "lease_ttl_seconds"},
                 )
             expires_at = _utc_timestamp(self._now() + timedelta(seconds=ttl_seconds))
+            claim_status = _claim_target_status(policy, current_status)
             next_orchestration = dict(current_orchestration)
-            next_orchestration["status_key"] = "inprogress"
+            next_orchestration["status_key"] = claim_status
             next_orchestration["lease_owner"] = actor
             next_orchestration["lease_expires_at"] = expires_at
             if request.idempotency_key:
@@ -527,8 +535,8 @@ class OrchestrationService:
                 summary=request.reason or "",
                 idempotency_key=request.idempotency_key or "",
                 task_id=task.id,
-                from_status=current_status if current_status != "inprogress" else "",
-                to_status="inprogress",
+                from_status=current_status if current_status != claim_status else "",
+                to_status=claim_status,
                 metadata={"lease_ttl_seconds": str(ttl_seconds)},
             )
             return event, next_orchestration
@@ -536,6 +544,7 @@ class OrchestrationService:
         def validate(task: TaskRecord, state: Any, current_version: int, policy: OrchestrationPolicy) -> None:
             _validate_current_orchestration(task, policy)
             current_status = _state_status_key(task, state)
+            claim_status = _claim_target_status(policy, current_status)
             actor = resolve_orchestration_actor(request.actor)
             lease_owner = state.lease_owner if state is not None else None
             lease_expires_at = state.lease_expires_at if state is not None else None
@@ -549,13 +558,13 @@ class OrchestrationService:
                         "lease_expires_at": lease_expires_at,
                     },
                 )
-            if not policy.is_claimable(current_status) or not policy.can_transition(current_status, "inprogress"):
+            if not policy.is_claimable(current_status) or not policy.can_transition(current_status, claim_status):
                 raise OrchestrationTransitionError(
                     "Orchestration claim transition is not allowed",
                     details={
                         "task_id": task.id,
                         "from_status": current_status,
-                        "to_status": "inprogress",
+                        "to_status": claim_status,
                     },
                 )
 
@@ -706,7 +715,7 @@ class OrchestrationService:
         next_orchestration = dict(next_orchestration)
         next_orchestration["version"] = next_version
         source = _replace_frontmatter_value(task.raw_source, task.parsed, "orchestration", next_orchestration)
-        source = append_run_history_entry(source, candidate)
+        source = append_run_history_entry(source, candidate, history=parsed_history)
         updated = repository.replace_task_source(task.id, source)
         return OrchestrationMutationResult(
             task_id=updated.id,
@@ -798,10 +807,28 @@ def _split_items_json(items: Sequence[TaskSplitItem]) -> str:
 def _find_split_idempotency_match(
     repository: MutableRepository,
     candidate: OrchestrationRunEvent,
+    *,
+    current_task: TaskRecord | None = None,
+    current_events: Sequence[OrchestrationRunEvent] | None = None,
 ) -> OrchestrationRunEvent | None:
+    """Find a prior split event for this idempotency key.
+
+    Split events are recorded on the task being split, so the caller's already
+    parsed history is checked first: the common replay never touches the rest
+    of the project. The project-wide sweep remains for the cross-task case
+    (the same key used against a different parent), but it is lazy, skips the
+    task that was just checked, and stops at the first match.
+    """
     if not candidate.idempotency_key:
         return None
-    for task in [*repository.list_tasks(), *repository.list_completed_tasks()]:
+    if current_events is not None:
+        match = find_idempotency_match(current_events, candidate)
+        if match is not None:
+            return match
+    current_task_id = current_task.id.casefold() if current_task is not None else None
+    for task in _iter_repository_tasks(repository):
+        if current_task_id is not None and task.id.casefold() == current_task_id:
+            continue
         if candidate.idempotency_key not in task.raw_source:
             continue
         parsed_history = parse_run_history(task.raw_source)
@@ -812,6 +839,12 @@ def _find_split_idempotency_match(
         if match is not None:
             return match
     return None
+
+
+def _iter_repository_tasks(repository: MutableRepository) -> Iterator[TaskRecord]:
+    """Yield active tasks, then completed ones, loading each set only if reached."""
+    yield from repository.list_tasks()
+    yield from repository.list_completed_tasks()
 
 
 def _created_task_ids_from_event(event: OrchestrationRunEvent) -> list[str]:
@@ -974,19 +1007,60 @@ def _validate_current_orchestration(task: TaskRecord, policy: OrchestrationPolic
         return
     raise OrchestrationValidationError(
         "Task orchestration metadata is invalid",
-        details={
-            "task_id": task.id,
-            "issues": [
-                {
-                    "code": issue.code,
-                    "message": issue.message,
-                    "path": issue.path,
-                    "severity": issue.severity,
-                }
-                for issue in issues
-            ],
-        },
+        details={"task_id": task.id, "issues": _issue_payload(issues)},
     )
+
+
+def _validate_updated_orchestration(
+    task: TaskRecord,
+    orchestration: Mapping[str, Any],
+    policy: OrchestrationPolicy,
+) -> None:
+    """Reject record_run state updates that would persist invalid metadata.
+
+    record_run deliberately does not validate the *current* orchestration:
+    that tolerance is the documented repair path for a task whose frontmatter
+    is already broken. What it must not do is write new invalid state - a
+    malformed lease_expires_at or a lease owner without an expiry makes every
+    later claim, release, and transition raise OrchestrationValidationError and
+    marks the task invalid in the queue until the file is hand repaired. A
+    record_run that repairs the state still passes, because only the resulting
+    mapping is checked.
+    """
+    issues = validate_orchestration({"orchestration": dict(orchestration)}, policy)
+    if not issues:
+        return
+    raise OrchestrationValidationError(
+        "Orchestration state update would store invalid metadata",
+        details={"task_id": task.id, "issues": _issue_payload(issues)},
+    )
+
+
+def _issue_payload(issues: Sequence[ValidationIssue]) -> list[dict[str, object]]:
+    return [
+        {
+            "code": issue.code,
+            "message": issue.message,
+            "path": issue.path,
+            "severity": issue.severity,
+        }
+        for issue in issues
+    ]
+
+
+def _claim_target_status(policy: OrchestrationPolicy, current_status: str) -> str:
+    """Resolve the status a claim moves a task into, from the policy.
+
+    Claim mirrors release here: release derives its target from
+    ``policy.first_claimable_status()``, so claim must derive its target from
+    the policy too. Hardcoding "inprogress" made every claim fail for projects
+    whose working state is named something else ("doing", "active", ...).
+    Falling back to the current status keeps event construction total (it runs
+    before the idempotency replay check); a policy with no working state then
+    fails the claim in ``validate`` because a status cannot transition to
+    itself unless the policy declares that transition.
+    """
+    return policy.claim_target_status(current_status) or current_status
 
 
 def _state_status_key(task: TaskRecord, state: Any) -> str:
