@@ -5,6 +5,7 @@ before the corresponding fix landed.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -318,3 +319,180 @@ def test_repeated_reads_do_not_rescan_within_one_mutable_repository(tmp_path: Pa
     repo.list_tasks()
 
     assert loads["count"] == after_first, "repeated reads re-parsed every task file"
+
+
+# --------------------------------------------------------------------------
+# Review follow-ups
+# --------------------------------------------------------------------------
+
+
+def _captured_warnings():
+    """Collect loguru warnings; caplog does not receive loguru output."""
+    from loguru import logger as loguru_logger
+
+    messages: list[str] = []
+    sink_id = loguru_logger.add(lambda message: messages.append(message), level="WARNING")
+    return messages, sink_id
+
+
+def test_task_frontmatter_disable_is_honoured_even_when_gated(tmp_path: Path) -> None:
+    """`onStatusChange: false` is an opt-OUT, not attacker-executable content."""
+    sentinel = tmp_path / "config-ran.txt"
+    project = _project(tmp_path, onStatusChange=f"touch {sentinel}")
+    path = _tasks_dir(project) / "task-1 - Optout.md"
+    path.write_text(
+        "---\nid: TASK-1\ntitle: Optout\nstatus: To Do\ncreated_date: '2026-01-01'\n"
+        "onStatusChange: false\n---\n\n## Description\n\nBody\n",
+        encoding="utf-8",
+    )
+
+    repo = MutableRepository(project, refresh_remote_refs=False)
+    repo.edit_task("TASK-1", status="In Progress")
+
+    assert not sentinel.exists(), "a per-task opt-out was overridden by the config command"
+
+
+def test_create_draft_dependency_may_reference_a_completed_task(tmp_path: Path) -> None:
+    from backlog_py.core.drafts import DraftService
+
+    project = _project(tmp_path)
+    repo = MutableRepository(project, refresh_remote_refs=False)
+    repo.create_task(title="Dependency")
+    repo.edit_task("TASK-1", status="Done")
+    repo.complete_task("TASK-1")
+
+    draft = DraftService(project).create_draft(title="Later", dependencies=["TASK-1"])
+    recorded = draft.parsed.frontmatter.get("dependencies") or []
+    assert any("TASK-1" in str(dep).upper() for dep in recorded)
+
+
+def test_crlf_survives_clearing_a_section(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    path = _tasks_dir(project) / "task-1 - Crlf.md"
+    source = (
+        "---\nid: TASK-1\ntitle: Crlf\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n\n"
+        "## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nBody\n<!-- SECTION:DESCRIPTION:END -->\n\n"
+        "## Implementation Plan\n\n<!-- SECTION:PLAN:BEGIN -->\nA plan\n<!-- SECTION:PLAN:END -->\n"
+    ).replace("\n", "\r\n")
+    path.write_bytes(source.encode("utf-8"))
+
+    MutableRepository(project, refresh_remote_refs=False).edit_task("TASK-1", clear_plan=True)
+
+    raw = path.read_bytes()
+    bare_lf = raw.count(b"\n") - raw.count(b"\r\n")
+    assert bare_lf == 0, f"{bare_lf} bare LF endings leaked into a CRLF file when clearing a section"
+
+
+def test_duplicate_task_ids_warn_when_timestamps_differ(tmp_path: Path) -> None:
+    """The common case is two files committed at different times, not an exact tie."""
+    import subprocess
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    env = {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path),
+    }
+
+    def git(*args, **kwargs):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, env={**env, **kwargs})
+
+    git("init", "-q")
+    project = init_project(root).project
+    tasks = _tasks_dir(project)
+    body = "---\nid: TASK-1\ntitle: {title}\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n\n## Description\n\nx\n"
+    (tasks / "task-1 - Alpha.md").write_text(body.format(title="Alpha"), encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "first", GIT_AUTHOR_DATE="2026-01-01T00:00:00", GIT_COMMITTER_DATE="2026-01-01T00:00:00")
+    (tasks / "task-1 - Zulu.md").write_text(body.format(title="Zulu"), encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-qm", "second", GIT_AUTHOR_DATE="2026-01-02T00:00:00", GIT_COMMITTER_DATE="2026-01-02T00:00:00")
+
+    messages, sink_id = _captured_warnings()
+    try:
+        tasks_found = ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
+    finally:
+        from loguru import logger as loguru_logger
+
+        loguru_logger.remove(sink_id)
+
+    assert len([t for t in tasks_found if t.id.casefold() == "task-1"]) == 1
+    assert any("Duplicate task id" in message for message in messages), (
+        "a duplicate id resolved by commit time was hidden with no warning"
+    )
+
+
+def test_unparsable_decision_still_reserves_its_id(tmp_path: Path) -> None:
+    """Skipping a bad file must not let its id be reissued to a new file."""
+    from backlog_py.core.decisions import DecisionService
+
+    project = _project(tmp_path)
+    service = DecisionService(project)
+    first = service.create_decision(title="Alpha")
+    first.path.write_text("---\nbroken: [unterminated\n", encoding="utf-8")
+
+    second = service.create_decision(title="Beta")
+    assert second.id != first.id, f"id {first.id} was reissued after the original became unparsable"
+
+
+def test_unparsable_document_still_reserves_its_id(tmp_path: Path) -> None:
+    from backlog_py.core.documents import DocumentService
+
+    project = _project(tmp_path)
+    service = DocumentService(project)
+    first = service.create_document_from_title("Alpha", content="a")
+    first.path.write_text("---\nbroken: [unterminated\n", encoding="utf-8")
+
+    second = service.create_document_from_title("Beta", content="b")
+    assert second.id != first.id, f"id {first.id} was reissued after the original became unparsable"
+
+
+def test_section_edit_ignores_a_nested_duplicate_block(tmp_path: Path) -> None:
+    """A DESCRIPTION block nested inside PLAN must not receive the edit."""
+    project = _project(tmp_path)
+    path = _tasks_dir(project) / "task-1 - Nested.md"
+    path.write_text(
+        "---\nid: TASK-1\ntitle: Nested\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n\n"
+        "## Implementation Plan\n\n"
+        "<!-- SECTION:PLAN:BEGIN -->\n"
+        "<!-- SECTION:DESCRIPTION:BEGIN -->\nnested decoy\n<!-- SECTION:DESCRIPTION:END -->\n"
+        "<!-- SECTION:PLAN:END -->\n\n"
+        "## Description\n\n"
+        "<!-- SECTION:DESCRIPTION:BEGIN -->\nreal\n<!-- SECTION:DESCRIPTION:END -->\n",
+        encoding="utf-8",
+    )
+
+    repo = MutableRepository(project, refresh_remote_refs=False)
+    repo.edit_task("TASK-1", description="NEW TEXT")
+
+    text = path.read_text(encoding="utf-8")
+    plan_block = text.split("## Description")[0]
+    assert "NEW TEXT" not in plan_block, "the edit was spliced into the nested block inside PLAN"
+    assert "NEW TEXT" in text
+
+
+def test_disabling_a_callback_does_not_execute_a_snake_case_alias(tmp_path: Path) -> None:
+    """Disabling the hook must not run an attacker-planted alias key.
+
+    The caller-supplied trust flag was set for any non-None value including a
+    disable, while the write only cleared the camelCase key — leaving a planted
+    `on_status_change:` to execute with the gate skipped.
+    """
+    project = _project(tmp_path)
+    sentinel = tmp_path / "pwned.txt"
+    path = _tasks_dir(project) / "task-1 - Alias.md"
+    path.write_text(
+        "---\nid: TASK-1\ntitle: Alias\nstatus: To Do\ncreated_date: '2026-01-01'\n"
+        f"on_status_change: touch {sentinel}\n---\n\n## Description\n\nBody\n",
+        encoding="utf-8",
+    )
+
+    repo = MutableRepository(project, refresh_remote_refs=False)
+    repo.edit_task("TASK-1", status="In Progress", on_status_change=False)
+
+    assert not sentinel.exists(), "a planted on_status_change alias executed while disabling the hook"
