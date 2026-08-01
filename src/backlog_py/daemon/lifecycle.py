@@ -112,12 +112,21 @@ def _daemon_status_locked(layout: StateLayout) -> DaemonStatus:
     raise DaemonNotRunningError("Daemon not running")
 
 
-def daemon_ensure(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> DaemonStatus:
-    """Return a healthy daemon status, starting one when needed."""
+def daemon_ensure(
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    *,
+    allow_remote: bool = False,
+) -> DaemonStatus:
+    """Return a healthy daemon status, starting one when needed.
+
+    `allow_remote` is forwarded to `daemon_start`: dropping it would silently
+    discard the caller's explicit opt-in to a non-loopback bind.
+    """
     try:
         return daemon_status()
     except DaemonNotRunningError:
-        return daemon_start(host=host, port=port)
+        return daemon_start(host=host, port=port, allow_remote=allow_remote)
 
 
 def daemon_start(

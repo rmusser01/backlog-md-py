@@ -175,3 +175,23 @@ def test_daemon_cli_matches_the_daemon_service_signatures():
 
     inspect.signature(run_foreground_service).bind(host="0.0.0.0", port=18765, allow_remote=True)
     inspect.signature(daemon_start).bind(host="0.0.0.0", port=18765, allow_remote=True)
+
+
+def test_daemon_ensure_forwards_allow_remote_to_daemon_start(monkeypatch):
+    """The Python API opt-in must reach daemon_start instead of being dropped."""
+    from backlog_py.daemon import lifecycle
+
+    seen: dict[str, object] = {}
+
+    def fake_daemon_status():
+        raise lifecycle.DaemonNotRunningError("Daemon not running")
+
+    def fake_daemon_start(host=lifecycle.DEFAULT_HOST, port=lifecycle.DEFAULT_PORT, *, allow_remote=False):
+        seen.update(host=host, port=port, allow_remote=allow_remote)
+        return "started"
+
+    monkeypatch.setattr(lifecycle, "daemon_status", fake_daemon_status)
+    monkeypatch.setattr(lifecycle, "daemon_start", fake_daemon_start)
+
+    assert lifecycle.daemon_ensure(host="0.0.0.0", port=18765, allow_remote=True) == "started"
+    assert seen == {"host": "0.0.0.0", "port": 18765, "allow_remote": True}
