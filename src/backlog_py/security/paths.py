@@ -13,6 +13,18 @@ class PathContainmentError(ValueError):
         return f"Path {self.candidate} is outside allowed base {self.base}"
 
 
+class PathComponentRedirectError(PathContainmentError):
+    """A component of a trusted anchor is a symlink, even one that stays in the project.
+
+    Subclasses ``PathContainmentError`` so every existing handler keeps catching
+    it; only the message differs, because "outside allowed base" would be a
+    false statement about a link that resolves within the project.
+    """
+
+    def __str__(self) -> str:
+        return f"Path {self.candidate} is a symlink and cannot be trusted as a base directory"
+
+
 def assert_path_within_base(base: Path, candidate: Path) -> Path:
     """Resolve both paths and reject candidates outside the real base directory.
 
@@ -38,6 +50,22 @@ def assert_trusted_subpath(root: Path, candidate: Path) -> Path:
     and resolving it would make the attacker's target the base, so everything
     "inside" it passes. Walking down from ``root`` one component at a time means
     a symlink planted at any level is rejected instead of becoming the new base.
+
+    Containment alone is too weak here. A link to a sibling *inside* the project
+    resolves within the root and would pass, yet ``backlog/docs ->
+    backlog/decisions`` silently redirects every document write into the
+    decisions directory, where documents overwrite decision files. So each
+    component must resolve to exactly itself: ``current`` is already resolved, so
+    ``current / part`` equals its own resolution only when ``part`` is a real
+    entry -- either a genuine directory or one that does not exist yet, since
+    ``Path.resolve()`` is non-strict and leaves a missing tail untouched. Only a
+    symlink breaks that equality, so any link in the chain is refused regardless
+    of where it points. Deliberately relocating ``backlog/docs`` elsewhere on
+    disk is refused too; a trusted base has to be the directory it names.
+
+    ``root`` itself is resolved once up front and is exempt, which is what keeps
+    a project reached through a symlink working (macOS ``/tmp`` ->
+    ``/private/tmp``, a symlinked checkout, a container bind mount).
     """
     resolved_root = root.resolve()
     try:
@@ -46,5 +74,10 @@ def assert_trusted_subpath(root: Path, candidate: Path) -> Path:
         raise PathContainmentError(base=resolved_root, candidate=candidate.absolute()) from exc
     current = resolved_root
     for part in relative.parts:
-        current = assert_path_within_base(current, current / part)
+        next_path = current / part
+        # Escapes keep their containment message; this only resolves the link.
+        resolved_next = assert_path_within_base(current, next_path)
+        if resolved_next != next_path:
+            raise PathComponentRedirectError(base=current, candidate=next_path)
+        current = resolved_next
     return current

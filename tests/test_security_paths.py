@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import (
+    PathContainmentError,
+    assert_path_within_base,
+    assert_trusted_subpath,
+)
 
 
 def test_assert_path_within_base_allows_backlog_child(tmp_path):
@@ -88,6 +92,96 @@ def test_assert_path_within_base_rejects_symlinked_directory_escape(tmp_path):
         assert_path_within_base(base, linked_dir / "task.md")
 
 
+def _symlink(link: Path, target: Path, *, directory: bool = True) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+
+def test_assert_trusted_subpath_allows_plain_nested_path(tmp_path):
+    root = tmp_path / "proj"
+    anchor = root / "backlog" / "docs"
+    anchor.mkdir(parents=True)
+
+    assert assert_trusted_subpath(root, anchor) == anchor.resolve()
+
+
+def test_assert_trusted_subpath_allows_missing_directory(tmp_path):
+    """Service constructors compute their anchor before the directory exists.
+
+    ``Path.resolve()`` is non-strict, so a component that is simply absent
+    resolves to itself and must not be mistaken for a redirected one.
+    """
+    root = tmp_path / "proj"
+    root.mkdir()
+    missing = root / "backlog" / "archive" / "milestones"
+
+    assert assert_trusted_subpath(root, missing) == root.resolve() / "backlog" / "archive" / "milestones"
+
+
+def test_assert_trusted_subpath_allows_root_reached_through_symlink(tmp_path):
+    """The macOS /tmp -> /private/tmp case: only the root is resolved, once, up front."""
+    real_root = tmp_path / "real"
+    (real_root / "backlog" / "docs").mkdir(parents=True)
+    link_root = tmp_path / "linked"
+    _symlink(link_root, real_root)
+
+    resolved = assert_trusted_subpath(link_root, link_root / "backlog" / "docs")
+
+    assert resolved == (real_root / "backlog" / "docs").resolve()
+
+
+def test_assert_trusted_subpath_rejects_component_symlinked_to_project_sibling(tmp_path):
+    """``backlog/docs -> backlog/decisions`` never leaves the root, and must still be refused.
+
+    Containment alone accepts it: the resolved target is inside the project. But
+    it silently redirects every document write into the decisions directory,
+    where documents overwrite decision files. Trusting a component requires it to
+    be the real directory it names, not merely a pointer to somewhere allowed.
+    """
+    root = tmp_path / "proj"
+    decisions = root / "backlog" / "decisions"
+    decisions.mkdir(parents=True)
+    docs = root / "backlog" / "docs"
+    _symlink(docs, decisions)
+
+    with pytest.raises(PathContainmentError, match="symlink"):
+        assert_trusted_subpath(root, docs)
+
+
+def test_assert_trusted_subpath_rejects_intermediate_symlink_to_project_sibling(tmp_path):
+    """The redirect can sit at any depth, not just on the final component."""
+    root = tmp_path / "proj"
+    real = root / "real"
+    (real / "docs").mkdir(parents=True)
+    backlog = root / "backlog"
+    _symlink(backlog, real)
+
+    with pytest.raises(PathContainmentError):
+        assert_trusted_subpath(root, backlog / "docs")
+
+
+def test_assert_trusted_subpath_rejects_component_symlinked_outside_project(tmp_path):
+    root = tmp_path / "proj"
+    (root / "backlog").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    docs = root / "backlog" / "docs"
+    _symlink(docs, outside)
+
+    with pytest.raises(PathContainmentError, match="outside allowed base"):
+        assert_trusted_subpath(root, docs)
+
+
+def test_assert_trusted_subpath_rejects_candidate_outside_root(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+
+    with pytest.raises(PathContainmentError):
+        assert_trusted_subpath(root, tmp_path / "elsewhere" / "docs")
+
+
 def test_config_write_rejects_a_symlinked_backlog_directory(tmp_path):
     """A symlink planted inside the project must not let a config write escape it.
 
@@ -156,6 +250,34 @@ def test_service_directory_symlink_cannot_redirect_writes(tmp_path, subdir, serv
             service.create_draft(title="Escaped")
 
     assert list(outside.iterdir()) == [], "a write escaped the project through a directory symlink"
+
+
+def test_docs_symlinked_to_decisions_cannot_cross_contaminate(tmp_path):
+    """The reported P1: the redirect target is inside the project, so containment passed.
+
+    ``backlog/docs -> backlog/decisions`` never escapes the root, yet it routes
+    every document write into the decisions directory where the two managed
+    directories collide and documents overwrite decision files.
+    """
+    from backlog_py.core.documents import DocumentService
+    from backlog_py.core.init import init_project
+
+    project = init_project(tmp_path / "proj", no_git=True).project
+    decisions = project.backlog_dir / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    (decisions / "decision-1 - Keep.md").write_text("original decision", encoding="utf-8")
+
+    docs = project.backlog_dir / "docs"
+    if docs.exists():
+        shutil.rmtree(docs)
+    _symlink(docs, decisions)
+
+    # Use a name that does not collide, so the only thing that can stop the
+    # write is the containment guard rather than an "already exists" check.
+    with pytest.raises(ValueError, match="symlink"):
+        DocumentService(project).create_document("cross.md", title="Cross", content="x")
+
+    assert [p.name for p in decisions.iterdir()] == ["decision-1 - Keep.md"]
 
 
 def test_milestone_directory_symlink_cannot_redirect_writes(tmp_path):

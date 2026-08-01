@@ -295,6 +295,44 @@ def test_content_security_policy_allows_configured_remote_mermaid_origin(tmp_pat
     assert directives["script-src"] == ["'self'", "'unsafe-inline'", "https://cdn.example.test"]
 
 
+def test_content_security_policy_allows_self_styles(tmp_path, monkeypatch):
+    """`style-src` must list 'self', not only 'unsafe-inline'.
+
+    The board inlines its CSS today, so omitting 'self' is invisible - but the
+    Mermaid bundle is already served from /assets, and the first stylesheet that
+    follows it there would be blocked by a policy that never allows same-origin
+    styles.
+    """
+    monkeypatch.delenv("BACKLOG_PY_BROWSER_MERMAID_URL", raising=False)
+    service = start_browser_service(_project(tmp_path), host="127.0.0.1", port=0)
+    try:
+        with urllib.request.urlopen(service.root_url, timeout=5) as response:
+            headers = dict(response.headers)
+    finally:
+        service.shutdown()
+
+    directives = _csp_directives(headers["Content-Security-Policy"])
+    assert directives["style-src"] == ["'self'", "'unsafe-inline'"]
+
+
+def test_content_security_policy_allows_bracketed_ipv6_mermaid_origin(tmp_path, monkeypatch):
+    """A loopback IPv6 mermaid host must reach script-src, not be dropped.
+
+    Dropping it while the URL is still emitted as the script `src` turns a
+    working config into an opaque CSP violation in the console.
+    """
+    monkeypatch.setenv("BACKLOG_PY_BROWSER_MERMAID_URL", "http://[::1]:8080/mermaid.min.js")
+    service = start_browser_service(_project(tmp_path), host="127.0.0.1", port=0)
+    try:
+        with urllib.request.urlopen(service.root_url, timeout=5) as response:
+            headers = dict(response.headers)
+    finally:
+        service.shutdown()
+
+    directives = _csp_directives(headers["Content-Security-Policy"])
+    assert directives["script-src"] == ["'self'", "'unsafe-inline'", "http://[::1]:8080"]
+
+
 def test_content_security_policy_ignores_malformed_mermaid_url(tmp_path, monkeypatch):
     # A hostile env value must not be able to inject extra CSP directives.
     monkeypatch.setenv("BACKLOG_PY_BROWSER_MERMAID_URL", "https://evil.test; script-src *:443/x.js")
@@ -308,6 +346,73 @@ def test_content_security_policy_ignores_malformed_mermaid_url(tmp_path, monkeyp
     policy = headers["Content-Security-Policy"]
     assert policy.count("script-src") == 1
     assert "*" not in _csp_directives(policy)["script-src"]
+
+
+# --- Security headers apply to every method --------------------------------
+
+
+_SECURITY_HEADERS = ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy")
+
+
+def test_head_request_mirrors_get_headers_without_a_body(tmp_path):
+    """`curl -I` is the obvious way to check the headers; it must not 501."""
+    service = start_browser_service(_project(tmp_path), host="127.0.0.1", port=0)
+    try:
+        head = _raw_request(service, "HEAD", "/")
+        get = _raw_request(service, "GET", "/")
+    finally:
+        service.shutdown()
+
+    assert head["status"] == 200, head
+    assert head["body"] == ""
+    for header in _SECURITY_HEADERS:
+        assert head["headers"].get(header) == get["headers"].get(header), header
+
+
+def test_head_request_honours_the_host_check(tmp_path):
+    service = start_browser_service(_project(tmp_path), host="127.0.0.1", port=0)
+    try:
+        response = _raw_request(service, "HEAD", "/api/board", host_header=f"attacker.example.com:{service.port}")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 403, response
+
+
+def test_unsupported_methods_are_rejected_with_security_headers(tmp_path):
+    """OPTIONS/PUT/DELETE must not fall through to the stdlib 501.
+
+    `BaseHTTPRequestHandler.send_error` answers before `do_*` runs, so those
+    responses skipped both the Host check and every security header.
+    """
+    service = start_browser_service(_project(tmp_path), host="127.0.0.1", port=0)
+    try:
+        responses = {method: _raw_request(service, method, "/") for method in ("OPTIONS", "PUT", "DELETE", "PATCH")}
+        unknown = _raw_request(service, "TRACE", "/")
+    finally:
+        service.shutdown()
+
+    for method, response in responses.items():
+        assert response["status"] == 405, (method, response)
+        assert response["headers"].get("Allow") == "GET, POST", (method, response)
+        for header in _SECURITY_HEADERS:
+            assert response["headers"].get(header), (method, header, response)
+
+    # A verb with no handler at all still goes through the stdlib error path,
+    # which must now also carry the headers.
+    assert unknown["status"] in (405, 501), unknown
+    for header in _SECURITY_HEADERS:
+        assert unknown["headers"].get(header), (header, unknown)
+
+
+def test_unsupported_method_with_foreign_host_is_forbidden(tmp_path):
+    service = start_browser_service(_project(tmp_path), host="127.0.0.1", port=0)
+    try:
+        response = _raw_request(service, "PUT", "/api/board", host_header=f"attacker.example.com:{service.port}")
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 403, response
 
 
 # --- Endpoint id parsing (decode before validating) -----------------------
