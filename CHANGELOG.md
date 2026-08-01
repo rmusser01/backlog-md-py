@@ -19,6 +19,28 @@
   passed explicitly to `task create`/`task edit --on-status-change` still runs.
 - Automatic release tagging now waits for CI to succeed on the exact commit
   before tagging and publishing to PyPI, rather than racing it.
+- `daemon start`/`daemon run` now reject a non-loopback `--host`. Pass
+  `--allow-remote` to bind a LAN address deliberately; the daemon serves the
+  full MCP JSON-RPC surface including every write tool.
+- `search --type` with no supported values is now a usage error (exit 2) instead
+  of silently searching nothing and exiting 0.
+- `--plain` is now implemented on all ten orchestration commands, emitting
+  tab-separated records for agent parsing. It was previously declared and
+  ignored on five of them, and identical to the default on `record-run`, whose
+  plain output has therefore changed shape.
+- MCP tool schemas now set `additionalProperties: false` where the handler has a
+  fixed signature, so an unknown argument is rejected rather than accepted and
+  ignored. `resources/read` returns `-32002` for an unknown URI, and a
+  non-project `project` argument returns a tool error pointing at
+  `backlog://init-required` instead of a `-32603` internal error.
+- `claim_task` derives its target status from the orchestration policy, so a
+  policy whose working state is not `inprogress` can now be claimed at all.
+- `record_run` rejects a state update that would persist invalid orchestration
+  metadata, and run history is capped at 50 entries. A replay whose idempotency
+  key has aged out returns a conflict rather than silently re-running the work.
+- Task ids are no longer reissued from a file that failed to parse; allocation
+  also scans filenames, so a corrupted `decision-9` leaves a gap rather than
+  producing two files under one id.
 
 ### Fixed
 

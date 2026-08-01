@@ -53,7 +53,11 @@ RESOURCE_NOT_FOUND = -32002
 # layout of the machine running the server. Relative paths (backlog/tasks/...)
 # and URIs (backlog://init-required) are meaningful to the caller, so the
 # leading separator must not be preceded by a word character, '.', ':' or '/'.
-_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![\w.:/])(?:[A-Za-z]:[\\/]|/)[^\s'\"]*")
+# Requires at least one path segment after the root, so a bare "/" used as a
+# separator in prose ("To Do / In Progress") or markup ("</div>") is left alone.
+_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?<![\w.:/])(?:[A-Za-z]:[\\/]|/)[\w.\-]+(?:[\\/][^\s'\"]*)?"
+)
 
 _INIT_REQUIRED_MESSAGE = (
     "No Backlog.md project was found for the requested project directory. "

@@ -25,6 +25,10 @@ from backlog_py.core.init import InitProjectError, InitProjectResult, init_proje
 from backlog_py.core.milestones import MilestoneMutationError, MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.errors import NotFoundError
+# Hosts the daemon may bind without an explicit remote-exposure opt-in. Sourced
+# from the server so the CLI cannot accept a spelling the server then rejects
+# with a raw ValueError.
+from backlog_py.mcp.http_server import LOOPBACK_HOSTS as _LOOPBACK_HOSTS
 from backlog_py.core.repository import (
     MutableRepository,
     ReadOnlyRepository,
@@ -93,8 +97,6 @@ _TASK_USAGE = (
     "task edit TASK_ID | task archive TASK_ID | task demote TASK_ID"
 )
 
-# Hosts the daemon may bind without an explicit remote-exposure opt-in.
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0:0:0:0:0:0:0:1"})
 
 
 def _clean_error_message(exc: Exception) -> str:
@@ -116,8 +118,13 @@ def _validate_bind_host(ctx: click.Context, param: click.Parameter, value: str |
     normalized = value.strip()
     if ctx.params.get("allow_remote"):
         return normalized
-    if normalized.casefold() in _LOOPBACK_HOSTS:
-        return normalized
+    # Return the spelling the server accepts, not the user's. Accepting LOCALHOST
+    # or [::1] here and passing it through unchanged made the server reject it
+    # with a bare ValueError after the CLI had already approved it.
+    canonical = normalized.casefold().strip("[]")
+    for allowed in _LOOPBACK_HOSTS:
+        if canonical == allowed.casefold().strip("[]"):
+            return allowed
     raise click.BadParameter(
         f"{value} is not a loopback host. The daemon exposes the MCP JSON-RPC surface, so it must bind "
         "127.0.0.1, localhost, or ::1. Pass --allow-remote to bind a non-loopback host deliberately.",
