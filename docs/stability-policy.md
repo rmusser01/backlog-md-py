@@ -2,15 +2,17 @@
 
 `backlog-md-py` is stable starting with the 1.0.0 release line. Stable means
 the documented local-file CLI, MCP, daemon, browser-board, TUI, and Python
-helper workflows are covered by the 1.x compatibility contract after release
-validation.
+helper workflows are covered by the current major compatibility contract after
+release validation. The contract in force is the 2.x line; see the 2.0.0
+CHANGELOG entry for the breaking changes that closed the 1.x line and the
+migration step for each.
 
 ## Supported Contract
 
 The stable support contract covers:
 
-- Python 3.11, 3.12, and 3.13 package installation from released wheels and
-  source distributions.
+- Python 3.11, 3.12, 3.13, and 3.14 package installation from released wheels
+  and source distributions.
 - The `backlog-py` CLI and `python -m backlog_py` module entry point for the
   operations represented in the compatibility inventory.
 - The SDK-free `backlog-py-mcp` stdio entry point, pure MCP helper functions,
@@ -39,7 +41,7 @@ supported contract.
 
 ## Change Policy
 
-Within the 1.x line, minor releases may add backward-compatible CLI, MCP,
+Within a major line, minor releases may add backward-compatible CLI, MCP,
 browser, TUI, daemon, or Python helper behavior when the parity inventory or
 safety model requires it. Patch releases should preserve the stable supported
 contract and focus on bug fixes, documentation, compatibility evidence, and
