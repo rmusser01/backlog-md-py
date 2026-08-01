@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import shutil
 import subprocess  # nosec B404
-import tempfile
-import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -26,6 +23,8 @@ from backlog_py.core.documents import DocumentMutationError, DocumentRecord, Doc
 from backlog_py.core.drafts import DraftService
 from backlog_py.core.init import InitProjectError, InitProjectResult, init_project
 from backlog_py.core.milestones import MilestoneMutationError, MilestoneRecord, MilestoneService
+from backlog_py.core import editing
+from backlog_py.core.editing import EditorAbort, edit_via_scratch_copy
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.errors import NotFoundError
 # Hosts the daemon may bind without an explicit remote-exposure opt-in. Sourced
@@ -70,7 +69,7 @@ from backlog_py.storage.config import (
 )
 from backlog_py.runtime.locks import LockTimeoutError, with_init_lock, with_project_write_lock
 from backlog_py.runtime.state import RuntimeRecord, runtime_status
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import PathContainmentError
 from backlog_py.storage.project import discover_project
 
 T = TypeVar("T")
@@ -106,7 +105,8 @@ _CLI_DOMAIN_ERRORS = (
 # module at import time (it would drag the CLI into the optional Textual
 # dependency graph), and the CLI cannot import the TUI for the same reason in
 # reverse. Hoisting both onto a shared editor module is the right follow-up.
-NON_BLOCKING_EDITOR_SECONDS = 0.5
+# Re-exported from the shared editor flow; kept so existing references resolve.
+NON_BLOCKING_EDITOR_SECONDS = editing.NON_BLOCKING_EDITOR_SECONDS
 
 
 class _EditorConflictError(click.ClickException):
@@ -2432,127 +2432,32 @@ def _frontmatter_value_includes_time(value: object) -> bool:
 def _edit_task_in_configured_editor(ctx: click.Context, task_record: TaskRecord) -> None:
     """Edit a task file without holding the project write lock while the user types.
 
-    The lock is process-wide and every other writer (MCP, browser, daemon,
-    another CLI invocation) gives up after 5 seconds, so wrapping an interactive
-    ``$EDITOR`` session in it stalls the whole project for as long as the editor
-    stays open. Instead the user edits a copy, and the lock is held only for the
-    instant it takes to apply the result (auto-commit included, since it runs
-    inside ``with_project_write_lock``).
+    The flow lives in :mod:`backlog_py.core.editing` so the CLI and the TUI
+    cannot drift on it; this only supplies the two surface-specific pieces (how
+    to launch the editor, how to take the lock — auto-commit included, since it
+    runs inside ``with_project_write_lock``) and maps the shared abort onto a
+    ClickException so it renders as a clean error rather than a traceback.
     """
     project = _project(ctx)
-    # Validate before anything is copied: a path that escapes the project must
-    # be rejected while there is still nothing of the user's to lose.
-    safe_path = assert_path_within_base(project.root, task_record.path)
     editor_command = _configured_editor_command(project)
-    original = safe_path.read_bytes() if safe_path.exists() else None
 
-    # Not a TemporaryDirectory: the scratch file must outlive this function
-    # whenever the user's bytes are not safely applied, otherwise their work is
-    # deleted out from under them. The copy keeps the original filename so the
-    # editor shows a recognisable name with the right extension.
-    scratch = Path(tempfile.mkdtemp(prefix="backlog-py-edit-"))
-    scratch_path = scratch / safe_path.name
-    keep_scratch = False
+    def run_editor(scratch_path: Path) -> None:
+        _run_editor_command(editor_command, scratch_path)
+
+    def apply_locked(apply: Callable[[], None]) -> None:
+        _locked_write(ctx, "task_editor", apply)
+
     try:
-        if original is not None:
-            scratch_path.write_bytes(original)
-        # From here the copy is the file the user types into, so it is kept by
-        # default. It is deleted only at the three points below where its bytes
-        # are provably not the user's work: never touched, or already applied.
-        keep_scratch = True
-
-        started = time.monotonic()
-        try:
-            _run_editor_command(editor_command, scratch_path)
-        except Exception as exc:
-            if _editing_copy_is_untouched(scratch_path, original):
-                keep_scratch = False
-                raise
-            raise _EditorConflictError(
-                f"{editor_command[0]} failed ({_clean_error_message(exc)}) after saving, so nothing "
-                f"was applied. Your edit is preserved at {scratch_path}."
-            ) from exc
-        elapsed = time.monotonic() - started
-
-        if not scratch_path.exists():
-            # Deleting the copy inside the editor is how you abort an edit; it is
-            # not a request to write an empty file over the task. Nothing the
-            # user authored survives, so there is nothing to keep either.
-            keep_scratch = False
-            click.echo(f"No changes applied to {task_record.id}: the editing copy was deleted.")
-            return
-
-        edited = scratch_path.read_bytes()
-        if edited == original:
-            # Unchanged content is never worth applying, and this is the only
-            # case where cleanup can race an editor that is still open on the
-            # copy: a GUI editor hands the file to a running instance and returns
-            # while the user is still typing, whatever the clock says. So the
-            # copy is always kept and always reported; elapsed time only chooses
-            # the wording.
-            if elapsed < NON_BLOCKING_EDITOR_SECONDS:
-                raise _EditorConflictError(
-                    f"{editor_command[0]} returned immediately, so it is probably not waiting for the "
-                    f"editor to close. Nothing was applied, and your copy is preserved at "
-                    f"{scratch_path} — save into that file and copy it back yourself. Configure a "
-                    "blocking editor (for example 'code --wait') to edit tasks in place."
-                )
-            raise _EditorConflictError(
-                f"{safe_path.name} came back unchanged, so nothing was applied. Your copy is "
-                f"preserved at {scratch_path} in case the editor is still open on it; delete it "
-                "once you are done with it."
-            )
-
-        def apply_edit() -> None:
-            # Re-read under the lock: a writer that landed while the editor was
-            # open must not be silently overwritten with stale content.
-            current = safe_path.read_bytes() if safe_path.exists() else None
-            if current != original:
-                raise _EditorConflictError(
-                    f"{safe_path.name} changed while it was open in the editor, so your edit was "
-                    f"not applied. It is preserved at {scratch_path}."
-                )
-            # Deliberately a plain write rather than the temp-file + os.replace
-            # dance used elsewhere: os.replace swaps in a new inode, which would
-            # break hard links and any editor or watcher holding this file open.
-            # A torn write still leaves the user's bytes in the copy, which is
-            # only deleted once this returns.
-            safe_path.write_bytes(edited)
-
-        try:
-            _locked_write(ctx, "task_editor", apply_edit)
-        except _EditorConflictError:
-            # Already carries the scratch path; do not re-wrap it.
-            raise
-        except Exception as exc:
-            # A lock timeout because another writer holds the project lock, a
-            # full disk, a read-only file: the edit is not applied, so the copy
-            # stays and the message says where it is.
-            raise _EditorConflictError(
-                f"{safe_path.name} could not be updated ({type(exc).__name__}: "
-                f"{_clean_error_message(exc)}), so your edit was not applied. It is preserved at "
-                f"{scratch_path}."
-            ) from exc
-        # The bytes are in the task file; the copy is now redundant.
-        keep_scratch = False
-        click.echo(f"Edited {task_record.id}")
-    finally:
-        if not keep_scratch:
-            shutil.rmtree(scratch, ignore_errors=True)
-
-
-def _editing_copy_is_untouched(scratch_path: Path, original: bytes | None) -> bool:
-    """Whether the editing copy holds nothing the user authored.
-
-    Only a copy that answers ``True`` may be deleted. An unreadable copy answers
-    ``False``: not being able to tell is not a licence to delete it.
-    """
-    try:
-        if not scratch_path.exists():
-            return True
-        return scratch_path.read_bytes() == original
-    except OSError:
-        return False
+        edit_via_scratch_copy(
+            task_record.path,
+            project.root,
+            editor_label=editor_command[0],
+            run_editor=run_editor,
+            apply_locked=apply_locked,
+        )
+    except EditorAbort as exc:
+        raise _EditorConflictError(str(exc)) from exc
+    click.echo(f"Edited {task_record.id}")
 
 
 def _configured_editor_command(project: BacklogProject) -> list[str]:

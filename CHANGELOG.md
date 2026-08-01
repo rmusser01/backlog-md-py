@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixed
+
+- Task reads no longer follow a symlink out of the project. A file such as
+  `backlog/tasks/leak.md` pointing anywhere readable was parsed and its contents
+  surfaced as a task on the browser board, in `task list`, in search, and through
+  the MCP read tools. Writes were already containment-checked; reads were not.
+  A link that stays inside its bucket still works, so relocating the whole
+  directory onto another volume is unaffected. (#155)
+
+### Changed
+
+- The interactive-editor flow is now shared by the CLI and the TUI
+  (`backlog_py.core.editing`). It was implemented twice, and both copies had to
+  be fixed for the same four data-loss defects independently. Behaviour on both
+  surfaces is unchanged. (#154)
+
 ## 2.0.0 - 2026-08-01
 
 This release fixes data-corruption, security, and performance defects found in a
