@@ -34,6 +34,10 @@ _KEY_ALIASES = {
     "zero_padded_ids": ("zero_padded_ids", "zeroPaddedIds"),
     "task_prefix": ("task_prefix", "taskPrefix"),
     "check_active_branches": ("check_active_branches", "checkActiveBranches"),
+    "task_frontmatter_status_callbacks": (
+        "task_frontmatter_status_callbacks",
+        "taskFrontmatterStatusCallbacks",
+    ),
     "active_branch_days": ("active_branch_days", "activeBranchDays"),
     "definition_of_done": ("definition_of_done", "definitionOfDone"),
 }
@@ -49,6 +53,7 @@ _BOOLEAN_CONFIG_KEYS = {
     "auto_commit",
     "bypass_git_hooks",
     "check_active_branches",
+    "task_frontmatter_status_callbacks",
 }
 _INTEGER_CONFIG_KEYS = {"active_branch_days"}
 _PORT_CONFIG_KEYS = {"default_port"}
@@ -81,6 +86,7 @@ def load_config(path: Path) -> BacklogConfig:
         zero_padded_ids=_optional_positive_int(raw, "zero_padded_ids"),
         task_prefix=_task_prefix_value(raw),
         check_active_branches=_bool_value(raw, "check_active_branches", True),
+        task_frontmatter_status_callbacks=_bool_value(raw, "task_frontmatter_status_callbacks", False),
         active_branch_days=_int_value(raw, "active_branch_days", 30),
         definition_of_done=_optional_definition_of_done_defaults(_get(raw, "definition_of_done", None)),
     )
@@ -98,7 +104,7 @@ def replace_definition_of_done_defaults(project: BacklogProject, items: object) 
     key = "definition_of_done" if "definition_of_done" in raw else "definitionOfDone"
     raw[key] = normalized
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
-    _atomic_write_text(project.config_path, f"{yaml_text}\n")
+    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
     return load_config(project.config_path)
 
 
@@ -162,7 +168,7 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
         raw[raw_key] = parsed_value
         display_value = parsed_value
     yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
-    _atomic_write_text(project.config_path, f"{yaml_text}\n")
+    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
     return raw_key, display_value
 
 
@@ -180,9 +186,12 @@ def _load_raw_config(path: Path) -> dict[Any, Any]:
     return raw
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
+def _atomic_write_text(path: Path, content: str, base: Path | None = None) -> None:
+    # Anchor containment on a trusted base (the project root) when the caller can
+    # supply one: checking a file against its own parent is vacuous, so a symlink
+    # planted at backlog/ would otherwise redirect the write outside the project.
     try:
-        safe_path = assert_path_within_base(path.parent, path)
+        safe_path = assert_path_within_base(base if base is not None else path.parent, path)
     except PathContainmentError as exc:
         raise ValueError(str(exc)) from exc
     temp_name: str | None = None

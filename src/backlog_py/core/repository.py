@@ -6,7 +6,7 @@ import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from math import isfinite
+from math import inf, isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -14,12 +14,12 @@ import yaml
 from loguru import logger
 
 from backlog_py.core.errors import NotFoundError
-from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent
-from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown
+from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent, numeric_id_key
+from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown, TaskMarkdownSection
 from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.runtime.git import (
-    current_task_snapshot_timestamp,
+    current_task_snapshot_timestamps,
     list_active_branch_task_snapshots,
     maybe_fetch_remote_refs,
 )
@@ -88,6 +88,7 @@ class ReadOnlyRepository:
         self._use_sqlite_index = _sqlite_index_enabled() if use_sqlite_index is None else use_sqlite_index
         self._remote_refs_refreshed = False
         self._visible_task_records: dict[str, list[TaskRecord]] | None = None
+        self._lookup_task_records: list[TaskRecord] | None = None
 
     @classmethod
     def from_path(cls, cwd: Path) -> "ReadOnlyRepository":
@@ -149,12 +150,64 @@ class ReadOnlyRepository:
             self.project.backlog_dir / "archive" / "tasks",
         )
 
+    def _lookup_task_records_cached(self) -> list[TaskRecord]:
+        """Every on-disk task across all buckets, loaded once per repository instance."""
+        if self._lookup_task_records is None:
+            records: list[TaskRecord] = []
+            for directory in self._task_lookup_dirs():
+                records.extend(_load_tasks_from_dir(directory))
+            self._lookup_task_records = records
+        return self._lookup_task_records
+
+    def _all_known_task_records(self) -> list[TaskRecord]:
+        """Active, completed, and archived tasks — everything ``get_task`` can resolve.
+
+        Dependency and parent validation uses this so that completing a task does
+        not retroactively make it unreferenceable.
+        """
+        records = list(self.list_tasks())
+        seen = {task.id.casefold() for task in records}
+        for task in self._lookup_task_records_cached():
+            if task.id.casefold() not in seen:
+                seen.add(task.id.casefold())
+                records.append(task)
+        return records
+
     def _reserved_task_ids(self) -> set[str]:
         """Casefolded ids of every task in any bucket (active, completed, archived)."""
         ids = {task.id.casefold() for task in self.list_tasks()}
-        for directory in self._task_lookup_dirs():
-            ids.update(task.id.casefold() for task in _load_tasks_from_dir(directory))
+        ids.update(task.id.casefold() for task in self._lookup_task_records_cached())
         return ids
+
+    def _task_id_is_reserved(self, candidate: str) -> bool:
+        """Zero-padding-insensitive reservation check.
+
+        ``TASK-7`` and ``TASK-007`` denote the same task to ``get_task``, so both
+        forms must be refused when either is already on disk — otherwise two files
+        claim one id and the original becomes unaddressable.
+        """
+        candidate_key = numeric_id_key(candidate)
+        for reserved in self._reserved_task_ids():
+            if reserved == candidate.casefold():
+                return True
+            if candidate_key is not None and numeric_id_key(reserved) == candidate_key:
+                return True
+        return False
+
+    def _invalidate_task_cache(self) -> None:
+        self._visible_task_records = None
+        self._lookup_task_records = None
+
+    def _safe_task_path(self, candidate: Path) -> Path:
+        """Assert a task file lives under the backlog directory.
+
+        The base must be a trusted anchor, not the candidate's own parent:
+        "is X inside its own parent" is vacuously true, and resolving an
+        attacker-planted directory symlink would launder an escape into a
+        containment pass. Anchoring on the backlog dir means a symlinked
+        ``tasks/`` resolves outside it and is rejected.
+        """
+        return _mutation_path(self.project.backlog_dir, candidate)
 
     def list_completed_tasks(self) -> list[TaskRecord]:
         return sorted(self._load_completed_tasks(), key=_task_record_sort_key)
@@ -279,8 +332,26 @@ class ReadOnlyRepository:
         for candidate in candidates:
             key = candidate.task.id.casefold()
             current = selected.get(key)
-            if current is None or _visible_record_key(candidate) >= _visible_record_key(current):
+            if current is None:
                 selected[key] = candidate
+                continue
+            if _visible_record_key(candidate) > _visible_record_key(current):
+                selected[key] = candidate
+            elif _visible_record_key(candidate) == _visible_record_key(current):
+                # Equal timestamps happen outside a worktree, or when both files
+                # are dirty. Pick deterministically by path so list/board/export
+                # do not silently disagree between runs, and say so: one of these
+                # files is invisible everywhere until the duplicate id is fixed.
+                winner, loser = sorted((candidate, current), key=lambda record: str(record.task.path))
+                if winner.task.path != current.task.path:
+                    selected[key] = winner
+                if candidate.task.path != current.task.path:
+                    logger.warning(
+                        "Duplicate task id {}: using {} and ignoring {}",
+                        candidate.task.id,
+                        winner.task.path,
+                        loser.task.path,
+                    )
 
         return {
             "tasks": [
@@ -324,9 +395,12 @@ def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
 
 
 def _current_branch_records(project: BacklogProject, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
+    tasks = _load_tasks_from_dir(task_dir)
+    # One batched git call for the whole directory instead of three per file.
+    timestamps = current_task_snapshot_timestamps(project, [task.path for task in tasks])
     return [
-        _VisibleTaskRecord(bucket, task, current_task_snapshot_timestamp(project, task.path))
-        for task in _load_tasks_from_dir(task_dir)
+        _VisibleTaskRecord(bucket, task, timestamps.get(task.path, inf))
+        for task in tasks
     ]
 
 
@@ -383,10 +457,6 @@ class MutableRepository(ReadOnlyRepository):
     def from_path(cls, cwd: Path) -> "MutableRepository":
         return cls(discover_project(Path.cwd(), explicit_cwd=cwd))
 
-    def _load_visible_task_records(self) -> dict[str, list[TaskRecord]]:
-        self._visible_task_records = None
-        return super()._load_visible_task_records()
-
     def create_task(
         self,
         *,
@@ -415,8 +485,10 @@ class MutableRepository(ReadOnlyRepository):
     ) -> TaskRecord:
         current_config = load_config(self.project.config_path)
         normalized_on_status_change = _normalize_on_status_change_create(on_status_change)
-        tasks = self.list_tasks()
-        normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
+        known_tasks = self._all_known_task_records()
+        normalized_parent_task_id = _normalize_parent_task_id(
+            parent_task_id, known_tasks, current_config.task_prefix
+        )
         normalized_id = _normalize_task_id(
             task_id or (
                 self._next_child_task_id(normalized_parent_task_id)
@@ -425,11 +497,11 @@ class MutableRepository(ReadOnlyRepository):
             ),
             current_config.task_prefix,
         )
-        if normalized_id.casefold() in self._reserved_task_ids():
+        if self._task_id_is_reserved(normalized_id):
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
-        _reject_missing_dependencies(normalized_dependencies, tasks)
-        _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
+        _reject_missing_dependencies(normalized_dependencies, known_tasks)
+        _reject_circular_dependencies(normalized_id, normalized_dependencies, known_tasks)
         task_status = status or current_config.default_status
         _reject_unknown_status(task_status, current_config.statuses)
         target = self._task_path(normalized_id, title)
@@ -466,6 +538,7 @@ class MutableRepository(ReadOnlyRepository):
         )
         parse_task_markdown(content)
         _atomic_write_text(target, content)
+        self._invalidate_task_cache()
         return _load_task(target)
 
     def edit_task(
@@ -517,7 +590,7 @@ class MutableRepository(ReadOnlyRepository):
         old_status = task.status
         original_source = task.raw_source
         on_status_change_update = _normalize_on_status_change_update(on_status_change)
-        safe_current_path = _mutation_path(task.path.parent, task.path)
+        safe_current_path = self._safe_task_path(task.path)
         target_path = safe_current_path
         if title is not None:
             target_path = self._task_path(task.id, title, base_dir=task.path.parent)
@@ -525,10 +598,10 @@ class MutableRepository(ReadOnlyRepository):
                 raise TaskMutationError(f"Task path already exists: {target_path.name}")
         normalized_dependencies = None
         if dependencies is not None:
-            tasks = self.list_tasks()
+            known_tasks = self._all_known_task_records()
             normalized_dependencies = _normalize_dependency_ids(dependencies, self.project.config.task_prefix)
-            _reject_missing_dependencies(normalized_dependencies, tasks)
-            _reject_circular_dependencies(task.id, normalized_dependencies, tasks)
+            _reject_missing_dependencies(normalized_dependencies, known_tasks)
+            _reject_circular_dependencies(task.id, normalized_dependencies, known_tasks)
         source = task.raw_source
         parsed = task.parsed
         if description is not None:
@@ -668,21 +741,31 @@ class MutableRepository(ReadOnlyRepository):
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
         _atomic_write_text(target_path, source)
+        self._invalidate_task_cache()
         if target_path != safe_current_path:
             safe_current_path.unlink()
         updated_task = _load_task(target_path)
         if status is not None and updated_task.status != old_status:
-            _run_status_change_callback(self.project, updated_task, old_status, updated_task.status)
+            _run_status_change_callback(
+                self.project,
+                updated_task,
+                old_status,
+                updated_task.status,
+                # A command supplied by this very call was typed by the caller, so
+                # it is trusted even though it is read back out of frontmatter.
+                caller_supplied_callback=on_status_change is not None,
+            )
         return updated_task
 
     def replace_task_source(self, task_id: str, source: str) -> TaskRecord:
         task = self.get_task(task_id)
-        safe_current_path = _mutation_path(task.path.parent, task.path)
+        safe_current_path = self._safe_task_path(task.path)
         parsed = parse_task_markdown(source)
         parsed_id = str(parsed.frontmatter.get("id") or "")
         if parsed_id.casefold() != task.id.casefold():
             raise TaskMutationError(f"Task source id mismatch: expected {task.id}, got {parsed_id or '<missing>'}")
         _atomic_write_text(safe_current_path, source)
+        self._invalidate_task_cache()
         return _load_task(safe_current_path)
 
     def replace_task_frontmatter_values(self, task_id: str, updates: dict[str, object]) -> TaskRecord:
@@ -692,7 +775,7 @@ class MutableRepository(ReadOnlyRepository):
 
     def archive_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
-        safe_current_path = _mutation_path(task.path.parent, task.path)
+        safe_current_path = self._safe_task_path(task.path)
         archive_root = _mutation_path(self.project.backlog_dir, self.project.backlog_dir / "archive")
         archive_dir = _mutation_path(archive_root, archive_root / "tasks")
         archive_dir.mkdir(parents=True, exist_ok=True)
@@ -700,19 +783,21 @@ class MutableRepository(ReadOnlyRepository):
         if target_path.exists():
             raise TaskMutationError(f"Archived task path already exists: {target_path.name}")
         os.replace(safe_current_path, target_path)
+        self._invalidate_task_cache()
         return _load_task(target_path)
 
     def complete_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
         if not _is_done_status(task.status):
             raise TaskMutationError(f'Task {task.id} is not Done. Set status to "Done" before completing it.')
-        safe_current_path = _mutation_path(task.path.parent, task.path)
+        safe_current_path = self._safe_task_path(task.path)
         completed_dir = _mutation_path(self.project.backlog_dir, self.project.backlog_dir / "completed")
         completed_dir.mkdir(parents=True, exist_ok=True)
         target_path = _mutation_path(completed_dir, completed_dir / task.path.name)
         if target_path.exists():
             raise TaskMutationError(f"Completed task path already exists: {target_path.name}")
         os.replace(safe_current_path, target_path)
+        self._invalidate_task_cache()
         return _load_task(target_path)
 
     def _next_task_id(self, config: BacklogConfig | None = None) -> str:
@@ -742,7 +827,7 @@ class MutableRepository(ReadOnlyRepository):
         task_dir = base_dir if base_dir is not None else self.project.backlog_dir / "tasks"
         task_dir.mkdir(parents=True, exist_ok=True)
         path = task_dir / f"{task_id.lower()} - {_slug_title(title)}.md"
-        return _mutation_path(task_dir, path)
+        return self._safe_task_path(path)
 
 
 def _load_task(path: Path) -> TaskRecord:
@@ -835,10 +920,11 @@ def _matches_modified_file_filters(
     ]
     if not modified_files:
         return False
-    return any(
-        requested_value.strip().casefold() in modified_file
+    # ALL-of, matching every other list filter: --modified-files a,b means the
+    # task touched both, not either.
+    return all(
+        any(requested_value.strip().casefold() in modified_file for modified_file in modified_files)
         for requested_value in requested_values
-        for modified_file in modified_files
     )
 
 
@@ -963,9 +1049,9 @@ def _mutation_path(base: Path, candidate: Path) -> Path:
 
 def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
     section = _find_section(parsed, name)
-    new_section = _render_section_markers(name, content)
+    new_section = _render_section_markers(name, content, _detect_newline(source))
     if section is not None:
-        section_start = source.find(section.raw)
+        section_start = _section_offset(source, section)
         if section_start == -1:
             return source.replace(section.raw.rstrip("\r\n"), new_section, 1)
         section_end = _section_replace_end(source, section_start + len(section.raw), _section_lookup_names(name))
@@ -1000,7 +1086,7 @@ def _remove_section(source: str, parsed: ParsedTaskMarkdown, name: str) -> str:
     section = parsed.sections.get(name)
     if section is None:
         return source
-    section_start = source.find(section.raw)
+    section_start = _section_offset(source, section)
     if section_start == -1:
         return source
     heading = _heading_for_section(name)
@@ -1016,6 +1102,21 @@ def _remove_section(source: str, parsed: ParsedTaskMarkdown, name: str) -> str:
     if before:
         return f"{before}\n"
     return after
+
+
+def _section_offset(source: str, section: TaskMarkdownSection) -> int:
+    """Locate a parsed section in ``source``, preferring its recorded offset.
+
+    Chained edits shift later offsets, so the recorded position is only trusted
+    when the text still matches; otherwise fall back to a content search.
+    """
+    if section.start >= 0 and source[section.start : section.end] == section.raw:
+        return section.start
+    return source.find(section.raw)
+
+
+def _detect_newline(source: str) -> str:
+    return "\r\n" if "\r\n" in source else "\n"
 
 
 def _find_section(parsed: ParsedTaskMarkdown, name: str):
@@ -1070,33 +1171,35 @@ def _section_end_line_pattern(names: Sequence[str]) -> re.Pattern[str]:
 
 
 def _insert_section(source: str, name: str, content: str) -> str:
-    block = f"{_heading_for_section(name)}\n\n{_render_section_markers(name, content)}"
+    newline = _detect_newline(source)
+    block = f"{_heading_for_section(name)}{newline * 2}{_render_section_markers(name, content, newline)}"
     if name == "PLAN":
         try:
             acceptance_block = _extract_marker_block(source, "AC")
         except TaskMutationError:
             acceptance_block = ""
         if acceptance_block:
-            return source.replace(acceptance_block, f"{acceptance_block.rstrip()}\n\n{block}", 1)
+            return source.replace(acceptance_block, f"{acceptance_block.rstrip()}{newline * 2}{block}", 1)
     if name == "FINAL_SUMMARY":
         return _insert_section_before_heading(source, "## Definition of Done", block)
-    return source.rstrip() + f"\n\n{block}\n"
+    return source.rstrip() + f"{newline * 2}{block}{newline}"
 
 
 def _insert_section_before_heading(source: str, heading: str, block: str) -> str:
+    newline = _detect_newline(source)
     heading_start = source.find(f"\n{heading}")
     if heading_start != -1:
         heading_start += 1
     elif source.startswith(heading):
         heading_start = 0
     else:
-        return source.rstrip() + f"\n\n{block}\n"
+        return source.rstrip() + f"{newline * 2}{block}{newline}"
 
     before = source[:heading_start].rstrip()
     after = source[heading_start:].lstrip()
     if before:
-        return f"{before}\n\n{block}\n\n{after}"
-    return f"{block}\n\n{after}"
+        return f"{before}{newline * 2}{block}{newline * 2}{after}"
+    return f"{block}{newline * 2}{after}"
 
 
 def _append_to_section(
@@ -1255,10 +1358,11 @@ def _render_optional_section(name: str, content: str) -> str:
     return f"{_heading_for_section(name)}\n\n{_render_section_markers(name, normalized)}\n\n"
 
 
-def _render_section_markers(name: str, content: str) -> str:
+def _render_section_markers(name: str, content: str, newline: str = "\n") -> str:
+    body = content.replace("\r\n", "\n").replace("\n", newline) if newline != "\n" else content
     return (
-        f"<!-- SECTION:{name}:BEGIN -->\n"
-        f"{content}\n"
+        f"<!-- SECTION:{name}:BEGIN -->{newline}"
+        f"{body}{newline}"
         f"<!-- SECTION:{name}:END -->"
     )
 
@@ -1494,11 +1598,23 @@ def _normalize_on_status_change_value(value: str | bool | None) -> str | None | 
     return normalized
 
 
-def _task_status_callback_command(task: TaskRecord, config: BacklogConfig) -> str | None:
+def _task_status_callback_command(
+    task: TaskRecord, config: BacklogConfig, *, caller_supplied_callback: bool = False
+) -> str | None:
     raw = task.parsed.frontmatter.get("onStatusChange")
     if raw is None:
         raw = task.parsed.frontmatter.get("on_status_change")
     if raw is not None:
+        if not (config.task_frontmatter_status_callbacks or caller_supplied_callback):
+            # This command comes from the task file, which travels in from clones,
+            # branches, and pull requests. Running it would let a status change
+            # (including a board drag-and-drop) execute attacker-authored shell.
+            logger.warning(
+                "Ignoring onStatusChange in {} frontmatter: set taskFrontmatterStatusCallbacks "
+                "to true in config to allow task files to run commands",
+                task.id,
+            )
+            return config.on_status_change
         normalized = _normalize_on_status_change_value(raw if isinstance(raw, bool) else str(raw))
         if normalized is _NO_STATUS_CALLBACK_UPDATE:
             return None
@@ -1511,8 +1627,14 @@ def _run_status_change_callback(
     task: TaskRecord,
     old_status: str,
     new_status: str,
+    *,
+    caller_supplied_callback: bool = False,
 ) -> None:
-    command = _task_status_callback_command(task, load_config(project.config_path))
+    command = _task_status_callback_command(
+        task,
+        load_config(project.config_path),
+        caller_supplied_callback=caller_supplied_callback,
+    )
     if not command:
         return
     try:
