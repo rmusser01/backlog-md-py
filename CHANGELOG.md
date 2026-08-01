@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.1 - 2026-08-01
+
+A follow-up to 2.0.0 closing the two items its review left open. No behaviour
+changes to the supported contract.
+
 ### Fixed
 
 - Task reads no longer follow a symlink out of the project. A file such as
