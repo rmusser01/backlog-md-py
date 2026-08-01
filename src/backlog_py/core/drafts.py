@@ -10,6 +10,7 @@ from loguru import logger
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
+from backlog_py.security.paths import assert_trusted_subpath
 from backlog_py.core.repository import (
     MutableRepository,
     ReadOnlyRepository,
@@ -42,7 +43,9 @@ class DraftService:
 
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
-        self.drafts_dir = project.backlog_dir / "drafts"
+        # Validated per level: a repo can ship backlog/drafts as a symlink, and a
+        # resolved attacker-controlled anchor would pass containment.
+        self.drafts_dir = assert_trusted_subpath(project.root, project.backlog_dir / "drafts")
 
     def create_draft(
         self,
@@ -71,11 +74,13 @@ class DraftService:
         normalized_id = _normalize_draft_id(draft_id) if draft_id is not None else self._next_draft_id()
         if self._draft_exists(normalized_id):
             raise TaskMutationError(f"Draft id already exists: {normalized_id}")
+        # Every addressable task, not just the active bucket: completing a task
+        # must not retroactively make it unreferenceable by a later draft.
         tasks = ReadOnlyRepository(
             self.project,
             refresh_remote_refs=False,
             include_active_branch_snapshots=False,
-        ).list_tasks()
+        )._all_known_task_records()
         current_config = load_config(self.project.config_path)
         normalized_parent_task_id = _normalize_parent_task_id(parent_task_id, tasks, current_config.task_prefix)
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)

@@ -13,7 +13,11 @@ from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository, TaskMutationError, _atomic_write_text, _mutation_path
 from backlog_py.markdown.task_parser import parse_task_markdown
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import (
+    PathContainmentError,
+    assert_path_within_base,
+    assert_trusted_subpath,
+)
 
 
 class MilestoneMutationError(ValueError):
@@ -40,8 +44,11 @@ class _TaskReferenceUpdate:
 class MilestoneService:
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
-        self.active_dir = project.backlog_dir / "milestones"
-        self.archive_dir = project.backlog_dir / "archive" / "milestones"
+        # Validated per level: a symlinked milestones dir must not become the base.
+        self.active_dir = assert_trusted_subpath(project.root, project.backlog_dir / "milestones")
+        self.archive_dir = assert_trusted_subpath(
+            project.root, project.backlog_dir / "archive" / "milestones"
+        )
 
     def add_milestone(self, name: str, description: str = "") -> MilestoneRecord:
         target = self._active_path(name)

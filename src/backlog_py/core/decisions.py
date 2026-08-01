@@ -15,7 +15,11 @@ from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.search.simple import ranked_matches
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import (
+    PathContainmentError,
+    assert_path_within_base,
+    assert_trusted_subpath,
+)
 
 
 VALID_DECISION_STATUSES = {"proposed", "accepted", "rejected", "superseded"}
@@ -44,7 +48,9 @@ class DecisionRecord:
 class DecisionService:
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
-        self.decisions_dir = project.backlog_dir / "decisions"
+        # Validated per level: a repo can ship backlog/decisions as a symlink,
+        # and a resolved attacker-controlled anchor would pass containment.
+        self.decisions_dir = assert_trusted_subpath(project.root, project.backlog_dir / "decisions")
 
     def create_decision(self, title: str, *, status: str = "proposed") -> DecisionRecord:
         decision_id = self._next_decision_id()
@@ -109,6 +115,13 @@ class DecisionService:
             match = re.fullmatch(r"decision-(\d+)", decision.id.casefold())
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
+        # Also scan filenames: an unparsable file is skipped by list_decisions(),
+        # and reissuing its number would put two files under one id.
+        if self.decisions_dir.is_dir():
+            for path in self.decisions_dir.glob("*.md"):
+                match = re.match(r"decision-(\d+)", path.stem.casefold())
+                if match is not None:
+                    max_id = max(max_id, int(match.group(1)))
         return format_numbered_id("decision-", max_id + 1, self.project.config.zero_padded_ids)
 
 

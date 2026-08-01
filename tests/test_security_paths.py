@@ -114,3 +114,66 @@ def test_config_write_rejects_a_symlinked_backlog_directory(tmp_path):
         set_config_value(project, "defaultPort", "9999")
 
     assert (outside / config_name).read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize(
+    "subdir,service_attr",
+    [("docs", "docs_dir"), ("decisions", "decisions_dir"), ("drafts", "drafts_dir")],
+)
+def test_service_directory_symlink_cannot_redirect_writes(tmp_path, subdir, service_attr):
+    """A repo shipping backlog/<subdir> as a symlink must not become the trusted base.
+
+    assert_path_within_base resolves the base, so an attacker-planted directory
+    symlink would otherwise make every candidate under it "contained".
+    """
+    from backlog_py.core.init import init_project
+
+    project = init_project(tmp_path / "proj", no_git=True).project
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = project.backlog_dir / subdir
+    if target.exists():
+        shutil.rmtree(target)
+    try:
+        target.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    if subdir == "docs":
+        from backlog_py.core.documents import DocumentService as Service
+    elif subdir == "decisions":
+        from backlog_py.core.decisions import DecisionService as Service
+    else:
+        from backlog_py.core.drafts import DraftService as Service
+
+    with pytest.raises(ValueError):
+        service = Service(project)
+        if subdir == "docs":
+            service.create_document("escaped.md", title="Escaped", content="x")
+        elif subdir == "decisions":
+            service.create_decision(title="Escaped")
+        else:
+            service.create_draft(title="Escaped")
+
+    assert list(outside.iterdir()) == [], "a write escaped the project through a directory symlink"
+
+
+def test_milestone_directory_symlink_cannot_redirect_writes(tmp_path):
+    from backlog_py.core.init import init_project
+    from backlog_py.core.milestones import MilestoneService
+
+    project = init_project(tmp_path / "proj", no_git=True).project
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = project.backlog_dir / "milestones"
+    if target.exists():
+        shutil.rmtree(target)
+    try:
+        target.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    with pytest.raises(ValueError):
+        MilestoneService(project).add_milestone(name="Escaped")
+
+    assert list(outside.iterdir()) == [], "a milestone write escaped the project"

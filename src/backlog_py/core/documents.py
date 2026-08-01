@@ -15,7 +15,11 @@ from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.search.simple import ranked_matches
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import (
+    PathContainmentError,
+    assert_path_within_base,
+    assert_trusted_subpath,
+)
 
 
 class DocumentMutationError(ValueError):
@@ -37,7 +41,9 @@ class DocumentRecord:
 class DocumentService:
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
-        self.docs_dir = project.backlog_dir / "docs"
+        # Validated per level: a repo can ship backlog/docs as a symlink, and a
+        # resolved attacker-controlled anchor would pass containment.
+        self.docs_dir = assert_trusted_subpath(project.root, project.backlog_dir / "docs")
 
     def create_document(
         self,
@@ -203,6 +209,13 @@ class DocumentService:
             match = re.fullmatch(r"DOC-(\d+)", document.id.upper())
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
+        # Also scan filenames: an unparsable file is skipped by list_documents(),
+        # and reissuing its number would put two files under one id.
+        if self.docs_dir.is_dir():
+            for path in self.docs_dir.rglob("*.md"):
+                match = re.match(r"doc-(\d+)", path.stem.casefold())
+                if match is not None:
+                    max_id = max(max_id, int(match.group(1)))
         return format_numbered_id("DOC-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _document_id_exists(self, document_id: str) -> bool:
