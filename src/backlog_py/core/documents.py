@@ -13,9 +13,13 @@ from backlog_py.core.ids import format_numbered_id
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
-from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.markdown.task_parser import parse_task_markdown, salvage_frontmatter_id
 from backlog_py.search.simple import ranked_matches
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import (
+    PathContainmentError,
+    assert_path_within_base,
+    assert_trusted_subpath,
+)
 
 
 class DocumentMutationError(ValueError):
@@ -37,7 +41,9 @@ class DocumentRecord:
 class DocumentService:
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
-        self.docs_dir = project.backlog_dir / "docs"
+        # Validated per level: a repo can ship backlog/docs as a symlink, and a
+        # resolved attacker-controlled anchor would pass containment.
+        self.docs_dir = assert_trusted_subpath(project.root, project.backlog_dir / "docs")
 
     def create_document(
         self,
@@ -77,9 +83,19 @@ class DocumentService:
         return self.create_document(path, title=title, content=content, metadata=frontmatter)
 
     def list_documents(self) -> list[DocumentRecord]:
+        documents, _ = self._scan_documents()
+        return sorted(documents, key=lambda document: document.path_relative)
+
+    def _scan_documents(self) -> tuple[list[DocumentRecord], list[Path]]:
+        """Read every document file, returning parsed records and skipped paths.
+
+        Id allocation needs the skipped paths as well as the records: a file that
+        cannot be parsed still occupies whatever id it holds.
+        """
         if not self.docs_dir.is_dir():
-            return []
+            return ([], [])
         documents: list[DocumentRecord] = []
+        unparsed: list[Path] = []
         for path in sorted(self.docs_dir.rglob("*.md")):
             try:
                 documents.append(self._load_document(path))
@@ -90,7 +106,8 @@ class DocumentService:
                 # A single unparsable file must not disable every document
                 # operation; skip it and warn, as the task repository does.
                 logger.warning("Skipping unreadable document file {}: {}", path, exc)
-        return sorted(documents, key=lambda document: document.path_relative)
+                unparsed.append(path)
+        return (documents, unparsed)
 
     def search_documents(self, query: str) -> list[DocumentRecord]:
         return ranked_matches(self.list_documents(), query, _document_search_text)
@@ -195,22 +212,40 @@ class DocumentService:
             raise DocumentMutationError(f"Invalid document path: {directory}") from exc
         return relative
 
+    def _reserved_document_ids(self) -> set[str]:
+        """Casefolded ids claimed on disk, including ids inside unparsable files.
+
+        ``list_documents()`` skips a file it cannot parse, which hides that file's
+        id from allocation. Documents can live at any caller-chosen path, so the
+        filename says nothing about the id; the id is instead salvaged straight
+        out of the raw frontmatter.
+        """
+        documents, unparsed = self._scan_documents()
+        reserved = {document.id.casefold() for document in documents if document.id}
+        for path in unparsed:
+            salvaged = salvage_frontmatter_id(path)
+            if salvaged is not None:
+                reserved.add(salvaged.casefold())
+        return reserved
+
     def _next_document_id(self) -> str:
         max_id = 0
-        for document in self.list_documents():
-            if document.id is None:
-                continue
-            match = re.fullmatch(r"DOC-(\d+)", document.id.upper())
+        for document_id in self._reserved_document_ids():
+            match = re.fullmatch(r"doc-(\d+)", document_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
+        # Filenames are the last resort: a file that neither parses nor exposes a
+        # readable id still owns the number in its generated name, and reissuing
+        # it would put two files under one id.
+        if self.docs_dir.is_dir():
+            for path in self.docs_dir.rglob("*.md"):
+                match = re.match(r"doc-(\d+)", path.stem.casefold())
+                if match is not None:
+                    max_id = max(max_id, int(match.group(1)))
         return format_numbered_id("DOC-", max_id + 1, self.project.config.zero_padded_ids)
 
     def _document_id_exists(self, document_id: str) -> bool:
-        normalized_id = document_id.casefold()
-        return any(
-            document.id is not None and document.id.casefold() == normalized_id
-            for document in self.list_documents()
-        )
+        return document_id.casefold() in self._reserved_document_ids()
 
 
 def _move_document(source_path: Path, target: Path, source: str) -> None:

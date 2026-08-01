@@ -385,6 +385,39 @@ def test_resources_read_unknown_uri_returns_resource_not_found():
     assert "backlog://nope" in response["error"]["message"], "path redaction mangled the resource URI"
 
 
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        # Separators in prose and markup are not paths; they must survive intact.
+        ("Unknown status. Valid: To Do / In Progress", "Unknown status. Valid: To Do / In Progress"),
+        ("unexpected </div> in the body", "unexpected </div> in the body"),
+        # Absolute paths must be masked *entirely*, whatever characters the
+        # leading component happens to use. A partial mask still leaks layout.
+        ("failed at /version~1", "failed at <path>"),
+        ("failed at /tmp~user/x", "failed at <path>"),
+        ("failed at /home/robert/proj/backlog/tasks/task-1.md", "failed at <path>"),
+        ("failed at C:\\Users\\robert\\proj", "failed at <path>"),
+        # Relative paths and URIs are meaningful to the caller and stay readable.
+        ("backlog/tasks/task-1.md is invalid", "backlog/tasks/task-1.md is invalid"),
+        ("backlog://init-required", "backlog://init-required"),
+    ],
+)
+def test_redact_paths_masks_whole_absolute_paths_without_mangling_prose(message, expected):
+    assert protocol_module._redact_paths(message) == expected
+
+
+def test_invalid_params_message_names_the_tool(tmp_path):
+    """inspect.Signature.bind does not know the callable's name; we must add it."""
+    project = _project(tmp_path)
+
+    response = _call_tool(project.root, "task_view", task_id="TASK-1", bogus="x")
+
+    assert response["error"]["code"] == -32602
+    message = response["error"]["message"]
+    assert "task_view" in message, message
+    assert "bogus" in message, message
+
+
 def test_task_edit_reloads_project_config_like_task_create(tmp_path):
     project = _project(tmp_path)
     MutableRepository(project).create_task(title="Example")

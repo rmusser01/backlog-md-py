@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -292,37 +293,233 @@ def test_task_view_default_honors_date_display_config(tmp_path):
     assert "12:34" not in result.output
 
 
-def test_task_view_editor_key_launches_default_editor_under_project_lock(tmp_path, monkeypatch):
+def _preserved_copy(output: str) -> Path:
+    """Extract the preserved editing copy the CLI error must name."""
+    match = re.search(r"(\S+backlog-py-edit-[^\n]*?\.md)", output)
+    assert match is not None, f"the error did not name the preserved copy: {output}"
+    return Path(match.group(1))
+
+
+def _editor_repo(tmp_path: Path, monkeypatch, fake_editor) -> tuple[Path, list, dict]:
+    """Prepare a repo whose `$EDITOR` is `fake_editor`, tracking lock activity."""
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
     set_config_value(project, "defaultEditor", "fake-editor --wait")
-    lock_operations = []
-    editor_invocations = []
 
     from backlog_py.cli import main as cli_main
 
+    lock_operations: list[tuple[Path, str]] = []
+    state = {"depth": 0, "held_during_edit": []}
     original_lock = cli_main.with_project_write_lock
 
     def tracking_lock(project, operation, fn):
         lock_operations.append((project.root, operation))
-        return original_lock(project, operation, fn)
+        state["depth"] += 1
+        try:
+            return original_lock(project, operation, fn)
+        finally:
+            state["depth"] -= 1
+
+    def tracking_editor(command, path):
+        state["held_during_edit"].append(state["depth"])
+        return fake_editor(command, path)
+
+    monkeypatch.setattr(cli_main, "with_project_write_lock", tracking_lock)
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+    monkeypatch.setattr(cli_main, "_run_editor_command", tracking_editor)
+    return repo, lock_operations, state
+
+
+def test_task_view_editor_key_edits_a_copy_outside_the_project_lock(tmp_path, monkeypatch):
+    """The interactive editor session must not hold the process-wide write lock.
+
+    Every other writer (MCP, browser, daemon, another CLI run) gives up after 5
+    seconds, so an open $EDITOR would stall project-wide writes indefinitely.
+    """
+    editor_invocations = []
 
     def fake_editor(command, path):
         editor_invocations.append((command, path))
         path.write_text(path.read_text(encoding="utf-8") + "\nEdited by test.\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli_main, "with_project_write_lock", tracking_lock)
-    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
-    monkeypatch.setattr(cli_main, "_run_editor_command", fake_editor)
+    repo, lock_operations, state = _editor_repo(tmp_path, monkeypatch, fake_editor)
 
     result = _invoke_repo(repo, "task", "TASK-1", input="e")
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
+    assert state["held_during_edit"] == [0], "the editor ran while the project write lock was held"
     assert lock_operations == [(repo, "task_editor")]
-    assert editor_invocations == [(["fake-editor", "--wait"], _task_file(repo))]
+    command, edited_path = editor_invocations[0]
+    assert command == ["fake-editor", "--wait"]
+    assert edited_path != _task_file(repo), "the editor was pointed at the live task file"
+    assert edited_path.name == _task_file(repo).name
     assert "Edited TASK-1" in result.output
     assert "Edited by test." in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_task_view_editor_refuses_to_clobber_a_concurrent_write(tmp_path, monkeypatch):
+    """A write that landed while the editor was open must not be silently lost."""
+
+    def fake_editor(command, path):
+        path.write_text("edited by user\n", encoding="utf-8")
+        _task_file(repo).write_text("concurrent version\n", encoding="utf-8")
+
+    repo, _lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert _task_file(repo).read_text(encoding="utf-8") == "concurrent version\n"
+    preserved = _preserved_copy(result.output)
+    assert preserved.read_text(encoding="utf-8") == "edited by user\n", "the user's edit was destroyed"
+
+
+def test_task_view_editor_preserves_the_copy_when_the_lock_times_out(tmp_path, monkeypatch):
+    """A LockTimeoutError must not take the user's authored bytes with it."""
+
+    def fake_editor(command, path):
+        path.write_text("edited by user\n", encoding="utf-8")
+
+    repo, _lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    from backlog_py.cli import main as cli_main
+    from backlog_py.runtime.locks import LockTimeoutError
+
+    def timeout(project, operation, fn):
+        raise LockTimeoutError("Timed out waiting for the project write lock")
+
+    monkeypatch.setattr(cli_main, "with_project_write_lock", timeout)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    preserved = _preserved_copy(result.output)
+    assert preserved.read_text(encoding="utf-8") == "edited by user\n", "the user's edit was destroyed"
+
+
+def test_task_view_editor_preserves_the_copy_when_the_apply_fails_for_any_reason(tmp_path, monkeypatch):
+    """A full disk or a read-only file must not take the user's edit with it."""
+
+    def fake_editor(command, path):
+        path.write_text("edited by user\n", encoding="utf-8")
+
+    repo, _lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    from backlog_py.cli import main as cli_main
+
+    def explode(project, operation, fn):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(cli_main, "with_project_write_lock", explode)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    preserved = _preserved_copy(result.output)
+    assert preserved.read_text(encoding="utf-8") == "edited by user\n", "the user's edit was destroyed"
+
+
+def test_task_view_editor_warns_when_the_editor_does_not_block(tmp_path, monkeypatch):
+    """A GUI editor returns instantly; deleting the copy would lose the edit."""
+
+    def fake_editor(command, path):
+        return None
+
+    repo, lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert lock_operations == [], "nothing to apply, so the lock must never be taken"
+    assert "not waiting" in result.output
+    assert _preserved_copy(result.output).exists(), "the copy was deleted while the editor was still open"
+
+
+def test_task_view_editor_keeps_an_unchanged_copy_even_when_the_editor_was_slow(tmp_path, monkeypatch):
+    """No clock can tell a still-open GUI editor from a closed one.
+
+    A slow return with unchanged content is exactly the case where the editor may
+    still be open on the copy, so the copy is kept and reported either way; the
+    elapsed time only picks the wording.
+    """
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "NON_BLOCKING_EDITOR_SECONDS", 0.0)
+
+    def fake_editor(command, path):
+        return None
+
+    repo, lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert lock_operations == [], "nothing to apply, so the lock must never be taken"
+    assert "unchanged" in result.output
+    assert _preserved_copy(result.output).exists(), "an unchanged copy was deleted under a possibly open editor"
+
+
+def test_task_view_editor_treats_a_deleted_copy_as_an_abort(tmp_path, monkeypatch):
+    """Deleting the copy in the editor aborts the edit; it never writes an empty file."""
+    scratch_dirs = []
+
+    def fake_editor(command, path):
+        scratch_dirs.append(path.parent)
+        path.unlink()
+
+    repo, lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+    before = _task_file(repo).read_text(encoding="utf-8")
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code == 0, result.output
+    assert lock_operations == [], "nothing to apply, so the lock must never be taken"
+    assert _task_file(repo).read_text(encoding="utf-8") == before
+    assert not scratch_dirs[0].exists(), "an empty scratch directory was left behind"
+
+
+def test_task_view_editor_keeps_the_copy_when_the_editor_exits_non_zero_after_saving(tmp_path, monkeypatch):
+    """`vim :cq` (or a crashed `code --wait`) must not destroy what was saved."""
+
+    def fake_editor(command, path):
+        path.write_text("edited by user\n", encoding="utf-8")
+        raise click.ClickException("Editor exited with status 1: fake-editor")
+
+    repo, lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert lock_operations == []
+    preserved = _preserved_copy(result.output)
+    assert preserved.read_text(encoding="utf-8") == "edited by user\n", "the user's edit was destroyed"
+
+
+def test_task_view_editor_cleans_up_when_the_editor_fails_without_saving(tmp_path, monkeypatch):
+    """An untouched copy holds nothing of the user's, so the failure surfaces as-is."""
+    scratch_dirs = []
+
+    def fake_editor(command, path):
+        scratch_dirs.append(path.parent)
+        raise click.ClickException("Editor command not found: fake-editor")
+
+    repo, lock_operations, _state = _editor_repo(tmp_path, monkeypatch, fake_editor)
+
+    result = _invoke_repo(repo, "task", "TASK-1", input="e")
+
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+    assert lock_operations == []
+    assert "Editor command not found" in result.output
+    assert "preserved at" not in result.output
+    assert not scratch_dirs[0].exists(), "an untouched scratch directory was left behind"
 
 
 def test_search_plain_outputs_matching_task():
@@ -332,6 +529,21 @@ def test_search_plain_outputs_matching_task():
     assert "TASK-1" in result.output
     assert "Example task" in result.output
     assert "Actions:" not in result.output
+
+
+def test_search_empty_type_value_is_treated_as_no_filter():
+    """`--type "$TYPES"` with an unset shell variable must not be a usage error."""
+    result = _invoke("search", "parser preservation", "--type", "", "--plain")
+
+    assert result.exit_code == 0, result.output
+    assert "TASK-1" in result.output
+
+
+def test_search_all_invalid_type_values_remain_a_usage_error():
+    result = _invoke("search", "parser preservation", "--type", "bogus", "--plain")
+
+    assert result.exit_code == 2
+    assert "bogus" in result.output
 
 
 def test_search_default_renders_interactive_filter_panel():
@@ -565,35 +777,24 @@ def test_board_interactive_move_updates_task_under_project_lock(tmp_path, monkey
     assert MutableRepository.from_path(repo).get_task("TASK-1").status == "Done"
 
 
-def test_board_interactive_edit_launches_default_editor_under_project_lock(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    shutil.copytree(FIXTURE_REPO, repo)
-    project = discover_project(Path.cwd(), explicit_cwd=repo)
-    set_config_value(project, "defaultEditor", "fake-editor --wait")
-    lock_operations = []
+def test_board_interactive_edit_applies_the_edit_outside_the_project_lock(tmp_path, monkeypatch):
     editor_invocations = []
-
-    from backlog_py.cli import main as cli_main
-
-    original_lock = cli_main.with_project_write_lock
-
-    def tracking_lock(project, operation, fn):
-        lock_operations.append((project.root, operation))
-        return original_lock(project, operation, fn)
 
     def fake_editor(command, path):
         editor_invocations.append((command, path))
         path.write_text(path.read_text(encoding="utf-8") + "\nEdited from board.\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli_main, "with_project_write_lock", tracking_lock)
-    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
-    monkeypatch.setattr(cli_main, "_run_editor_command", fake_editor)
+    repo, lock_operations, state = _editor_repo(tmp_path, monkeypatch, fake_editor)
 
     result = _invoke_repo(repo, "board", input="eTASK-1\n")
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
+    assert state["held_during_edit"] == [0], "the editor ran while the project write lock was held"
     assert lock_operations == [(repo, "task_editor")]
-    assert editor_invocations == [(["fake-editor", "--wait"], _task_file(repo))]
+    command, edited_path = editor_invocations[0]
+    assert command == ["fake-editor", "--wait"]
+    assert edited_path != _task_file(repo), "the editor was pointed at the live task file"
+    assert edited_path.name == _task_file(repo).name
     assert "Edited TASK-1" in result.output
     assert "Edited from board." in _task_file(repo).read_text(encoding="utf-8")
 

@@ -2,15 +2,17 @@
 
 `backlog-md-py` is stable starting with the 1.0.0 release line. Stable means
 the documented local-file CLI, MCP, daemon, browser-board, TUI, and Python
-helper workflows are covered by the 1.x compatibility contract after release
-validation.
+helper workflows are covered by the current major compatibility contract after
+release validation. The contract in force is the 2.x line; see the 2.0.0
+CHANGELOG entry for the breaking changes that closed the 1.x line and the
+migration step for each.
 
 ## Supported Contract
 
 The stable support contract covers:
 
-- Python 3.11, 3.12, and 3.13 package installation from released wheels and
-  source distributions.
+- Python 3.11, 3.12, 3.13, and 3.14 package installation from released wheels
+  and source distributions.
 - The `backlog-py` CLI and `python -m backlog_py` module entry point for the
   operations represented in the compatibility inventory.
 - The SDK-free `backlog-py-mcp` stdio entry point, pure MCP helper functions,
@@ -39,7 +41,7 @@ supported contract.
 
 ## Change Policy
 
-Within the 1.x line, minor releases may add backward-compatible CLI, MCP,
+Within a major line, minor releases may add backward-compatible CLI, MCP,
 browser, TUI, daemon, or Python helper behavior when the parity inventory or
 safety model requires it. Patch releases should preserve the stable supported
 contract and focus on bug fixes, documentation, compatibility evidence, and
@@ -48,6 +50,19 @@ deprecation path.
 
 Known behavior outside the stable contract must stay explicitly documented in the
 parity docs instead of being implied by the README.
+
+## Trust Model
+
+The project files are treated as data, with one deliberate exception:
+`onStatusChange` runs a shell command. From 2.0.0 a command carried in a task
+file's own frontmatter requires `taskFrontmatterStatusCallbacks: true`, because
+task markdown routinely arrives from branches and pull requests.
+
+That gate is defence in depth, not a trust boundary. `backlog/config.yml` comes
+through the same channel, so a hostile repository can set `onStatusChange` at
+config level or enable the key itself. Opening a project means trusting its
+config file. Cloning a repository you do not trust and running any mutating
+command against it is outside the supported safety model.
 
 ## Stable Release Gate
 

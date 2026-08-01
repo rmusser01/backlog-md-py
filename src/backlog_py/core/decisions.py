@@ -13,9 +13,13 @@ from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_numbered_id, ids_equivalent
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
-from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.markdown.task_parser import parse_task_markdown, salvage_frontmatter_id
 from backlog_py.search.simple import ranked_matches
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import (
+    PathContainmentError,
+    assert_path_within_base,
+    assert_trusted_subpath,
+)
 
 
 VALID_DECISION_STATUSES = {"proposed", "accepted", "rejected", "superseded"}
@@ -44,7 +48,9 @@ class DecisionRecord:
 class DecisionService:
     def __init__(self, project: BacklogProject) -> None:
         self.project = project
-        self.decisions_dir = project.backlog_dir / "decisions"
+        # Validated per level: a repo can ship backlog/decisions as a symlink,
+        # and a resolved attacker-controlled anchor would pass containment.
+        self.decisions_dir = assert_trusted_subpath(project.root, project.backlog_dir / "decisions")
 
     def create_decision(self, title: str, *, status: str = "proposed") -> DecisionRecord:
         decision_id = self._next_decision_id()
@@ -64,9 +70,19 @@ class DecisionService:
         return _load_decision(self.decisions_dir, target)
 
     def list_decisions(self) -> list[DecisionRecord]:
+        decisions, _ = self._scan_decisions()
+        return sorted(decisions, key=_decision_sort_key)
+
+    def _scan_decisions(self) -> tuple[list[DecisionRecord], list[Path]]:
+        """Read every decision file, returning parsed records and skipped paths.
+
+        Id allocation needs the skipped paths as well as the records: a file that
+        cannot be parsed still occupies whatever id it holds.
+        """
         if not self.decisions_dir.is_dir():
-            return []
+            return ([], [])
         decisions: list[DecisionRecord] = []
+        unparsed: list[Path] = []
         for path in sorted(self.decisions_dir.glob("decision-*.md")):
             try:
                 decisions.append(self._load_decision(path))
@@ -77,7 +93,8 @@ class DecisionService:
                 # A single unparsable file must not disable every decision
                 # operation; skip it and warn, as the task repository does.
                 logger.warning("Skipping unreadable decision file {}: {}", path, exc)
-        return sorted(decisions, key=_decision_sort_key)
+                unparsed.append(path)
+        return (decisions, unparsed)
 
     def search_decisions(self, query: str) -> list[DecisionRecord]:
         return ranked_matches(self.list_decisions(), query, _decision_search_text)
@@ -103,12 +120,35 @@ class DecisionService:
         except PathContainmentError as exc:
             raise DecisionMutationError(f"Invalid decision path: {decision_id}") from exc
 
+    def _reserved_decision_ids(self) -> set[str]:
+        """Casefolded ids claimed on disk, including ids inside unparsable files.
+
+        ``list_decisions()`` skips a file it cannot parse, which hides that file's
+        id from allocation. A renamed or hand-written file carries its id only in
+        the frontmatter, so the id is salvaged straight out of the raw text.
+        """
+        decisions, unparsed = self._scan_decisions()
+        reserved = {decision.id.casefold() for decision in decisions if decision.id}
+        for path in unparsed:
+            salvaged = salvage_frontmatter_id(path)
+            if salvaged is not None:
+                reserved.add(salvaged.casefold())
+        return reserved
+
     def _next_decision_id(self) -> str:
         max_id = 0
-        for decision in self.list_decisions():
-            match = re.fullmatch(r"decision-(\d+)", decision.id.casefold())
+        for decision_id in self._reserved_decision_ids():
+            match = re.fullmatch(r"decision-(\d+)", decision_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
+        # Filenames are the last resort: a file that neither parses nor exposes a
+        # readable id still owns the number in its generated name, and reissuing
+        # it would put two files under one id.
+        if self.decisions_dir.is_dir():
+            for path in self.decisions_dir.glob("*.md"):
+                match = re.match(r"decision-(\d+)", path.stem.casefold())
+                if match is not None:
+                    max_id = max(max_id, int(match.group(1)))
         return format_numbered_id("decision-", max_id + 1, self.project.config.zero_padded_ids)
 
 

@@ -89,10 +89,65 @@ def test_http_endpoint_accepts_loopback_host_header():
         service.shutdown()
 
 
-def _raw_request(host, port, method, path, *, host_header=None, token=None, timeout=5.0):
+def test_http_endpoint_rejects_a_missing_host_header():
+    """Fail closed like the browser service: no Host means no rebinding check."""
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_request(
+            service.host,
+            service.port,
+            "GET",
+            "/health",
+            omit_host=True,
+        )
+
+        assert _status_code(response) == 403
+    finally:
+        service.shutdown()
+
+
+def test_http_endpoint_rejects_a_host_header_with_userinfo():
+    """urlparse('//evil.com@127.0.0.1:PORT').hostname silently drops the userinfo."""
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_request(
+            service.host,
+            service.port,
+            "GET",
+            "/status",
+            host_header=f"evil.example.com@127.0.0.1:{service.port}",
+            token="secret",
+        )
+
+        assert _status_code(response) == 403
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.parametrize("host_header", ["", "127.0.0.1:", "127.0.0.1:notaport", "[::1", "::1:80"])
+def test_http_endpoint_rejects_malformed_host_headers(host_header):
+    service = start_mcp_http_server(host="127.0.0.1", port=0, token="secret")
+    try:
+        response = _raw_request(
+            service.host,
+            service.port,
+            "GET",
+            "/status",
+            host_header=host_header,
+            token="secret",
+        )
+
+        assert _status_code(response) == 403
+    finally:
+        service.shutdown()
+
+
+def _raw_request(host, port, method, path, *, host_header=None, omit_host=False, token=None, timeout=5.0):
     import socket
 
-    lines = [f"{method} {path} HTTP/1.1", f"Host: {host_header if host_header is not None else f'{host}:{port}'}"]
+    lines = [f"{method} {path} HTTP/1.1"]
+    if not omit_host:
+        lines.append(f"Host: {host_header if host_header is not None else f'{host}:{port}'}")
     if token is not None:
         lines.append(f"Authorization: Bearer {token}")
     lines.append("Connection: close")

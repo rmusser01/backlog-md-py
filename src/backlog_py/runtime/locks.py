@@ -137,6 +137,21 @@ class _RuntimeFileLock:
                 time.sleep(min(poll_interval, max(deadline - time.monotonic(), 0)))
                 continue
 
+            if not _locked_handle_is_current(handle, self.lock_path):
+                # The lock lives on the inode, not on the path: whoever unlinked
+                # the file we just locked left us excluding nobody, and the next
+                # acquirer would create a fresh inode and "win" it too. Drop this
+                # lock and race for whatever now lives at the path.
+                _release_handle(handle)
+                if time.monotonic() >= deadline:
+                    raise LockTimeoutError(
+                        f"Timed out acquiring {self.kind} lock for operation {self.operation!r}"
+                    )
+                time.sleep(min(poll_interval, max(deadline - time.monotonic(), 0)))
+                handle = self.lock_path.open("a+", encoding="utf-8")
+                _prepare_lock_file(handle)
+                continue
+
             held = _HeldRuntimeLock(self, handle)
             try:
                 self._write_metadata()
@@ -203,8 +218,7 @@ def list_runtime_locks() -> list[dict[str, object]]:
         metadata = _read_lock_metadata(metadata_path)
         if metadata is None:
             continue
-        key = str(metadata.get("key") or metadata_path.stem)
-        lock_path = layout.locks_dir / f"{key}.lock"
+        lock_path = _lock_path_for_metadata(metadata_path)
         metadata["lock_path"] = str(lock_path)
         metadata["metadata_path"] = str(metadata_path)
         metadata["active"] = _metadata_lock_is_active(metadata, lock_path)
@@ -223,7 +237,10 @@ def prune_stale_locks(*, min_age_seconds: float = DEFAULT_LOCK_PRUNE_AGE_SECONDS
       rewritten on every acquire and release, so it dates the last use.
     * The lock file is unlinked only while this process itself holds its flock,
       which proves no other process holds it, and only after re-checking that
-      the metadata did not change while we were taking that lock.
+      the metadata did not change while we were taking that lock and that the
+      path still names the inode we locked.
+    * The lock file to unlink is derived from the metadata file's name, never
+      from the ``key`` recorded inside it.
 
     Anything that cannot be proven dead — unreadable metadata, a lock file with
     no metadata, a flock we cannot take — is left in place. Returns the removed
@@ -243,10 +260,20 @@ def prune_stale_locks(*, min_age_seconds: float = DEFAULT_LOCK_PRUNE_AGE_SECONDS
         metadata_stat = _stat(metadata_path)
         if metadata_stat is None or metadata_stat.st_mtime > cutoff:
             continue
-        key = str(metadata.get("key") or metadata_path.stem)
-        lock_path = layout.locks_dir / f"{key}.lock"
+        lock_path = _lock_path_for_metadata(metadata_path)
         removed.extend(_remove_dead_lock(lock_path, metadata_path, metadata_stat))
     return removed
+
+
+def _lock_path_for_metadata(metadata_path: Path) -> Path:
+    """Return the lock file paired with ``metadata_path``.
+
+    Derived from the metadata file's own name, never from the ``key`` inside its
+    body: that body is writable by anyone who can write the state directory, and
+    a planted ``"key": "../../x"`` would otherwise aim the pruner's unlink at an
+    arbitrary ``*.lock`` outside the locks directory.
+    """
+    return metadata_path.with_suffix(".lock")
 
 
 def _lock_owner_may_be_live(metadata: dict[str, object]) -> bool:
@@ -288,6 +315,8 @@ def _remove_dead_lock(lock_path: Path, metadata_path: Path, metadata_stat: os.st
         except OSError:
             return []  # held (or unprobeable): leave it strictly alone
         try:
+            if not _locked_handle_is_current(handle, lock_path):
+                return []  # the path no longer names the inode we locked
             current = _stat(metadata_path)
             if (
                 current is None
@@ -295,7 +324,10 @@ def _remove_dead_lock(lock_path: Path, metadata_path: Path, metadata_stat: os.st
                 or current.st_ino != metadata_stat.st_ino
             ):
                 return []  # someone used this lock while we were taking it
-            # Unlink while still holding the flock so no acquirer can slip in.
+            # Unlink while still holding the flock. That does not by itself shut
+            # acquirers out — one may already be spinning on this very inode —
+            # but such an acquirer revalidates the inode after it locks and
+            # reopens the path, so it cannot end up holding an orphan.
             removed = _unlink_if_unchanged(metadata_path, metadata_stat)
             removed.extend(_unlink_path(lock_path))
             return removed
@@ -319,6 +351,32 @@ def _unlink_path(path: Path) -> list[Path]:
     except OSError:
         return []
     return [path]
+
+
+def _locked_handle_is_current(handle: TextIO, path: Path) -> bool:
+    """Return True when the locked descriptor is still the file living at ``path``.
+
+    ``flock``/``msvcrt.locking`` attach to the open file, not to the name, so a
+    lock taken on an inode that has since been unlinked (or replaced) guards
+    nothing: the next acquirer creates a new file at the same path and locks
+    that instead. A vanished path counts as a mismatch.
+    """
+    try:
+        locked = os.fstat(handle.fileno())
+    except (OSError, ValueError):
+        return False
+    current = _stat(path)
+    if current is None:
+        return False
+    return (locked.st_ino, locked.st_dev) == (current.st_ino, current.st_dev)
+
+
+def _release_handle(handle: TextIO) -> None:
+    try:
+        with suppress(OSError):
+            _unlock(handle)
+    finally:
+        handle.close()
 
 
 def _stat(path: Path) -> os.stat_result | None:

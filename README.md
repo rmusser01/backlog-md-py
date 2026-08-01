@@ -14,7 +14,7 @@ or local agents without requiring a Node or Bun runtime.
 This project is stable starting with the 1.0 release line. The audited
 compatibility inventory reports the documented local-file CLI, Python helper,
 MCP, daemon, browser-board, and TUI surfaces as implemented for the current
-baseline. The supported 1.x contract is the behavior represented in the
+baseline. The supported 2.x contract is the behavior represented in the
 compatibility inventory, stability policy, and parity docs.
 
 The source of truth remains the `backlog/` Markdown directory in each project.

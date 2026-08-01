@@ -11,13 +11,19 @@ from typing import Mapping
 from urllib.parse import urlparse
 
 from backlog_py.mcp.protocol import McpRequestContext, handle_jsonrpc_text
+from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback
 
 
 # The daemon exposes the whole MCP surface, including every write tool, behind a
 # bearer token over cleartext HTTP. Binding anything but loopback would publish
 # it to the network, so the address is restricted exactly like the browser
 # service (see backlog_py.browser.service.create_browser_server).
-LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
+# Sourced from the shared helper so the browser and MCP servers cannot drift
+# on what counts as loopback. Re-exported: cli/main.py imports this name.
+LOOPBACK_HOSTS = LOOPBACK_HOSTNAMES
+
+# Port implied by a Host header that carries no explicit port.
+
 
 # Cap a single JSON-RPC request body so a malicious/oversized Content-Length
 # cannot exhaust daemon memory. 10 MiB is far above any legitimate tool call.
@@ -179,19 +185,9 @@ class _McpHttpHandler(BaseHTTPRequestHandler):
         """
         if getattr(self.server, "allow_remote", False):
             return True  # explicitly published off-loopback; Host cannot be pinned
-        header = self.headers.get("Host")
-        if header is None:
-            return True  # HTTP/1.0 client; no browser-originated rebinding risk
-        try:
-            parsed = urlparse(f"//{header}")
-            hostname = parsed.hostname
-            port = parsed.port
-        except ValueError:
-            return False
-        if hostname is None or hostname not in LOOPBACK_HOSTS:
-            return False
-        bound_port = int(self.server.server_address[1])
-        return bound_port == (80 if port is None else port)
+        return host_header_is_loopback(
+            self.headers.get("Host"), int(self.server.server_address[1])
+        )
 
     def _is_authorized(self) -> bool:
         header = self.headers.get("Authorization", "")

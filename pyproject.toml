@@ -87,19 +87,21 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
-# Ratchet list. Every entry below is a rule the tree genuinely violates today,
-# with the violation count measured at the commit that introduced this config
-# (ruff 0.16.1, `ruff check src tests`). Fix the code, then delete the entry.
+# Ratchet list. Every entry below is a rule the tree genuinely violates today.
+# Fix the code, then delete the entry. Re-measure rather than adjusting a count
+# by eye; the counts below are diagnostics, not files, and were taken with
+# ruff 0.16.1 as:
+#   ruff check --select <RULE> --statistics src tests   # with `ignore` emptied
 ignore = [
-  # 45 lines over the 120-char limit (1778 over ruff's 88-char default);
-  # the longest single line is 777 chars in src/backlog_py/compat/inventory.py.
+  # 45 lines over the 120-char limit (39 src, 6 tests); the longest single line
+  # is 777 chars in src/backlog_py/compat/inventory.py.
   "E501",
-  # 68 files with unsorted/ungrouped imports (36 in src, 32 in tests).
+  # 59 unsorted/ungrouped import blocks (30 src, 29 tests) across 56 files.
   # `ruff check --select I001 --fix src tests` clears this in one pass.
   "I001",
   # 32 uses of `datetime.timezone.utc` instead of `datetime.UTC` (21 src, 11 tests).
   "UP017",
-  # 20 deprecated `typing` imports (typing.Iterable/Sequence/... vs collections.abc).
+  # 21 deprecated `typing` imports (typing.Iterable/Sequence/... vs collections.abc).
   "UP035",
   # 13 quoted annotations that no longer need quoting under PEP 563.
   "UP037",
@@ -113,11 +115,11 @@ ignore = [
 # `_build_indexed_task_sources` returns `list["IndexedTaskSource"]` where the
 # name comes from a deliberate function-local import (circular-import break).
 "src/backlog_py/core/repository.py" = ["F821"]
-# 5 unused imports left in place; remove them and drop these entries.
-"src/backlog_py/indexing/sqlite.py" = ["F401"]
-"src/backlog_py/mcp/protocol.py" = ["F401"]
-"src/backlog_py/orchestration/service.py" = ["F401"]
-"src/backlog_py/search/simple.py" = ["F401"]
+# No `src/**` module is exempt from F401 any more. The four entries that used to
+# live here (indexing/sqlite.py, mcp/protocol.py, orchestration/service.py,
+# search/simple.py) were removed once the last unused import was deleted; a
+# per-file ignore that no longer matches a real violation silently masks the
+# *next* unused import, which is exactly what the ratchet exists to catch.
 # Test modules: 18 unused imports, 1 redefinition, and 5 late imports guarded by
 # an optional-dependency `pytest.importorskip`.
 "tests/**" = ["E402", "F401", "F811"]
@@ -130,8 +132,15 @@ files = ["src"]
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_unused_configs = true
-# Ratchet plan: `mypy` currently reports 60 errors across 14 files (mostly
-# [arg-type] in browser/service.py, tui/data.py, and mcp/protocol.py), so the CI
-# step runs with `continue-on-error: true`. Burn the list down file by file,
-# then drop `continue-on-error` from .github/workflows/ci.yml and start enabling
-# strict flags here.
+# Ratchet plan. This comment is the single source of truth for the baseline;
+# .github/workflows/ci.yml points here rather than repeating the number.
+#
+# `python -m mypy` (no arguments - it reads `files` above) reports 60 errors
+# across 14 files, mostly [arg-type], concentrated in browser/service.py (24)
+# and tui/data.py (11). The CI step therefore runs with
+# `continue-on-error: true`. Burn the list down file by file, then drop
+# `continue-on-error` from ci.yml and start enabling strict flags here.
+#
+# The number is the whole point of a ratchet, so re-measure it - never adjust it
+# by eye - whenever it changes:
+#   uv run --extra dev python -m mypy | tail -1

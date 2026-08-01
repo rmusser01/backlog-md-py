@@ -13,6 +13,8 @@ import pytest
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository
+from backlog_py.indexing import sqlite as sqlite_index
+from backlog_py.indexing.sqlite import SQLiteIndexError, _is_contention_error
 from backlog_py.storage.project import discover_project
 
 
@@ -178,7 +180,6 @@ def test_sqlite_index_losing_the_wal_switch_does_not_discard_a_live_database(tmp
 
     discards: list[Path] = []
     real_discard = sqlite_index._discard_index
-
     def tracking_discard(path: Path) -> None:
         discards.append(Path(path))
         real_discard(path)
@@ -434,3 +435,89 @@ def test_sqlite_index_database_is_private(tmp_path, monkeypatch):
     ):
         if sidecar.exists():
             assert stat_module.S_IMODE(sidecar.stat().st_mode) == 0o600
+
+
+# ---------------------------------------------------------------------------
+# Error classification: contention retries, a broken index self-heals
+# ---------------------------------------------------------------------------
+
+
+def _operational_error(message: str, code: int) -> sqlite3.OperationalError:
+    exc = sqlite3.OperationalError(message)
+    exc.sqlite_errorcode = code
+    return exc
+
+
+@pytest.mark.parametrize(
+    "exc,expected",
+    [
+        (_operational_error("database is locked", sqlite3.SQLITE_BUSY), True),
+        # Extended codes carry the primary code in the low byte.
+        (_operational_error("snapshot busy", sqlite3.SQLITE_BUSY | (2 << 8)), True),
+        (_operational_error("database table is locked", sqlite3.SQLITE_LOCKED), True),
+        (_operational_error("unable to open database file", sqlite3.SQLITE_CANTOPEN), False),
+        (_operational_error("attempt to write a readonly database", sqlite3.SQLITE_READONLY), False),
+        (sqlite3.DatabaseError("file is not a database"), False),
+        (OSError("boom"), False),
+        (SQLiteIndexError("boom"), False),
+    ],
+)
+def test_only_lock_contention_counts_as_transient(exc, expected):
+    """`OperationalError` is far broader than contention.
+
+    "unable to open database file" and "attempt to write a readonly database"
+    arrive as `OperationalError` too. Retrying those is pointless and, because
+    the retry path never discards the file, a persistently unusable index used
+    to strand every reader on the Markdown fallback with no way back.
+    """
+    assert _is_contention_error(exc) is expected
+
+
+def test_a_persistently_broken_index_is_discarded_and_rebuilt(tmp_path, monkeypatch):
+    """A non-contention failure must self-heal rather than fall back forever."""
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project = _project(_copy_fixture_repo(tmp_path))
+    discarded: list[Path] = []
+    attempts = {"count": 0}
+
+    real_discard = sqlite_index._discard_index
+
+    def counting_discard(path):
+        discarded.append(path)
+        return real_discard(path)
+
+    def failing_then_working(path, *, fingerprint_factory, rebuild):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise _operational_error("unable to open database file", sqlite3.SQLITE_CANTOPEN)
+        return []
+
+    monkeypatch.setattr(sqlite_index, "_discard_index", counting_discard)
+    monkeypatch.setattr(sqlite_index, "_load_task_sources", failing_then_working)
+
+    sqlite_index.load_task_sources(project, include_active_branch_snapshots=False, rebuild=lambda: [])
+
+    assert discarded, "a broken index was never discarded, so readers could never recover"
+    assert attempts["count"] >= 2, "the index was not rebuilt after being discarded"
+
+
+def test_contention_retries_without_discarding_the_database(tmp_path, monkeypatch):
+    """Deleting a merely-busy database would pull it out from under live readers."""
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project = _project(_copy_fixture_repo(tmp_path))
+    discarded: list[Path] = []
+    attempts = {"count": 0}
+
+    def busy_then_working(path, *, fingerprint_factory, rebuild):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise _operational_error("database is locked", sqlite3.SQLITE_BUSY)
+        return []
+
+    monkeypatch.setattr(sqlite_index, "_discard_index", lambda path: discarded.append(path))
+    monkeypatch.setattr(sqlite_index, "_load_task_sources", busy_then_working)
+
+    sqlite_index.load_task_sources(project, include_active_branch_snapshots=False, rebuild=lambda: [])
+
+    assert discarded == [], "a busy database was deleted out from under its readers"
+    assert attempts["count"] == 2

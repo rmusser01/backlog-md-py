@@ -53,7 +53,16 @@ RESOURCE_NOT_FOUND = -32002
 # layout of the machine running the server. Relative paths (backlog/tasks/...)
 # and URIs (backlog://init-required) are meaningful to the caller, so the
 # leading separator must not be preceded by a word character, '.', ':' or '/'.
-_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![\w.:/])(?:[A-Za-z]:[\\/]|/)[^\s'\"]*")
+# '<' is excluded too so markup ("</div>") is left alone rather than mangled
+# into "<<path>>".
+#
+# The first segment must exist (so a bare "/" used as a separator in prose --
+# "To Do / In Progress" -- is left alone) but is otherwise deliberately wide:
+# anything short of "every character up to the next separator" only *partially*
+# masks paths such as "/version~1" or "/tmp~user/x", which still leaks layout.
+_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?<![\w.:/<])(?:[A-Za-z]:[\\/]|/)[^\s\\/<>'\"]+(?:[\\/][^\s'\"]*)?"
+)
 
 _INIT_REQUIRED_MESSAGE = (
     "No Backlog.md project was found for the requested project directory. "
@@ -227,7 +236,7 @@ def _call_tool(params: dict[str, object], *, context: McpRequestContext) -> dict
         # with the setup resource instead of a -32603 echoing the path.
         return _tool_error_result(_INIT_REQUIRED_MESSAGE)
 
-    _reject_unbindable_arguments(tool.handler, project, arguments)
+    _reject_unbindable_arguments(name, tool.handler, project, arguments)
     try:
         result = tool.handler(project, **arguments)
     except McpArgumentError as exc:
@@ -244,6 +253,7 @@ def _call_tool(params: dict[str, object], *, context: McpRequestContext) -> dict
 
 
 def _reject_unbindable_arguments(
+    name: str,
     handler: Callable[..., Any],
     project: BacklogProject,
     arguments: dict[str, object],
@@ -260,7 +270,10 @@ def _reject_unbindable_arguments(
     try:
         signature.bind(project, **arguments)
     except TypeError as exc:
-        raise JsonRpcError(INVALID_PARAMS, _tool_error_message(exc)) from exc
+        # Signature.bind does not know the callable's name, so its message reads
+        # "got an unexpected keyword argument 'bogus'" with nothing identifying
+        # which tool rejected it. Name the tool the client actually asked for.
+        raise JsonRpcError(INVALID_PARAMS, f"{name}: {_tool_error_message(exc)}") from exc
 
 
 def _tool_error_result(message: str) -> dict[str, object]:

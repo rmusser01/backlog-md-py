@@ -1,6 +1,6 @@
 # Contributing
 
-`backlog-md-py` is a stable 1.x Python compatibility implementation of
+`backlog-md-py` is a stable 2.x Python compatibility implementation of
 Backlog.md. Runtime code should stay free of Node/Bun dependencies; upstream
 Backlog.md tooling is only for fixture refresh or parity-generation work.
 
@@ -132,7 +132,7 @@ Before merging a version bump, or pushing a release tag by hand:
 
 ## Compatibility Scope
 
-The supported 1.x contract is defined in `docs/stability-policy.md`. Breaking
+The supported 2.x contract is defined in `docs/stability-policy.md`. Breaking
 changes to it need a major version bump. In short, the current cutover target
 covers:
 

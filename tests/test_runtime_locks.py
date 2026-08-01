@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -242,6 +243,110 @@ def test_prune_stale_locks_keeps_lock_files_without_metadata(tmp_path, monkeypat
 
     assert prune_stale_locks(min_age_seconds=0) == []
     assert orphan.exists(), "removed a lock whose state could not be proven dead"
+
+
+def test_prune_stale_locks_cannot_hand_two_acquirers_the_same_lock(tmp_path, monkeypatch):
+    """flock lives on the inode, not the path: pruning must not fork the lock.
+
+    Drives the exact reviewed interleaving with events (no sleeps):
+
+    * the pruner takes the flock and is gated just before it unlinks;
+    * a real acquirer opens the path and piles up in its retry loop (it has not
+      written metadata yet, so the pruner's metadata re-check still passes);
+    * the pruner unlinks metadata + lock file, then unlocks;
+    * the acquirer's next retry succeeds -- on an orphaned inode.
+
+    At that point the acquirer believes it holds the project write lock, so no
+    second acquirer may take it.
+    """
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    lock = ProjectWriteLock(project_root, operation="task_create")
+    with lock.acquire(timeout=1):
+        pass
+    _backdate(lock.metadata_path, days=30)
+
+    pruner_holds_flock = threading.Event()
+    waiter_is_spinning = threading.Event()
+    waiter_finished_acquire = threading.Event()
+    release_waiter = threading.Event()
+
+    real_try_lock = runtime_locks._try_lock
+    real_unlink_if_unchanged = runtime_locks._unlink_if_unchanged
+
+    def instrumented_try_lock(handle):
+        try:
+            real_try_lock(handle)
+        except BlockingIOError:
+            if threading.current_thread().name == "waiter":
+                waiter_is_spinning.set()
+            raise
+
+    def gated_unlink_if_unchanged(path, expected):
+        if path == lock.metadata_path:
+            # The pruner holds the flock and is about to unlink; let a genuine
+            # acquirer pile up behind it before the file goes away.
+            pruner_holds_flock.set()
+            assert waiter_is_spinning.wait(10), "waiter never reached the retry loop"
+        return real_unlink_if_unchanged(path, expected)
+
+    monkeypatch.setattr(runtime_locks, "_try_lock", instrumented_try_lock)
+    monkeypatch.setattr(runtime_locks, "_unlink_if_unchanged", gated_unlink_if_unchanged)
+
+    waiter_outcome: list[str] = []
+
+    def run_pruner() -> None:
+        prune_stale_locks(min_age_seconds=0)
+
+    def run_waiter() -> None:
+        try:
+            with ProjectWriteLock(project_root, operation="waiter").acquire(timeout=10):
+                waiter_outcome.append("acquired")
+                waiter_finished_acquire.set()
+                assert release_waiter.wait(10)
+        except LockTimeoutError:
+            waiter_outcome.append("timeout")
+        finally:
+            waiter_finished_acquire.set()
+
+    pruner = threading.Thread(target=run_pruner, name="pruner")
+    waiter = threading.Thread(target=run_waiter, name="waiter")
+    pruner.start()
+    try:
+        assert pruner_holds_flock.wait(10), "pruner never reached the unlink"
+        waiter.start()
+        assert waiter_finished_acquire.wait(10), "waiter never finished acquiring"
+        assert waiter_outcome == ["acquired"], "the waiter should still get the lock, just a real one"
+        with pytest.raises(LockTimeoutError, match="intruder"):
+            ProjectWriteLock(project_root, operation="intruder").acquire(timeout=0.2).close()
+    finally:
+        release_waiter.set()
+        waiter.join(timeout=10)
+        pruner.join(timeout=10)
+
+    assert not waiter.is_alive()
+    assert not pruner.is_alive()
+
+
+def test_prune_stale_locks_ignores_a_traversal_key_planted_in_metadata(tmp_path, monkeypatch):
+    """The lock path is derived from the metadata file, never from its contents."""
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    locks_dir = tmp_path / "state" / "locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    outsider = tmp_path / "outsider.lock"
+    outsider.write_text("", encoding="utf-8")
+    planted = locks_dir / "project-planted.json"
+    planted.write_text(
+        json.dumps({"active": False, "key": "../../outsider", "kind": "project", "pid": 999_999}),
+        encoding="utf-8",
+    )
+    _backdate(planted, days=30)
+
+    removed = prune_stale_locks(min_age_seconds=0)
+
+    assert outsider.exists(), "pruning followed a traversal key out of the locks directory"
+    assert removed == [planted]
 
 
 def _backdate(path: Path, *, days: float) -> None:

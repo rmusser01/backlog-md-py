@@ -19,10 +19,21 @@ on:
       - main
   # Manual escape hatch: retag a main commit whose automatic tagging was missed
   # or failed. Run it from the `main` branch.
+  #
+  # WARNING: a manual dispatch bypasses the CI-success gate in the job `if:`
+  # below - it only keeps the "contained in origin/main" and "tag does not
+  # already exist" guards. Tagging starts release.yml, which publishes to PyPI
+  # irreversibly, so confirm by hand that CI is green on the target commit
+  # before dispatching. See "Fallback: manual tagging" in RELEASE.md.
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  # Both sides must name the branch the same way or the group does not actually
+  # serialise anything: `workflow_run.head_branch` is the short name (`main`)
+  # while `github.ref` is the full ref (`refs/heads/main`), so a manual dispatch
+  # would land in a different group and race the automatic run for the same
+  # commit. `github.ref_name` is the short name for `workflow_dispatch`.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -48,6 +59,24 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository)
 
     steps:
+      # Action-pinning policy for this repository, stated here because this job
+      # holds `contents: write` + `actions: write` and creates the tag that
+      # triggers the PyPI publish:
+      #
+      #   * Third-party actions are pinned to a full commit SHA. They are
+      #     outside GitHub's trust boundary and a moved tag is a supply-chain
+      #     compromise. `release.yml` pins softprops/action-gh-release and
+      #     pypa/gh-action-pypi-publish this way, and
+      #     tests/test_package_metadata.py enforces it.
+      #   * First-party `actions/*` (checkout, setup-python, upload-artifact)
+      #     float on their major tag. They are published by GitHub itself, from
+      #     the same trust domain as the runner image and the `GITHUB_TOKEN`
+      #     that this job uses, so a SHA pin buys no additional isolation.
+      #
+      # Deliberately not pinned here: this repository has no Dependabot config,
+      # so a lone SHA pin in this one job would silently rot while the other
+      # four `actions/checkout@v4` uses keep receiving security fixes. Pin all
+      # of them (and add update automation) or none; do not pin just this one.
       - name: Checkout
         uses: actions/checkout@v4
         with:

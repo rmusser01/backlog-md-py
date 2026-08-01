@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-08-01
+
+This release fixes data-corruption, security, and performance defects found in a
+full review of the 1.0.1 codebase. Several fixes necessarily change documented
+behaviour, so it opens a new major line per `docs/stability-policy.md`.
+
+### Breaking Changes
+
+Each of these changes an interface covered by the stable support contract. Most
+exist because the previous behaviour was unsafe.
+
+- **`onStatusChange` in a task file's own frontmatter no longer runs.** Task
+  markdown arrives from clones, branches, and pull requests, so a status change
+  — including a board drag-and-drop — could execute attacker-authored shell.
+  *Migration:* set `taskFrontmatterStatusCallbacks: true` in `backlog/config.yml`
+  to restore it. Config-level `onStatusChange` is unaffected, and a command
+  passed explicitly to `task create`/`task edit --on-status-change` still runs.
+
+  Be clear about what this does and does not protect. `backlog/config.yml`
+  arrives through the same channel a task file does, so a hostile *repository*
+  can still set `onStatusChange` at config level, or flip this key to `true`.
+  The gate defends against the common case — a pull request or branch that only
+  touches `backlog/tasks/` — not against cloning and operating on a repository
+  you do not trust. Treat a clone's `backlog/config.yml` the way you would treat
+  any other executable content in it.
+- **`daemon start`/`daemon run` reject a non-loopback `--host`.** The daemon
+  serves the full MCP JSON-RPC surface, including every write tool, so binding a
+  LAN address handed project write access to the network.
+  *Migration:* pass `--allow-remote` to opt in deliberately.
+- **The browser board requires an `Origin` header on mutating requests, and a
+  loopback `Host` on every request.** Previously any local process could create,
+  edit, and archive tasks, rewrite `config.yml`, and shut the service down with
+  no credentials; and a DNS-rebinding page could read the entire backlog.
+  *Migration:* non-browser clients must send `Origin` and a loopback `Host`.
+  Browsers already do both.
+- **MCP tools reject unknown arguments.** Schemas now set
+  `additionalProperties: false` wherever the handler has a fixed signature, so
+  an argument that was previously accepted and silently ignored returns `-32602`.
+  *Migration:* remove extra fields; the schema is now authoritative.
+- **MCP `resources/read` returns `-32002` for an unknown URI** instead of
+  `-32602`, matching the MCP specification.
+- **`search --type` with no supported values is a usage error (exit 2)** instead
+  of exiting 0 having silently searched nothing.
+- **`--modified-files a,b` requires every value**, matching every other list
+  filter. It previously matched a task touching any one of them.
+- **`orchestration record-run --plain` emits a tab-separated record.** Its plain
+  output was previously identical to the default rendering.
+- **Run history is capped at 50 entries per task.** Older entries are dropped
+  behind a marker recording how many; a replay whose idempotency key has aged
+  out returns a conflict rather than silently re-running the work.
+- **Python helper:** the document, decision, draft, and milestone services now
+  raise at construction when their directory escapes the project via a symlink.
+
 ### Added
 
 - Add a compatibility extension that discovers H1-first documents without
@@ -19,6 +72,28 @@
   passed explicitly to `task create`/`task edit --on-status-change` still runs.
 - Automatic release tagging now waits for CI to succeed on the exact commit
   before tagging and publishing to PyPI, rather than racing it.
+- `daemon start`/`daemon run` now reject a non-loopback `--host`. Pass
+  `--allow-remote` to bind a LAN address deliberately; the daemon serves the
+  full MCP JSON-RPC surface including every write tool.
+- `search --type` with no supported values is now a usage error (exit 2) instead
+  of silently searching nothing and exiting 0.
+- `--plain` is now implemented on all ten orchestration commands, emitting
+  tab-separated records for agent parsing. It was previously declared and
+  ignored on five of them, and identical to the default on `record-run`, whose
+  plain output has therefore changed shape.
+- MCP tool schemas now set `additionalProperties: false` where the handler has a
+  fixed signature, so an unknown argument is rejected rather than accepted and
+  ignored. `resources/read` returns `-32002` for an unknown URI, and a
+  non-project `project` argument returns a tool error pointing at
+  `backlog://init-required` instead of a `-32603` internal error.
+- `claim_task` derives its target status from the orchestration policy, so a
+  policy whose working state is not `inprogress` can now be claimed at all.
+- `record_run` rejects a state update that would persist invalid orchestration
+  metadata, and run history is capped at 50 entries. A replay whose idempotency
+  key has aged out returns a conflict rather than silently re-running the work.
+- Task ids are no longer reissued from a file that failed to parse; allocation
+  also scans filenames, so a corrupted `decision-9` leaves a gap rather than
+  producing two files under one id.
 
 ### Fixed
 

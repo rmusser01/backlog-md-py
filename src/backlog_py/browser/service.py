@@ -14,7 +14,7 @@ from html import escape
 from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Mapping
+from typing import Mapping, Sequence
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
@@ -31,6 +31,7 @@ from backlog_py.orchestration import (
     parse_run_history,
 )
 from backlog_py.runtime.locks import with_project_write_lock
+from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback
 from backlog_py.storage.config import (
     get_definition_of_done_defaults,
     load_config,
@@ -39,8 +40,9 @@ from backlog_py.storage.config import (
     set_config_value,
 )
 
-_LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost", "::1"))
-_DEFAULT_HTTP_PORT = 80
+# Sourced from the shared helper so the browser and MCP servers cannot drift
+# on what counts as loopback.
+_LOOPBACK_HOSTS = LOOPBACK_HOSTNAMES
 # Cap request bodies so an oversized Content-Length cannot exhaust memory, and
 # bound the socket so a slow/idle client cannot pin a handler thread forever.
 _MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
@@ -56,9 +58,20 @@ _BROWSER_MERMAID_URL_ENV = "BACKLOG_PY_BROWSER_MERMAID_URL"
 # remote Mermaid URL is configured; the CSP is widened to that origin too.
 _BROWSER_MERMAID_SRI_ENV = "BACKLOG_PY_BROWSER_MERMAID_SRI"
 # Hosts/ports that may appear verbatim in a Content-Security-Policy source.
-_CSP_SOURCE_PATTERN = re.compile(r"[A-Za-z0-9.\-]+(:[0-9]+)?")
-# One or more space-separated `sha(256|384|512)-<base64>` integrity digests.
-_SRI_PATTERN = re.compile(r"sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}(?: sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2})*")
+# Either a registered name / IPv4 literal, or a bracketed IPv6 literal such as
+# `[::1]:8080` - a perfectly ordinary local Mermaid server. Rejecting those used
+# to drop the origin from script-src while still emitting the URL as the script
+# `src`, so diagrams failed with a CSP violation rather than a clear error.
+# Neither alternative can contain a space or a `;`, so no extra CSP source or
+# directive can be injected through the env var.
+_CSP_SOURCE_PATTERN = re.compile(r"(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]+)?")
+# One or more space-separated integrity digests. The digest body accepts base64
+# and base64url (`-`/`_`, which some CDNs publish) plus the spec's optional
+# `?option` suffix. Option characters are restricted to an unambiguous subset of
+# VCHAR: the value is HTML-escaped before it reaches the attribute, but there is
+# no reason to accept quotes or angle brackets here in the first place.
+_SRI_DIGEST_SOURCE = r"sha(?:256|384|512)-[A-Za-z0-9+/_-]+={0,2}(?:\?[A-Za-z0-9._~%+/=-]*)?"
+_SRI_PATTERN = re.compile(rf"{_SRI_DIGEST_SOURCE}(?: {_SRI_DIGEST_SOURCE})*")
 _BOARD_REVISION_RETRY_MS = 5000
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
@@ -284,6 +297,53 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             # connection with a bare traceback; return a 500 error page.
             logger.exception("Unhandled error serving GET {}", self.path)
             self._safe_send_error()
+
+    def do_HEAD(self) -> None:
+        # Same routing and same headers as GET; the body is suppressed in
+        # `_send_text` / `_send_cached_asset` / `_send_board_event`. Without a
+        # handler, `BaseHTTPRequestHandler` answers `curl -I` with a bare 501
+        # that never reaches the Host check or the security headers.
+        self.do_GET()
+
+    def do_OPTIONS(self) -> None:
+        self._reject_unsupported_method()
+
+    def do_PUT(self) -> None:
+        self._reject_unsupported_method()
+
+    def do_PATCH(self) -> None:
+        self._reject_unsupported_method()
+
+    def do_DELETE(self) -> None:
+        self._reject_unsupported_method()
+
+    def _reject_unsupported_method(self) -> None:
+        """Answer an unsupported verb through the normal response pipeline.
+
+        The stdlib's fallback (`send_error(501)` straight out of
+        `handle_one_request`) runs before any `do_*` method, so it skipped both
+        the Host check and every security header. Verbs with no handler at all
+        still land there, which is why `send_response` is overridden as well.
+        """
+        if not self._host_allowed():
+            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+            return
+        self._send_json(
+            HTTPStatus.METHOD_NOT_ALLOWED,
+            {"error": "Method not allowed"},
+            extra_headers=(("Allow", "GET, POST"),),
+        )
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        """Emit the security headers on *every* response, including errors.
+
+        `send_error` (unknown verb, malformed request line, oversized header
+        block) builds its response without going through the senders below, so
+        hooking the one call they all share is what makes "applied on every
+        request" true rather than aspirational.
+        """
+        super().send_response(code, message)
+        self._send_security_headers()
 
     def _send_readonly_listing_error(self, subject: str, exc: BaseException) -> None:
         """Return a well-formed error for a readonly route instead of a bare 500.
@@ -619,16 +679,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         backlog. The hostname must be a loopback literal and the port must be
         the bound port (an absent port means the HTTP default, port 80).
         """
-        header = self.headers.get("Host")
-        if header is None:
-            return False
-        parsed = _parse_host_header(header)
-        if parsed is None:
-            return False
-        hostname, port = parsed
-        if hostname.casefold() not in _LOOPBACK_HOSTS:
-            return False
-        return (_DEFAULT_HTTP_PORT if port is None else port) == int(self.server.server_address[1])
+        return host_header_is_loopback(
+            self.headers.get("Host"), int(self.server.server_address[1])
+        )
 
     def _origin_allowed(self) -> bool:
         """Require a same-origin loopback Origin on every mutating request.
@@ -646,8 +699,19 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         parsed = urlparse(origin)
         return parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS and parsed.netloc == host
 
-    def _send_json(self, status: HTTPStatus, payload: Mapping[str, object]) -> None:
-        self._send_text(status, json.dumps(payload, sort_keys=True), content_type="application/json")
+    def _send_json(
+        self,
+        status: HTTPStatus,
+        payload: Mapping[str, object],
+        *,
+        extra_headers: Sequence[tuple[str, str]] = (),
+    ) -> None:
+        self._send_text(
+            status,
+            json.dumps(payload, sort_keys=True),
+            content_type="application/json",
+            extra_headers=extra_headers,
+        )
 
     def _send_html(self, status: HTTPStatus, html: str) -> None:
         self._send_text(status, html, content_type="text/html; charset=utf-8")
@@ -656,7 +720,6 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", "0")
-        self._send_security_headers()
         self.end_headers()
         _record_service_request(
             self.server,
@@ -680,9 +743,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("Content-Length", str(len(data)))
-        self._send_security_headers()
         self.end_headers()
-        self.wfile.write(data)
+        self._write_body(data)
         _record_service_request(
             self.server,
             method=self.command,
@@ -690,6 +752,12 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             status=HTTPStatus.OK,
             content_type=content_type,
         )
+
+    def _write_body(self, data: bytes) -> None:
+        """Write a response body, except for HEAD, which is headers only."""
+        if self.command == "HEAD":
+            return
+        self.wfile.write(data)
 
     def _send_security_headers(self) -> None:
         # Purely defensive, additive headers: block MIME sniffing, framing
@@ -706,9 +774,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         # The vendored asset is version-pinned and immutable.
         self.send_header("Cache-Control", "public, max-age=86400, immutable")
-        self._send_security_headers()
         self.end_headers()
-        self.wfile.write(data)
+        self._write_body(data)
         _record_service_request(
             self.server,
             method=self.command,
@@ -717,14 +784,22 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             content_type=content_type,
         )
 
-    def _send_text(self, status: HTTPStatus, text: str, *, content_type: str) -> None:
+    def _send_text(
+        self,
+        status: HTTPStatus,
+        text: str,
+        *,
+        content_type: str,
+        extra_headers: Sequence[tuple[str, str]] = (),
+    ) -> None:
         data = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self._send_security_headers()
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.end_headers()
-        self.wfile.write(data)
+        self._write_body(data)
         _record_service_request(
             self.server,
             method=self.command,
@@ -814,23 +889,51 @@ def _with_mermaid_integrity_attribute(html: str, *, escaped_url: str) -> str:
     optional integrity value is attached to the same element here; the default
     (local, same-origin) asset renders exactly as before.
     """
-    if _mermaid_script_origin() is None:
+    remote_origin = _mermaid_script_origin()
+    if remote_origin is None:
         # Integrity only means something for a third-party build: gating the
         # same-origin vendored asset (or the disabled/empty URL) on a digest
         # the operator never set for it would silently break diagrams.
         return html
     integrity = _resolve_mermaid_integrity()
     if not integrity:
+        _warn_unverified_remote_mermaid(remote_origin)
         return html
     marker = f'data-mermaid-url="{escaped_url}"'
     return html.replace(marker, f'{marker} data-mermaid-sri="{escape(integrity, quote=True)}"', 1)
+
+
+def _warn_unverified_remote_mermaid(remote_origin: str) -> None:
+    """Say out loud that third-party script is being loaded unverified.
+
+    A missing digest and a rejected one both end up as "no integrity attribute",
+    so without this a single typo in the digest downgrades a verified load to an
+    unverified one with nothing in the logs to show for it.
+    """
+    raw = (os.environ.get(_BROWSER_MERMAID_SRI_ENV) or "").strip()
+    reason = (
+        f"no {_BROWSER_MERMAID_SRI_ENV} is set"
+        if not raw
+        else f"the configured {_BROWSER_MERMAID_SRI_ENV} value is malformed and was rejected"
+    )
+    logger.warning(
+        "Loading Mermaid from remote origin {} without subresource integrity: {}. "
+        "The board will execute whatever that origin serves. Set {} to a "
+        "'sha384-<base64>' digest, or unset {} to use the vendored local build.",
+        remote_origin,
+        reason,
+        _BROWSER_MERMAID_SRI_ENV,
+        _BROWSER_MERMAID_URL_ENV,
+    )
 
 
 def _resolve_mermaid_integrity() -> str:
     """Return a validated subresource-integrity value for a remote Mermaid URL.
 
     Malformed values are ignored rather than emitted, so a bad env var can
-    never break the attribute or inject markup.
+    never break the attribute or inject markup. Callers must not read a ``""``
+    result as "no integrity was asked for" - see
+    ``_warn_unverified_remote_mermaid``, which reports both cases.
     """
     value = (os.environ.get(_BROWSER_MERMAID_SRI_ENV) or "").strip()
     if not value or not _SRI_PATTERN.fullmatch(value):
@@ -871,6 +974,28 @@ def _content_security_policy() -> str:
     same-origin JSON, opens an EventSource on /api/board/events and loads the
     vendored Mermaid build from /assets, so 'self' plus 'unsafe-inline' is the
     tightest policy that keeps the page working without a nonce pipeline.
+
+    Be precise about what that buys, because ``'unsafe-inline'`` in
+    ``script-src`` is doing most of the work here:
+
+    * It does **not** meaningfully mitigate script *execution*. Any injected
+      inline script element or event-handler attribute runs exactly as it would
+      with no policy at all. Output escaping (``html.escape`` on every rendered
+      value) remains the only defence against XSS on this page; treat the CSP as
+      a second line, not the first.
+    * What it does buy is *containment*. ``default-src 'none'`` plus
+      ``connect-src 'self'`` means injected script cannot exfiltrate the backlog
+      to a third-party host, and cannot pull in a remote payload: every fetch,
+      XHR, EventSource, image, font and frame target must be same-origin (only
+      an explicitly configured Mermaid origin is added, and only to
+      ``script-src``).
+    * ``frame-ancestors 'none'`` blocks clickjacking of the Stop/Archive
+      controls, ``base-uri 'none'`` stops an injected base element from
+      re-pointing every relative URL, and ``form-action 'self'`` stops a planted
+      form from POSTing project contents elsewhere.
+
+    Closing the execution gap needs a nonce (or hash) pipeline over board.html,
+    which is a larger change than this policy.
     """
     script_sources = ["'self'", "'unsafe-inline'"]
     remote_origin = _mermaid_script_origin()
@@ -879,7 +1004,11 @@ def _content_security_policy() -> str:
     directives = (
         "default-src 'none'",
         f"script-src {' '.join(script_sources)}",
-        "style-src 'unsafe-inline'",
+        # 'self' is redundant while the CSS is inlined, but the Mermaid bundle
+        # already ships from /assets: the first stylesheet that follows it there
+        # would otherwise be blocked by a policy that never allows same-origin
+        # styles.
+        "style-src 'self' 'unsafe-inline'",
         "connect-src 'self'",
         "img-src 'self' data:",
         "font-src 'self' data:",
@@ -1390,39 +1519,6 @@ def _metadata_string(value: object) -> str | None:
 
 def _root_url(host: str, port: int) -> str:
     return f"http://{host}:{port}/"
-
-
-def _parse_host_header(value: str) -> tuple[str, int | None] | None:
-    """Split a Host header into ``(hostname, port)``; ``None`` when malformed.
-
-    Handles the IPv6 bracket form (``[::1]:8080``/``[::1]``) and the common
-    port-less form (``localhost``).
-    """
-    raw = value.strip()
-    if not raw:
-        return None
-    if raw.startswith("["):
-        end = raw.find("]")
-        if end == -1:
-            return None
-        hostname = raw[1:end]
-        remainder = raw[end + 1 :]
-    elif raw.count(":") > 1:
-        # An unbracketed IPv6 literal is not a valid Host header.
-        return None
-    else:
-        hostname, separator, port_text = raw.partition(":")
-        remainder = f":{port_text}" if separator else ""
-    if not hostname:
-        return None
-    if not remainder:
-        return hostname, None
-    if not remainder.startswith(":"):
-        return None
-    port_text = remainder[1:]
-    if not port_text.isdigit():
-        return None
-    return hostname, int(port_text)
 
 
 def _endpoint_segment(path: str, prefix: str, suffix: str = "", *, allow_separators: bool = False) -> str | None:

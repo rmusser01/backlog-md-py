@@ -113,7 +113,33 @@ def test_malformed_decision_file_does_not_disable_decision_operations(tmp_path):
     assert [decision.id for decision in listed] == ["decision-1"]
     assert any("Broken.md" in message for message in warnings), warnings
     assert _service(repo).view_decision("1").title == "Use PostgreSQL"
-    assert _service(repo).create_decision("Another one").id == "decision-2"
+    # decision-9 is unparsable but still occupies its number, so allocation skips
+    # past it. A gap is harmless; reissuing 9 would put two files under one id.
+    assert _service(repo).create_decision("Another one").id == "decision-10"
+
+
+def test_unparsable_decision_whose_filename_hides_its_id_still_reserves_it(tmp_path):
+    """A skipped file keeps the id in its frontmatter, not the one in its name.
+
+    Scanning filenames only covers generated ``decision-N`` names; a renamed (or
+    hand-written) file carries its id solely in the frontmatter, and reissuing
+    that number would put two files under one id.
+    """
+    repo = _copy_fixture(tmp_path)
+    _write_decision(
+        repo,
+        "decision-legacy - Broken.md",
+        "---\nid: decision-4\ntitle: Broken\n\nNo closing fence.\n",
+    )
+
+    with _captured_warnings() as warnings:
+        listed = _service(repo).list_decisions()
+
+    assert listed == []
+    assert any("Broken.md" in message for message in warnings), warnings
+    created = _service(repo).create_decision("Another one")
+    assert created.id == "decision-5"
+    assert _service(repo).view_decision("5").title == "Another one"
 
 
 def test_decision_reader_tolerates_utf8_bom(tmp_path):
@@ -132,16 +158,24 @@ def test_decision_reader_tolerates_utf8_bom(tmp_path):
     assert not viewed.raw_source.startswith("﻿")
 
 
-def test_create_decision_refuses_to_overwrite_an_existing_file(tmp_path):
+def test_create_decision_refuses_to_overwrite_an_existing_file(tmp_path, monkeypatch):
+    """Guards the write against a file appearing between id allocation and write.
+
+    Id allocation now also scans filenames, so a natural collision is no longer
+    reachable; this drives the remaining race directly by pinning the allocated
+    id to one that is already taken.
+    """
     repo = _copy_fixture(tmp_path)
     squatter = _write_decision(
         repo,
         "decision-1 - Same-title.md",
         "---\nid: adr-1\ntitle: Same title\n---\n\n## Context\n\nkeep me\n",
     )
+    service = _service(repo)
+    monkeypatch.setattr(type(service), "_next_decision_id", lambda self: "decision-1")
 
     with pytest.raises(DecisionMutationError, match="already exists"):
-        _service(repo).create_decision("Same title")
+        service.create_decision("Same title")
 
     assert "keep me" in squatter.read_text(encoding="utf-8")
 

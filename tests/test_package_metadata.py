@@ -36,7 +36,7 @@ def test_pyproject_derives_distribution_version_from_package_attribute():
 def test_stable_release_metadata_and_docs_are_declared():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
 
-    assert __version__ == "1.0.1"
+    assert __version__ == "2.0.0"
     assert "Development Status :: 5 - Production/Stable" in pyproject["project"]["classifiers"]
     assert "Development Status :: 3 - Alpha" not in pyproject["project"]["classifiers"]
     assert "Development Status :: 4 - Beta" not in pyproject["project"]["classifiers"]
@@ -47,7 +47,7 @@ def test_stable_release_metadata_and_docs_are_declared():
 
     assert "Supported Contract" in stability_policy
     assert "Stable Release Gate" in stability_policy
-    assert "## 1.0.1" in changelog
+    assert "## 2.0.0" in changelog
     assert "## 1.0.0" in changelog
     assert "## 0.2.0" in changelog
     assert "Stable" in changelog
@@ -90,8 +90,12 @@ def test_pyproject_packages_browser_static_assets():
     assert "browser/templates/*.html" in package_data
     assert "browser/assets/*.css" in package_data
     assert "browser/assets/*.js" in package_data
+    # The vendored Mermaid bundle is MIT licensed, so its notice file has to
+    # ship in the wheel alongside the code it covers - dropping this entry is a
+    # licence-compliance regression, not a cosmetic one.
+    assert "browser/assets/*.md" in package_data
     assert "recursive-include src/backlog_py/browser/templates *.html" in manifest
-    assert "recursive-include src/backlog_py/browser/assets *.css *.js" in manifest
+    assert "recursive-include src/backlog_py/browser/assets *.css *.js *.md" in manifest
 
 
 def test_browser_board_assets_are_available_from_package_resources():
@@ -100,6 +104,56 @@ def test_browser_board_assets_are_available_from_package_resources():
     assert browser_package.joinpath("templates", "board.html").is_file()
     assert browser_package.joinpath("assets", "board.css").is_file()
     assert browser_package.joinpath("assets", "board.js").is_file()
+
+
+def test_vendored_mermaid_notice_ships_with_the_bundle():
+    assets = files("backlog_py.browser").joinpath("assets")
+
+    assert assets.joinpath("mermaid.min.js").is_file()
+    notice = assets.joinpath("mermaid.min.js.VENDOR.md")
+    assert notice.is_file()
+    assert "MIT" in notice.read_text(encoding="utf-8")
+
+
+def test_ci_runs_ruff_as_a_blocking_gate_and_mypy_as_advisory():
+    """The release story says "ruff is blocking"; pin that to the workflow.
+
+    `ruff check` passing is what the release checklist and RELEASE.md lean on
+    when they call a green CI run "safe to tag and publish", so a stray
+    `continue-on-error` on that step would quietly hollow out the gate. mypy is
+    the opposite: it runs against a known baseline and must stay advisory until
+    the baseline is burned down.
+    """
+    workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
+
+    assert "lint" in workflow["jobs"]
+    lint_steps = workflow["jobs"]["lint"]["steps"]
+    steps_by_name = {step["name"]: step for step in lint_steps}
+
+    ruff_step = steps_by_name["Run Ruff"]
+    assert "ruff check src tests" in ruff_step["run"]
+    assert "continue-on-error" not in ruff_step
+    assert ruff_step.get("if") is None
+
+    mypy_step = steps_by_name["Run mypy"]
+    assert "mypy" in mypy_step["run"]
+    assert mypy_step["continue-on-error"] is True
+
+    # A failing lint job has to be able to fail the workflow.
+    assert "continue-on-error" not in workflow["jobs"]["lint"]
+
+
+def test_ruff_lint_configuration_has_no_stale_per_file_ignores():
+    """Every per-file ignore must correspond to a violation that still exists.
+
+    A per-file ignore that no longer matches anything is not neutral: it
+    silently swallows the *next* violation of that rule in that file, which is
+    the one thing the ratchet exists to catch.
+    """
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    per_file_ignores = pyproject["tool"]["ruff"]["lint"]["per-file-ignores"]
+
+    assert not [path for path in per_file_ignores if path.startswith("src/") and "F401" in per_file_ignores[path]]
 
 
 def test_ci_smokes_sdk_free_mcp_entry_point_without_mcp_extra():
@@ -215,6 +269,13 @@ def test_auto_release_tag_workflow_tags_merged_main_versions():
     ]
     assert steps[0]["uses"] == "actions/checkout@v4"
     assert steps[0]["with"]["fetch-depth"] == 0
+    # This job holds contents:write + actions:write and creates the tag that
+    # starts the PyPI publish, so the floating first-party ref has to be a
+    # stated decision rather than an oversight. See the comment above the
+    # Checkout step for the policy it is stated against.
+    source = Path(".github/workflows/auto-release-tag.yml").read_text(encoding="utf-8")
+    assert "Action-pinning policy" in source
+    assert "Third-party actions are pinned to a full commit SHA" in source
     # workflow_run runs in default-branch context, so the commit CI validated has
     # to come from the event payload rather than the ambient ref.
     assert steps[0]["with"]["ref"] == "${{ github.event.workflow_run.head_sha || github.sha }}"
@@ -227,6 +288,57 @@ def test_auto_release_tag_workflow_tags_merged_main_versions():
     assert 'gh workflow run release.yml --ref "${{ steps.version.outputs.tag }}"' in run_script
     assert steps[-1]["if"] == "steps.tag.outputs.created == 'true'"
     assert steps[-1]["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+
+def test_first_party_action_refs_are_consistent_across_workflows():
+    """Pin all `actions/checkout` uses or none - never just one.
+
+    A lone SHA pin in one workflow rots in place while the others keep taking
+    security fixes from the moving tag, and this repository has no Dependabot
+    config to move it. The stated policy is in the Checkout comment in
+    auto-release-tag.yml.
+    """
+    refs = set()
+    for name in ("ci.yml", "release.yml", "auto-release-tag.yml"):
+        workflow = yaml.safe_load((Path(".github/workflows") / name).read_text())
+        for job in workflow["jobs"].values():
+            for step in job["steps"]:
+                uses = step.get("uses", "")
+                if uses.startswith("actions/checkout@"):
+                    refs.add(uses)
+
+    assert len(refs) == 1, refs
+
+
+def test_workflow_concurrency_groups_use_one_branch_naming_scheme():
+    """`workflow_run` and `workflow_dispatch` must land in the same group.
+
+    `workflow_run.head_branch` is the short name (`main`) while `github.ref` is
+    the full ref (`refs/heads/main`), so mixing them lets a manual dispatch run
+    concurrently with the automatic tag job for the same commit - two racing
+    jobs that both try to create and push the same tag.
+    """
+    source = Path(".github/workflows/auto-release-tag.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(source)
+
+    group = workflow["concurrency"]["group"]
+    assert "workflow_run.head_branch" in group
+    assert "github.ref_name" in group
+    assert "github.ref " not in group and "github.ref}" not in group
+
+
+def test_release_docs_state_that_manual_dispatch_bypasses_the_ci_gate():
+    """RELEASE.md must not read as if every tag is CI-gated.
+
+    The job guard short-circuits on `github.event_name == 'workflow_dispatch'`,
+    so a manual dispatch tags without ever consulting the CI conclusion, and
+    tagging is what publishes to PyPI.
+    """
+    release_doc = Path("RELEASE.md").read_text(encoding="utf-8")
+    workflow_source = Path(".github/workflows/auto-release-tag.yml").read_text(encoding="utf-8")
+
+    assert "bypasses the CI-success gate" in release_doc
+    assert "bypasses the CI-success gate" in workflow_source
 
 
 def test_python_support_range_is_311_through_314():
