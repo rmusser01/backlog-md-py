@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from backlog_py.core.models import ChecklistItem, ParsedTaskMarkdown, TaskMarkdownSection
 
@@ -192,3 +194,32 @@ def _parse_checklist_items(lines: list[str]) -> list[ChecklistItem]:
             )
         )
     return items
+
+
+_RAW_ID_LINE_RE = re.compile(r"^id:(?P<value>.*)$")
+
+
+def salvage_frontmatter_id(path: Path) -> str | None:
+    """Best-effort id of a file that failed to parse, read straight off its frontmatter.
+
+    A full parse is exactly what just failed, so this reads only the leading
+    ``---`` block line by line and takes the first top-level ``id:``. Reserving
+    an id that turns out not to be one only leaves a harmless gap in numbering;
+    missing one hands the same id to a second file, which is the bug this exists
+    to prevent. Scanning the whole file would let a stray ``id:`` in a body or a
+    code block inflate allocation, so the scan stops at the closing fence.
+    """
+    try:
+        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as source_file:
+            if source_file.readline().rstrip("\r\n") != "---":
+                return None
+            for raw_line in source_file:
+                line = raw_line.rstrip("\r\n")
+                if line == "---":
+                    return None
+                match = _RAW_ID_LINE_RE.match(line)
+                if match is not None:
+                    return match.group("value").strip().strip("\"'").strip() or None
+    except OSError as exc:
+        logger.warning("Could not recover an id from unreadable file {}: {}", path, exc)
+    return None

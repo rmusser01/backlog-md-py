@@ -374,6 +374,76 @@ def test_malformed_document_file_does_not_disable_document_operations(tmp_path):
     assert _service(repo).update_document("DOC-1", title="Setup Handbook").title == "Setup Handbook"
 
 
+def test_unparsable_document_at_a_custom_path_still_reserves_its_id(tmp_path):
+    """A skipped file keeps its id even when the filename says nothing about it.
+
+    Documents can be created at a caller-chosen path, so the id lives only in the
+    frontmatter. If the file later stops parsing it is skipped by list_documents()
+    and reissuing its number would put two files under one id.
+    """
+    repo = _copy_fixture(tmp_path)
+    docs_dir = repo / "backlog" / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "notes.md").write_text(
+        "---\nid: DOC-3\ntitle: Notes\n\nNo closing fence.\n", encoding="utf-8"
+    )
+
+    created = _service(repo).create_document("next.md", title="Next", content="More.")
+
+    assert created.id == "DOC-4"
+    # ...and the unparsable file must still not disable the other operations.
+    assert [document.id for document in _service(repo).list_documents()] == ["DOC-4"]
+    assert _service(repo).view_document("DOC-4").title == "Next"
+    assert _service(repo).update_document("DOC-4", title="Next Guide").title == "Next Guide"
+
+
+def test_document_id_recovery_reads_the_frontmatter_not_the_body(tmp_path):
+    """The recovered id comes from the leading block, so body text cannot inflate it."""
+    repo = _copy_fixture(tmp_path)
+    docs_dir = repo / "backlog" / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "notes.md").write_text(
+        '---\nid: DOC-2\ntitle: "unclosed quote\n---\n\nid: DOC-99\n', encoding="utf-8"
+    )
+
+    assert _service(repo).create_document("next.md", title="Next", content="More.").id == "DOC-3"
+
+
+def test_unparsable_document_without_a_readable_id_falls_back_to_its_filename(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    docs_dir = repo / "backlog" / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "doc-5 - Broken.md").write_text("---\ntitle: Broken\n\nNo closing fence.\n", encoding="utf-8")
+
+    assert _service(repo).create_document("next.md", title="Next", content="More.").id == "DOC-6"
+
+
+def test_document_id_held_by_an_unparsable_file_cannot_be_claimed_explicitly(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    docs_dir = repo / "backlog" / "docs"
+    docs_dir.mkdir(parents=True)
+    broken = docs_dir / "notes.md"
+    broken.write_text("---\nid: DOC-3\ntitle: Notes\n\nNo closing fence.\n", encoding="utf-8")
+
+    with pytest.raises(DocumentMutationError, match="Document id already exists"):
+        _service(repo).create_document("other.md", title="Other", content="x", metadata={"id": "doc-3"})
+
+    assert not (docs_dir / "other.md").exists()
+    assert "No closing fence." in broken.read_text(encoding="utf-8")
+
+
+def test_create_document_refuses_to_overwrite_an_existing_file(tmp_path):
+    """Guards the write itself: the path is caller-supplied, so ids cannot rule it out."""
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.create_document("guides/setup.md", title="Setup Guide", content="keep me")
+
+    with pytest.raises(DocumentMutationError, match="already exists"):
+        service.create_document("guides/setup.md", title="Setup Guide", content="clobber")
+
+    assert "keep me" in (repo / "backlog" / "docs" / "guides" / "setup.md").read_text(encoding="utf-8")
+
+
 def test_document_reader_tolerates_utf8_bom(tmp_path):
     repo = _copy_fixture(tmp_path)
     docs_dir = repo / "backlog" / "docs"

@@ -89,6 +89,7 @@ class ReadOnlyRepository:
         self._remote_refs_refreshed = False
         self._visible_task_records: dict[str, list[TaskRecord]] | None = None
         self._lookup_task_records: list[TaskRecord] | None = None
+        self._task_dir_records: dict[Path, list[TaskRecord]] = {}
 
     @classmethod
     def from_path(cls, cwd: Path) -> "ReadOnlyRepository":
@@ -132,10 +133,9 @@ class ReadOnlyRepository:
         for task in self.list_tasks():
             if matches(task.id):
                 return task
-        for directory in self._task_lookup_dirs():
-            for task in _load_tasks_from_dir(directory):
-                if matches(task.id):
-                    return task
+        for task in self._lookup_task_records_cached():
+            if matches(task.id):
+                return task
         raise NotFoundError(f"Task not found: {task_id}")
 
     def _task_lookup_dirs(self) -> tuple[Path, ...]:
@@ -155,9 +155,23 @@ class ReadOnlyRepository:
         if self._lookup_task_records is None:
             records: list[TaskRecord] = []
             for directory in self._task_lookup_dirs():
-                records.extend(_load_tasks_from_dir(directory))
+                records.extend(self._task_dir_records_cached(directory))
             self._lookup_task_records = records
         return self._lookup_task_records
+
+    def _task_dir_records_cached(self, directory: Path) -> list[TaskRecord]:
+        """Parse one task directory at most once per repository instance.
+
+        ``tasks/`` and ``completed/`` are read by both the visible-record scan
+        and the lookup scan; sharing the parse keeps the "everything get_task
+        can resolve" invariant (the same files, including duplicate-id losers
+        the visible scan drops) at half the I/O.
+        """
+        cached = self._task_dir_records.get(directory)
+        if cached is None:
+            cached = _load_tasks_from_dir(directory)
+            self._task_dir_records[directory] = cached
+        return cached
 
     def _all_known_task_records(self) -> list[TaskRecord]:
         """Active, completed, and archived tasks — everything ``get_task`` can resolve.
@@ -186,17 +200,13 @@ class ReadOnlyRepository:
         forms must be refused when either is already on disk — otherwise two files
         claim one id and the original becomes unaddressable.
         """
-        candidate_key = numeric_id_key(candidate)
-        for reserved in self._reserved_task_ids():
-            if reserved == candidate.casefold():
-                return True
-            if candidate_key is not None and numeric_id_key(reserved) == candidate_key:
-                return True
-        return False
+        candidate_key = _reference_key(candidate)
+        return any(_reference_key(reserved) == candidate_key for reserved in self._reserved_task_ids())
 
     def _invalidate_task_cache(self) -> None:
         self._visible_task_records = None
         self._lookup_task_records = None
+        self._task_dir_records.clear()
 
     def _safe_task_path(self, candidate: Path) -> Path:
         """Assert a task file lives under the backlog directory.
@@ -322,31 +332,34 @@ class ReadOnlyRepository:
 
     def _visible_task_candidates_from_markdown(self) -> dict[str, list[_VisibleTaskRecord]]:
         candidates = [
-            *_current_branch_records(self.project, "tasks", self.project.backlog_dir / "tasks"),
-            *_current_branch_records(self.project, "completed", self.project.backlog_dir / "completed"),
+            *self._current_branch_records("tasks", self.project.backlog_dir / "tasks"),
+            *self._current_branch_records("completed", self.project.backlog_dir / "completed"),
         ]
         if self._include_active_branch_snapshots:
             candidates.extend(_load_active_branch_records(self.project))
 
-        selected: dict[str, _VisibleTaskRecord] = {}
+        # Each record's sort key is carried alongside it, so a candidate is
+        # keyed once no matter how many rivals it is compared against.
+        selected: dict[str, tuple[_VisibleTaskRecord, float]] = {}
         for candidate in candidates:
             key = candidate.task.id.casefold()
-            current = selected.get(key)
-            if current is None:
-                selected[key] = candidate
-                continue
             candidate_key = _visible_record_key(candidate)
-            current_key = _visible_record_key(current)
+            existing = selected.get(key)
+            if existing is None:
+                selected[key] = (candidate, candidate_key)
+                continue
+            current, current_key = existing
             if candidate_key > current_key:
-                winner, loser = candidate, current
+                winner, winner_key, loser = candidate, candidate_key, current
             elif candidate_key < current_key:
-                winner, loser = current, candidate
+                winner, winner_key, loser = current, current_key, candidate
             else:
                 # Equal timestamps happen outside a worktree, or when both files
                 # are dirty. Break the tie by path so list/board/export do not
                 # silently disagree between runs.
                 winner, loser = sorted((candidate, current), key=lambda record: str(record.task.path))
-            selected[key] = winner
+                winner_key = candidate_key
+            selected[key] = (winner, winner_key)
             if candidate.task.path != current.task.path:
                 # Whichever arm resolved it, one of these files is now invisible
                 # everywhere until the duplicate id is fixed — always say so.
@@ -360,15 +373,24 @@ class ReadOnlyRepository:
         return {
             "tasks": [
                 candidate
-                for candidate in selected.values()
+                for candidate, _ in selected.values()
                 if candidate.bucket == "tasks"
             ],
             "completed": [
                 candidate
-                for candidate in selected.values()
+                for candidate, _ in selected.values()
                 if candidate.bucket == "completed"
             ],
         }
+
+    def _current_branch_records(self, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
+        tasks = self._task_dir_records_cached(task_dir)
+        # One batched git call for the whole directory instead of three per file.
+        timestamps = current_task_snapshot_timestamps(self.project, [task.path for task in tasks])
+        return [
+            _VisibleTaskRecord(bucket, task, timestamps.get(task.path, inf))
+            for task in tasks
+        ]
 
     def _ensure_remote_refs(self) -> None:
         if not self._refresh_remote_refs:
@@ -396,16 +418,6 @@ def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
             # unreadable; skip it (as branch snapshots already do) and warn.
             logger.warning("Skipping unreadable task file {}: {}", path, exc)
     return records
-
-
-def _current_branch_records(project: BacklogProject, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
-    tasks = _load_tasks_from_dir(task_dir)
-    # One batched git call for the whole directory instead of three per file.
-    timestamps = current_task_snapshot_timestamps(project, [task.path for task in tasks])
-    return [
-        _VisibleTaskRecord(bucket, task, timestamps.get(task.path, inf))
-        for task in tasks
-    ]
 
 
 def _load_active_branch_records(project: BacklogProject) -> list[_VisibleTaskRecord]:
@@ -541,7 +553,7 @@ class MutableRepository(ReadOnlyRepository):
             created_date=_current_task_timestamp(current_config.include_datetime_in_dates),
         )
         parse_task_markdown(content)
-        _atomic_write_text(target, content)
+        _atomic_write_text(target, content, base=self.project.backlog_dir)
         self._invalidate_task_cache()
         return _load_task(target)
 
@@ -748,10 +760,13 @@ class MutableRepository(ReadOnlyRepository):
             )
             parsed = parse_task_markdown(source)
         parse_task_markdown(source)
-        _atomic_write_text(target_path, source)
-        self._invalidate_task_cache()
+        _atomic_write_text(target_path, source, base=self.project.backlog_dir)
         if target_path != safe_current_path:
             safe_current_path.unlink()
+        # Invalidate only once the rename is complete. Repopulating between the
+        # write and the unlink would cache both files under one id and trip the
+        # duplicate-id warning for a rename that is perfectly well-formed.
+        self._invalidate_task_cache()
         updated_task = _load_task(target_path)
         if status is not None and updated_task.status != old_status:
             # Carry the caller's own command rather than a "trust me" flag: the
@@ -777,7 +792,7 @@ class MutableRepository(ReadOnlyRepository):
         parsed_id = str(parsed.frontmatter.get("id") or "")
         if parsed_id.casefold() != task.id.casefold():
             raise TaskMutationError(f"Task source id mismatch: expected {task.id}, got {parsed_id or '<missing>'}")
-        _atomic_write_text(safe_current_path, source)
+        _atomic_write_text(safe_current_path, source, base=self.project.backlog_dir)
         self._invalidate_task_cache()
         return _load_task(safe_current_path)
 
@@ -844,7 +859,9 @@ class MutableRepository(ReadOnlyRepository):
 
 
 def _load_task(path: Path) -> TaskRecord:
-    with path.open("r", encoding="utf-8", newline="") as task_file:
+    # utf-8-sig drops a BOM that would otherwise hide the frontmatter, matching
+    # how documents, decisions, and milestones read their own markdown.
+    with path.open("r", encoding="utf-8-sig", newline="") as task_file:
         parsed = parse_task_markdown(task_file.read())
     return _task_record_from_parsed(path, parsed)
 
@@ -1029,8 +1046,15 @@ def _new_task_source(
     )
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
-    safe_path = _mutation_path(path.parent, path)
+def _atomic_write_text(path: Path, content: str, base: Path | None = None) -> None:
+    """Write ``content`` to ``path`` atomically, contained within ``base``.
+
+    ``base`` is optional so the callers in other modules keep working, but it
+    should be supplied wherever a trusted anchor exists: falling back to
+    ``path.parent`` asks "is this path inside its own parent", which is
+    vacuously true and lets a planted directory symlink redirect the write.
+    """
+    safe_path = _mutation_path(base if base is not None else path.parent, path)
     temp_name: str | None = None
     with tempfile.NamedTemporaryFile(
         "w",
@@ -1130,7 +1154,19 @@ def _section_offset(source: str, section: TaskMarkdownSection) -> int:
 
 
 def _detect_newline(source: str) -> str:
-    return "\r\n" if "\r\n" in source else "\n"
+    """Return the newline that dominates ``source``.
+
+    Deliberately not "any CRLF implies CRLF": a single stray CRLF — a hand
+    edit, a bad merge, a paste — would then rewrite every new section of an
+    otherwise LF file in CRLF, and because the frontmatter writer consults this
+    same helper the whole file flips on the next edit. Ties go to CRLF so a
+    pure-CRLF file (and a one-line block) still round-trips unchanged.
+    """
+    crlf_count = source.count("\r\n")
+    if crlf_count == 0:
+        return "\n"
+    bare_lf_count = source.count("\n") - crlf_count
+    return "\r\n" if crlf_count >= bare_lf_count else "\n"
 
 
 def _find_section(parsed: ParsedTaskMarkdown, name: str):
@@ -1241,7 +1277,7 @@ def _append_checklist_items(
     lines = raw.splitlines(keepends=True)
     if not lines:
         raise TaskMutationError(f"Missing {marker} checklist section")
-    newline = "\r\n" if "\r\n" in raw else "\n"
+    newline = _detect_newline(raw)
     prefix = "".join(lines[:-1])
     if prefix and not prefix.endswith(("\n", "\r\n")):
         prefix = f"{prefix}{newline}"
@@ -1260,7 +1296,7 @@ def _replace_checklist_items(
 ) -> str:
     normalized_items = [_normalize_block(item) for item in items if _normalize_block(item)]
     raw = _extract_marker_block(source, marker)
-    newline = "\r\n" if "\r\n" in raw else "\n"
+    newline = _detect_newline(raw)
     rendered_items = _render_checklist(normalized_items)
     if newline == "\r\n":
         rendered_items = rendered_items.replace("\n", "\r\n")
@@ -1331,7 +1367,7 @@ def _replace_frontmatter_values(
             frontmatter.pop(key, None)
         else:
             frontmatter[key] = value
-    newline = "\r\n" if "\r\n" in source else "\n"
+    newline = _detect_newline(source)
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     yaml_text = yaml_text.replace("\n", newline)
     body = parsed.body
@@ -1373,7 +1409,12 @@ def _render_optional_section(name: str, content: str) -> str:
 
 
 def _render_section_markers(name: str, content: str, newline: str = "\n") -> str:
-    body = content.replace("\r\n", "\n").replace("\n", newline) if newline != "\n" else content
+    # Normalize in both directions. Passing LF-target content through untouched
+    # let CRLF supplied by a caller land inside an LF file, and the frontmatter
+    # writer then read that as "this file is CRLF" and convert the whole file.
+    body = content.replace("\r\n", "\n").replace("\r", "\n")
+    if newline != "\n":
+        body = body.replace("\n", newline)
     return (
         f"<!-- SECTION:{name}:BEGIN -->{newline}"
         f"{body}{newline}"
@@ -1527,18 +1568,45 @@ def _normalize_parent_task_id(
         return None
     normalized = _normalize_dependency_id(parent_task_id, task_prefix)
     for task in tasks:
-        if _task_ids_equal(task.id, normalized, task_prefix):
+        if task.id.strip().casefold() == normalized.casefold():
             return normalized
+    for task in tasks:
+        if _task_ids_equal(task.id, normalized, task_prefix):
+            # Only the zero-padding differs. Record the id the parent file
+            # actually carries so the generated child id and every later lookup
+            # line up with it instead of with the caller's spelling.
+            return task.id
     raise TaskMutationError(f"Parent task not found: {normalized}")
 
 
 def _task_ids_equal(left: str, right: str, task_prefix: str = "task") -> bool:
+    """True when two task ids denote the same task, ignoring case and zero-padding.
+
+    ``get_task`` resolves ``TASK-7`` to an on-disk ``TASK-007``, so every other
+    reference check has to agree — otherwise a dependency or parent that the
+    repository can resolve is reported as missing.
+    """
     try:
-        return _normalize_dependency_id(left, task_prefix).casefold() == _normalize_dependency_id(
-            right, task_prefix
-        ).casefold()
+        return ids_equivalent(
+            _normalize_dependency_id(left, task_prefix),
+            _normalize_dependency_id(right, task_prefix),
+        )
     except TaskMutationError:
-        return left.strip().casefold() == right.strip().casefold()
+        return ids_equivalent(left, right)
+
+
+def _reference_key(identifier: str) -> str:
+    """Canonical key for graph and membership lookups on a task id.
+
+    ``TASK-7``, ``task-007`` and ``TASK-007`` all collapse to one key, matching
+    what ``get_task`` and the id-reservation check already consider one task.
+    Ids without a ``prefix-number`` shape fall back to a casefolded string.
+    """
+    numeric = numeric_id_key(identifier)
+    if numeric is None:
+        return identifier.strip().casefold()
+    prefix, numbers = numeric
+    return prefix + ".".join(str(number) for number in numbers)
 
 
 def _reject_circular_dependencies(
@@ -1550,10 +1618,11 @@ def _reject_circular_dependencies(
     for task in tasks:
         raw_dependencies = task.parsed.frontmatter.get("dependencies") or []
         if isinstance(raw_dependencies, list):
-            graph[task.id.upper()] = [str(dependency).upper() for dependency in raw_dependencies]
+            graph[_reference_key(task.id)] = [_reference_key(str(dep)) for dep in raw_dependencies]
         else:
-            graph[task.id.upper()] = []
-    graph[task_id.upper()] = [dependency.upper() for dependency in dependencies]
+            graph[_reference_key(task.id)] = []
+    root = _reference_key(task_id)
+    graph[root] = [_reference_key(dependency) for dependency in dependencies]
     visiting: set[str] = set()
     visited: set[str] = set()
 
@@ -1570,14 +1639,14 @@ def _reject_circular_dependencies(
         visited.add(current)
         return False
 
-    if visit(task_id.upper()):
+    if visit(root):
         raise TaskMutationError(f"Circular dependency detected for {task_id}")
 
 
 def _reject_missing_dependencies(dependencies: Sequence[str], tasks: Sequence[TaskRecord]) -> None:
-    existing_ids = {task.id.upper() for task in tasks}
+    existing_ids = {_reference_key(task.id) for task in tasks}
     for dependency in dependencies:
-        if dependency.upper() not in existing_ids:
+        if _reference_key(dependency) not in existing_ids:
             raise TaskMutationError(f"Dependency not found: {dependency}")
 
 
@@ -1617,7 +1686,17 @@ def _task_status_callback_command(task: TaskRecord, config: BacklogConfig) -> st
     if raw is None:
         raw = task.parsed.frontmatter.get("on_status_change")
     if raw is not None:
-        normalized = _normalize_on_status_change_value(raw if isinstance(raw, bool) else str(raw))
+        try:
+            normalized = _normalize_on_status_change_value(raw if isinstance(raw, bool) else str(raw))
+        except TaskMutationError as exc:
+            # A malformed value — `onStatusChange: true` is the one that reaches
+            # here — is a defect in the task file, not a reason to abort the
+            # status transition that triggered this lookup. Normalization runs
+            # ahead of the gate so a per-task `false` is honoured, so it must not
+            # be able to raise past it: warn, name the task, and fall back to the
+            # reviewed config command exactly as if the key were absent.
+            logger.warning("Ignoring malformed onStatusChange in {} frontmatter: {}", task.id, exc)
+            return config.on_status_change
         if normalized is _NO_STATUS_CALLBACK_UPDATE or normalized is None:
             # An explicit per-task opt-out carries no executable content, so it is
             # always honoured — gating it would run the config command the task
