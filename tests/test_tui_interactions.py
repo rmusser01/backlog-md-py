@@ -8,7 +8,7 @@ pytest.importorskip("textual")
 from textual.widgets import Input, Markdown, Static, TextArea
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
-from backlog_py.tui.app import BacklogTuiApp, default_editor_runner
+from backlog_py.tui.app import BacklogTuiApp, EditorConflictError, default_editor_runner
 from backlog_py.tui.models import (
     BoardSnapshot,
     ChecklistItemView,
@@ -347,14 +347,22 @@ async def test_editor_confirmation_suspends_runs_editor_refreshes_and_reselects_
     assert app.snapshot.columns["To Do"][0].title == "Edited title"
 
 
-def test_default_editor_runner_uses_project_write_lock(monkeypatch):
+def test_default_editor_runner_applies_the_edit_under_the_project_write_lock(monkeypatch):
+    """The lock still guards the apply step, and the editor sees the real filename."""
     project = _project()
     path = project.root / "backlog" / "tasks" / "task-1.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original\n", encoding="utf-8")
     operations = []
     editor_calls = []
 
     monkeypatch.setattr("backlog_py.cli.main._configured_editor_command", lambda project: ["fake-editor"])
-    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", lambda command, path: editor_calls.append((command, path)))
+
+    def fake_editor(command, edited_path):
+        editor_calls.append((command, Path(edited_path).name))
+        Path(edited_path).write_text("edited\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", fake_editor)
 
     def fake_lock(project_arg, operation, fn):
         operations.append((project_arg.root, operation))
@@ -365,7 +373,29 @@ def test_default_editor_runner_uses_project_write_lock(monkeypatch):
     default_editor_runner(project, path)
 
     assert operations == [(project.root, "tui_task_editor")]
-    assert editor_calls == [(["fake-editor"], path)]
+    # A copy, but under the original filename so the editor keeps the extension.
+    assert editor_calls == [(["fake-editor"], "task-1.md")]
+    assert path.read_text(encoding="utf-8") == "edited\n"
+
+
+def test_default_editor_runner_takes_no_lock_when_nothing_changed(monkeypatch):
+    project = _project()
+    path = project.root / "backlog" / "tasks" / "task-1.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original\n", encoding="utf-8")
+    operations = []
+
+    monkeypatch.setattr("backlog_py.cli.main._configured_editor_command", lambda project: ["fake-editor"])
+    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", lambda command, edited: None)
+    monkeypatch.setattr(
+        "backlog_py.tui.app.with_project_write_lock",
+        lambda p, o, fn: operations.append(o) or fn(),
+    )
+
+    default_editor_runner(project, path)
+
+    assert operations == []
+    assert path.read_text(encoding="utf-8") == "original\n"
 
 
 @pytest.mark.asyncio
@@ -853,3 +883,66 @@ def _toggle_item(items: tuple[ChecklistItemView, ...], index: int, *, checked: b
         )
         for offset, item in enumerate(items, start=1)
     )
+
+
+def test_default_editor_runner_does_not_hold_the_lock_during_editing(monkeypatch, tmp_path):
+    """The interactive editor session must run outside the project write lock.
+
+    Holding it for the whole session blocks every CLI/MCP/browser write
+    project-wide for as long as the user leaves $EDITOR open, and those callers
+    time out after 5 seconds.
+    """
+    project = _project()
+    path = project.root / "backlog" / "tasks" / "task-1.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original\n", encoding="utf-8")
+
+    held = []
+
+    monkeypatch.setattr("backlog_py.cli.main._configured_editor_command", lambda project: ["fake-editor"])
+
+    def fake_editor(command, edited_path):
+        # Whatever the editor is looking at, the lock must not be held right now.
+        held.append(lock_depth["value"])
+        Path(edited_path).write_text("edited by user\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", fake_editor)
+
+    lock_depth = {"value": 0}
+
+    def fake_lock(project_arg, operation, fn):
+        lock_depth["value"] += 1
+        try:
+            return fn()
+        finally:
+            lock_depth["value"] -= 1
+
+    monkeypatch.setattr("backlog_py.tui.app.with_project_write_lock", fake_lock)
+
+    default_editor_runner(project, path)
+
+    assert held == [0], "the editor ran while the project write lock was held"
+    assert path.read_text(encoding="utf-8") == "edited by user\n"
+
+
+def test_default_editor_runner_refuses_to_clobber_a_concurrent_write(monkeypatch):
+    """A write that landed while the editor was open must not be silently lost."""
+    project = _project()
+    path = project.root / "backlog" / "tasks" / "task-1.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._configured_editor_command", lambda project: ["fake-editor"])
+
+    def fake_editor(command, edited_path):
+        Path(edited_path).write_text("editor version\n", encoding="utf-8")
+        # Another process commits a change while the editor is still open.
+        path.write_text("concurrent version\n", encoding="utf-8")
+
+    monkeypatch.setattr("backlog_py.cli.main._run_editor_command", fake_editor)
+    monkeypatch.setattr("backlog_py.tui.app.with_project_write_lock", lambda p, o, fn: fn())
+
+    with pytest.raises(EditorConflictError):
+        default_editor_runner(project, path)
+
+    assert path.read_text(encoding="utf-8") == "concurrent version\n"

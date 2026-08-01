@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -523,8 +524,11 @@ class BacklogTuiApp(App[None]):
         )
         try:
             await worker.wait()
-        except WorkerFailed:
-            pass
+        except WorkerFailed as exc:
+            # A conflict means the user's edit was deliberately not applied, so
+            # it has to be reported rather than swallowed like a cancelled edit.
+            if isinstance(exc.error, EditorConflictError):
+                self.notify(str(exc.error), severity="error")
 
     def _run_mutation(
         self,
@@ -706,12 +710,47 @@ def run_tui_app(project: BacklogProject) -> None:
     BacklogTuiApp(project).run()
 
 
+class EditorConflictError(RuntimeError):
+    """Raised when a task file changed while it was open in the editor."""
+
+
 def default_editor_runner(project: BacklogProject, path: Path) -> None:
+    """Edit a task file without holding the project write lock while the user types.
+
+    The lock is process-wide and every other writer (CLI, MCP, browser) gives up
+    after 5 seconds, so wrapping an interactive ``$EDITOR`` session in it stalls
+    the whole project for as long as the editor stays open. Instead the user
+    edits a copy, and the lock is held only for the instant it takes to apply the
+    result. The copy keeps the original filename so the editor still shows a
+    recognisable name with the right extension.
+    """
     from backlog_py.cli.main import _configured_editor_command, _run_editor_command
 
     command = _configured_editor_command(project)
+    original = path.read_bytes() if path.exists() else None
 
-    def edit_task_file() -> None:
-        _run_editor_command(command, path)
+    with tempfile.TemporaryDirectory(prefix="backlog-py-edit-") as scratch:
+        scratch_path = Path(scratch) / path.name
+        if original is not None:
+            scratch_path.write_bytes(original)
 
-    with_project_write_lock(project, "tui_task_editor", edit_task_file)
+        _run_editor_command(command, scratch_path)
+
+        if not scratch_path.exists():
+            return
+        edited = scratch_path.read_bytes()
+        if edited == original:
+            return
+
+        def apply_edit() -> None:
+            # Re-read under the lock: a writer that landed while the editor was
+            # open must not be silently overwritten with stale content.
+            current = path.read_bytes() if path.exists() else None
+            if current != original:
+                raise EditorConflictError(
+                    f"{path.name} changed while it was open in the editor; "
+                    "your edit was not applied. Reopen the task and redo it."
+                )
+            path.write_bytes(edited)
+
+        with_project_write_lock(project, "tui_task_editor", apply_edit)
