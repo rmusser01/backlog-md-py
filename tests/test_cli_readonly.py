@@ -965,3 +965,93 @@ def test_task_list_rejects_invalid_priority_filter(tmp_path):
     assert result.exit_code == 1
     assert "Invalid priority: urgent" in result.output
     assert "Valid values are: high, medium, low" in result.output
+
+
+def _count_project_discoveries(monkeypatch) -> dict[str, int]:
+    """Count how often a CLI invocation walks the filesystem for the project."""
+    from backlog_py.cli import main as cli_main
+
+    counter = {"calls": 0}
+    real_discover_project = cli_main.discover_project
+
+    def counting_discover_project(*args, **kwargs):
+        counter["calls"] += 1
+        return real_discover_project(*args, **kwargs)
+
+    monkeypatch.setattr(cli_main, "discover_project", counting_discover_project)
+    return counter
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("search", "task", "--plain"),
+        ("task", "list", "--plain"),
+        ("task", "create", "Discovery counted task"),
+        ("board", "export", "--readme"),
+        ("config", "get", "defaultStatus"),
+        ("overview",),
+    ],
+)
+def test_cli_commands_discover_the_project_once(tmp_path, monkeypatch, args):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    counter = _count_project_discoveries(monkeypatch)
+
+    result = _invoke_repo(repo, *args)
+
+    assert result.exit_code == 0, result.output
+    assert counter["calls"] == 1
+
+
+def test_search_with_only_unsupported_types_is_a_usage_error(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    result = _invoke_repo(repo, "search", "task", "--type", "bogus", "--plain")
+
+    assert result.exit_code != 0
+    assert "bogus" in result.output
+    assert "task, document, decision" in result.output or "decision, document, task" in result.output
+
+
+def test_search_keeps_supported_types_when_one_value_is_unsupported(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    result = _invoke_repo(repo, "search", "task", "--type", "task,bogus", "--plain")
+
+    assert result.exit_code == 0, result.output
+    assert "TASK-1" in result.output
+
+
+def test_task_without_arguments_reports_missing_id(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    result = _invoke_repo(repo, "task")
+
+    assert result.exit_code != 0
+    assert "Missing task id." in result.output
+
+
+def test_task_with_unknown_subcommand_reports_that_word(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    result = _invoke_repo(repo, "task", "view", "TASK-1")
+
+    assert result.exit_code != 0
+    assert "Missing task id." not in result.output
+    assert "view" in result.output
+
+
+def test_task_list_with_extra_argument_reports_extra_arguments(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+
+    result = _invoke_repo(repo, "task", "list", "extra")
+
+    assert result.exit_code != 0
+    assert "Missing task id." not in result.output
+    assert "task list" in result.output

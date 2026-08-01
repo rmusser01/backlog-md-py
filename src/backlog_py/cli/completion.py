@@ -80,7 +80,7 @@ def completion_install_path(shell: str, *, command_name: str, home: Path) -> Pat
 
 def completion_script(cli: click.Command, shell: str, *, command_name: str) -> str:
     if shell == "pwsh":
-        return powershell_completion_script(command_name)
+        return powershell_completion_script(command_name, cli=cli)
 
     completion_class = get_completion_class(shell)
     if completion_class is None:
@@ -112,26 +112,18 @@ def completion_enable_instructions(shell: str, install_path: Path) -> str:
     )
 
 
-def powershell_completion_script(command_name: str) -> str:
-    commands = [
-        "agents",
-        "board",
-        "cleanup",
-        "compat",
-        "completion",
-        "config",
-        "daemon",
-        "decision",
-        "doc",
-        "draft",
-        "init",
-        "integration",
-        "milestone",
-        "overview",
-        "search",
-        "task",
-    ]
-    command_list = ", ".join(f'"{command}"' for command in commands)
+def top_level_command_names(cli: click.Command | None) -> list[str]:
+    """Derive completion candidates from the CLI itself so they never go stale."""
+    commands = getattr(cli, "commands", None)
+    if not isinstance(commands, dict):
+        return []
+    return sorted(
+        name for name, command in commands.items() if not getattr(command, "hidden", False)
+    )
+
+
+def powershell_completion_script(command_name: str, *, cli: click.Command | None = None) -> str:
+    command_list = ", ".join(f'"{command}"' for command in top_level_command_names(cli))
     return f"""# PowerShell completion script for {command_name}
 $__backlogPyCompletionScriptBlock = {{
     param($wordToComplete, $commandAst, $cursorPosition)
