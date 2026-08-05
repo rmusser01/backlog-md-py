@@ -49,8 +49,13 @@ Alternatives considered and rejected:
 Replace the unconditional "interactive not available" error with:
 
 1. If `--defaults` was passed: behave exactly as today.
-2. Else if `_stdin_is_interactive()` is false: raise the current
-   `click.ClickException` telling the caller to pass `--defaults`.
+2. Else if `_stdin_is_interactive()` is false: raise a
+   `click.ClickException` telling the caller to pass `--defaults`. The wording
+   is updated from "Interactive init is not available in backlog-py yet" to
+   "Interactive init requires a terminal. Pass --defaults to use
+   non-interactive defaults." — the old message claims a now-existing feature
+   does not exist. The pinned test contract (substring `"Pass --defaults"`)
+   is preserved.
 3. Else: run the interactive prompt sequence, then call the existing
    `_locked_init(ctx, "init_project", lambda: _initialize_project(...))` with
    the collected answers. Post-init output ("Initialized Backlog.md project
