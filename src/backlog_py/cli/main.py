@@ -260,7 +260,9 @@ def _prompt_init_options(
     """
     click.echo("Interactive Backlog.md project setup")
     name = click.prompt("Project name", default=project_name or _cwd(ctx).resolve().name).strip()
-    directory = click.prompt("Backlog directory", default=backlog_dir).strip()
+    # Whitespace-only answers fall back to the default so an accidental space
+    # does not turn Path("") into the project root as the backlog directory.
+    directory = click.prompt("Backlog directory", default=backlog_dir).strip() or backlog_dir
     while True:
         prefix = click.prompt("Task ID prefix", default=task_prefix).strip()
         if prefix.isalpha():

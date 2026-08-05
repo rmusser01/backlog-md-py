@@ -207,3 +207,19 @@ def test_cli_init_interactive_reprompts_on_invalid_task_prefix(tmp_path, monkeyp
     assert "only letters" in result.output
     project = discover_project(tmp_path)
     assert project.config.task_prefix == "feat"
+
+
+def test_cli_init_interactive_whitespace_backlog_dir_falls_back_to_default(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    # Answers: name (default), whitespace-only backlog dir, then defaults for the rest.
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init"],
+        input="\n   \n\n\n\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    project = discover_project(tmp_path)
+    assert project.backlog_dir == tmp_path / "backlog"
+    assert (tmp_path / "backlog" / "config.yml").is_file()
