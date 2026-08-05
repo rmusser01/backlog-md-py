@@ -68,6 +68,11 @@ scratch project, pass `--no-git`:
 backlog-py --cwd /tmp/backlog-md-py-demo init --defaults --no-git
 ```
 
+On an interactive terminal you can also omit `--defaults` to be prompted for
+the project name, backlog directory, task prefix, config location, git
+integration, and agent instruction files; any flags you pass become the prompt
+defaults. Scripts and agents should keep using `--defaults`.
+
 After the scratch run, inspect `/tmp/backlog-md-py-demo/backlog/` to see the
 Markdown files that were created.
 
