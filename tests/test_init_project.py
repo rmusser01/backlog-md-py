@@ -125,3 +125,34 @@ def test_cli_init_can_create_agent_instructions(tmp_path):
     assert "Search before creating tasks" in content
     assert "`backlog://docs/task-workflow`" in content
     assert "Do not manually edit files under `backlog/`" in content
+
+
+def _force_interactive(monkeypatch):
+    """CliRunner stdin is never a TTY; pretend it is for interactive-init tests."""
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+
+def test_cli_init_interactive_prompts_for_custom_values(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init"],
+        input="Wizard Project\n\nJIRA\nroot\ny\ny\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Initialized Backlog.md project at" in result.output
+    assert "Updated AGENTS.md" in result.output
+
+    project = discover_project(tmp_path)
+    assert project.config.project_name == "Wizard Project"
+    assert project.config.task_prefix == "JIRA"
+    assert project.backlog_dir == tmp_path / "backlog"
+    # config location "root" with the default backlog dir writes backlog.config.yml
+    assert (tmp_path / "backlog.config.yml").is_file()
+    # answered "y" to disabling git integration
+    assert project.config.remote_operations is False
+    assert project.config.check_active_branches is False
