@@ -1,3 +1,33 @@
+# README Newcomer Rewrite Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Rewrite `README.md` so a first-time reader who has never used Backlog.md can understand the concept, scan the features, and complete a full quick-start tutorial without leaving the README.
+
+**Architecture:** Single-file, in-place rewrite of `README.md` per the approved spec. No code, packaging, doc, or test changes. All commands are copied verbatim from the current README or `docs/getting-started.md` (verified sources); badges are PyPI-sourced shields so they cannot go stale.
+
+**Tech Stack:** Markdown, shields.io badges, repo dev tooling (`build`, `twine`) for PyPI-render validation.
+
+**Spec:** `docs/superpowers/specs/2026-08-04-readme-newcomer-rewrite-design.md`
+
+**Verified badge facts (checked against `pyproject.toml`):**
+- Package name on PyPI: `backlog-md-py` (`pyproject.toml:6`)
+- Python: `requires-python = ">=3.11"`; classifiers list 3.11–3.14 (`pyproject.toml:9,22-25`)
+- License: **GPL-3.0-only** (`pyproject.toml:10`) — do NOT use an MIT badge
+- Repo URL: `https://github.com/rmusser01/backlog-md-py` (`pyproject.toml:37`)
+
+---
+
+### Task 1: Rewrite README.md with the newcomer-focused structure
+
+**Files:**
+- Modify: `README.md` (full replacement of all 143 lines)
+
+- [ ] **Step 1: Replace the entire README content**
+
+Use the Write tool to overwrite `README.md` with exactly this content:
+
+````markdown
 # backlog-md-py
 
 [![PyPI version](https://img.shields.io/pypi/v/backlog-md-py)](https://pypi.org/project/backlog-md-py/)
@@ -29,7 +59,7 @@ local agents. For the upstream concept and ecosystem, see
 
 | Interface | Entry point | What it's for |
 | --- | --- | --- |
-| CLI | `backlog-py --cwd /path/to/project ...` | Scriptable task, document, and board commands. |
+| CLI | `backlog-py --cwd /path/to/project ...` | Scriptable task, document, and board commands; a recommended automation surface. |
 | Python module | `python -m backlog_py ...` | The CLI in module form, for environments without script shims. |
 | Python helpers | `backlog_py.mcp`, `backlog_py.storage.project` | Call the same core services from your own Python code. |
 | MCP stdio server | `backlog-py-mcp` | SDK-free MCP server so AI agents can manage the backlog. |
@@ -65,7 +95,7 @@ backlog-py --cwd /tmp/backlog-md-py-demo init --defaults --no-git
 backlog-py --cwd /tmp/backlog-md-py-demo task create "Try backlog-md-py" --plain
 backlog-py --cwd /tmp/backlog-md-py-demo task list --plain
 backlog-py --cwd /tmp/backlog-md-py-demo task edit task-1 --notes "Edited in a scratch project." --plain
-backlog-py --cwd /tmp/backlog-md-py-demo board   # press q to exit
+backlog-py --cwd /tmp/backlog-md-py-demo board
 ```
 
 Then look inside `/tmp/backlog-md-py-demo/backlog/` — every record you just
@@ -172,3 +202,72 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow and
 ## License
 
 GPL-3.0-only. See [LICENSE](LICENSE).
+````
+
+- [ ] **Step 2: Verify every relative link resolves**
+
+Run:
+
+```bash
+cd /Users/macbook-dev/Documents/GitHub/backlog-md-py && \
+grep -oE '\]\(([^)#]+)(#[^)]*)?\)' README.md | sed -E 's/\]\(([^)#]+)(#[^)]*)?\)/\1/' | \
+grep -v '^https\?://' | sort -u | while read -r f; do [ -e "$f" ] || echo "MISSING: $f"; done
+```
+
+Expected: no output (no MISSING lines).
+
+- [ ] **Step 3: Verify every command matches a verified source**
+
+Confirm each CLI invocation in the new README appears in the old README (git)
+or `docs/getting-started.md`:
+
+```bash
+cd /Users/macbook-dev/Documents/GitHub/backlog-md-py && \
+for cmd in "init --defaults --no-git" "task create" "task list --plain" \
+  "task edit task-1 --notes" "browser --port 6420 --no-open" \
+  "backlog-py-mcp" "daemon ensure" "daemon status --json" \
+  "agents --update-instructions" "task <id> --plain"; do
+  grep -qF "$cmd" docs/getting-started.md || git show HEAD:README.md | grep -qF "$cmd" \
+    && echo "OK: $cmd" || echo "UNVERIFIED: $cmd"
+done
+```
+
+Expected: every line prints `OK:`.
+
+- [ ] **Step 4: Validate PyPI rendering**
+
+`readme` in `pyproject.toml` points at `README.md`, so a broken render would
+break the PyPI page. Build and check:
+
+```bash
+cd /Users/macbook-dev/Documents/GitHub/backlog-md-py && \
+uv run --extra dev python -m build --sdist --outdir /tmp/readme-check && \
+uv run --extra dev python -m twine check /tmp/readme-check/*
+```
+
+Expected: `Checking ...: PASSED`. Clean up with `rm -rf /tmp/readme-check`.
+
+### Task 2: Final review and commit
+
+**Files:**
+- Modify: `README.md`
+- (already present, uncommitted) `docs/superpowers/specs/2026-08-04-readme-newcomer-rewrite-design.md`, `docs/superpowers/plans/2026-08-04-readme-newcomer-rewrite.md`
+
+- [ ] **Step 1: Review the rendered diff**
+
+```bash
+cd /Users/macbook-dev/Documents/GitHub/backlog-md-py && git diff README.md
+```
+
+Read the diff top to bottom as a newcomer: concept clear, table scannable,
+tutorial complete, safety present but not front-loaded. Fix anything unclear.
+
+- [ ] **Step 2: Commit (requires explicit user confirmation first)**
+
+Git mutations need the user's go-ahead. Once confirmed:
+
+```bash
+cd /Users/macbook-dev/Documents/GitHub/backlog-md-py && \
+git add README.md docs/superpowers/specs/2026-08-04-readme-newcomer-rewrite-design.md docs/superpowers/plans/2026-08-04-readme-newcomer-rewrite.md && \
+git commit -m "docs: rewrite README for first-time Backlog.md users"
+```
