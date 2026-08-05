@@ -125,3 +125,101 @@ def test_cli_init_can_create_agent_instructions(tmp_path):
     assert "Search before creating tasks" in content
     assert "`backlog://docs/task-workflow`" in content
     assert "Do not manually edit files under `backlog/`" in content
+
+
+def _force_interactive(monkeypatch):
+    """CliRunner stdin is never a TTY; pretend it is for interactive-init tests."""
+    from backlog_py.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_stdin_is_interactive", lambda: True)
+
+
+def test_cli_init_interactive_prompts_for_custom_values(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init"],
+        input="Wizard Project\n\nJIRA\nroot\ny\ny\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Initialized Backlog.md project at" in result.output
+    assert "Updated AGENTS.md" in result.output
+
+    project = discover_project(tmp_path)
+    assert project.config.project_name == "Wizard Project"
+    assert project.config.task_prefix == "JIRA"
+    assert project.backlog_dir == tmp_path / "backlog"
+    # config location "root" with the default backlog dir writes backlog.config.yml
+    assert (tmp_path / "backlog.config.yml").is_file()
+    # answered "y" to disabling git integration
+    assert project.config.remote_operations is False
+    assert project.config.check_active_branches is False
+
+
+def test_cli_init_interactive_enter_accepts_defaults(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init", "Demo Project"],
+        input="\n" * 6,
+    )
+
+    assert result.exit_code == 0, result.output
+    project = discover_project(tmp_path)
+    assert project.config.project_name == "Demo Project"
+    assert project.config.task_prefix == "task"
+    assert (tmp_path / "backlog" / "config.yml").is_file()
+    assert project.config.remote_operations is True
+    assert project.config.check_active_branches is True
+
+
+def test_cli_init_interactive_prefills_flag_values(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init", "Myproj", "--task-prefix", "feat", "--no-git"],
+        input="\n" * 6,
+    )
+
+    assert result.exit_code == 0, result.output
+    project = discover_project(tmp_path)
+    assert project.config.project_name == "Myproj"
+    assert project.config.task_prefix == "feat"
+    assert project.config.remote_operations is False
+
+
+def test_cli_init_interactive_reprompts_on_invalid_task_prefix(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    # Answers: name (default), backlog dir (default), invalid prefix, retry prefix,
+    # config location (default), git confirm (default), instructions confirm (default).
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init"],
+        input="\n\nfeat1\nfeat\n\n\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "only letters" in result.output
+    project = discover_project(tmp_path)
+    assert project.config.task_prefix == "feat"
+
+
+def test_cli_init_interactive_whitespace_backlog_dir_falls_back_to_default(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    # Answers: name (default), whitespace-only backlog dir, then defaults for the rest.
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init"],
+        input="\n   \n\n\n\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    project = discover_project(tmp_path)
+    assert project.backlog_dir == tmp_path / "backlog"
+    assert (tmp_path / "backlog" / "config.yml").is_file()

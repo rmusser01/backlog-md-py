@@ -203,10 +203,22 @@ def init_command(
     config_location: str,
     agent_instructions: bool,
 ) -> None:
-    """Initialize a Backlog.md project with non-interactive defaults."""
+    """Initialize a Backlog.md project, interactively when a terminal is available."""
     if not defaults:
-        raise click.ClickException(
-            "Interactive init is not available in backlog-py yet. Pass --defaults to use non-interactive defaults."
+        if not _stdin_is_interactive():
+            raise click.ClickException(
+                "Interactive init requires a terminal. Pass --defaults to use non-interactive defaults."
+            )
+        project_name, backlog_dir, task_prefix, config_location, no_git, agent_instructions = (
+            _prompt_init_options(
+                ctx,
+                project_name=project_name,
+                backlog_dir=backlog_dir,
+                task_prefix=task_prefix,
+                config_location=config_location,
+                no_git=no_git,
+                agent_instructions=agent_instructions,
+            )
         )
     try:
         result, instruction_updates = _locked_init(
@@ -230,6 +242,40 @@ def init_command(
         click.echo(f"Preserved existing config at {result.project.config_path}")
     for update in instruction_updates:
         click.echo(f"Updated {update.path_relative}")
+
+
+def _prompt_init_options(
+    ctx: click.Context,
+    *,
+    project_name: str | None,
+    backlog_dir: str,
+    task_prefix: str,
+    config_location: str,
+    no_git: bool,
+    agent_instructions: bool,
+) -> tuple[str, str, str, str, bool, bool]:
+    """Collect init settings interactively; each parsed flag seeds its prompt default.
+
+    Runs before the init lock is acquired so user think-time never holds the lock.
+    """
+    click.echo("Interactive Backlog.md project setup")
+    name = click.prompt("Project name", default=project_name or _cwd(ctx).resolve().name).strip()
+    # Whitespace-only answers fall back to the default so an accidental space
+    # does not turn Path("") into the project root as the backlog directory.
+    directory = click.prompt("Backlog directory", default=backlog_dir).strip() or backlog_dir
+    while True:
+        prefix = click.prompt("Task ID prefix", default=task_prefix).strip()
+        if prefix.isalpha():
+            break
+        click.echo("Task ID prefix must be non-empty and contain only letters.")
+    location = click.prompt(
+        "Config location",
+        default=config_location,
+        type=click.Choice(["local", "root"], case_sensitive=False),
+    )
+    disable_git = click.confirm("Disable git integration?", default=no_git)
+    instructions = click.confirm("Create agent instruction files?", default=agent_instructions)
+    return name, directory, prefix, location, disable_git, instructions
 
 
 def _reject_edit_only_create_flags(
