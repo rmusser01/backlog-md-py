@@ -156,3 +156,54 @@ def test_cli_init_interactive_prompts_for_custom_values(tmp_path, monkeypatch):
     # answered "y" to disabling git integration
     assert project.config.remote_operations is False
     assert project.config.check_active_branches is False
+
+
+def test_cli_init_interactive_enter_accepts_defaults(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init", "Demo Project"],
+        input="\n" * 6,
+    )
+
+    assert result.exit_code == 0, result.output
+    project = discover_project(tmp_path)
+    assert project.config.project_name == "Demo Project"
+    assert project.config.task_prefix == "task"
+    assert (tmp_path / "backlog" / "config.yml").is_file()
+    assert project.config.remote_operations is True
+    assert project.config.check_active_branches is True
+
+
+def test_cli_init_interactive_prefills_flag_values(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init", "Myproj", "--task-prefix", "feat", "--no-git"],
+        input="\n" * 6,
+    )
+
+    assert result.exit_code == 0, result.output
+    project = discover_project(tmp_path)
+    assert project.config.project_name == "Myproj"
+    assert project.config.task_prefix == "feat"
+    assert project.config.remote_operations is False
+
+
+def test_cli_init_interactive_reprompts_on_invalid_task_prefix(tmp_path, monkeypatch):
+    _force_interactive(monkeypatch)
+
+    # Answers: name (default), backlog dir (default), invalid prefix, retry prefix,
+    # config location (default), git confirm (default), instructions confirm (default).
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(tmp_path), "init"],
+        input="\n\nfeat1\nfeat\n\n\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "only letters" in result.output
+    project = discover_project(tmp_path)
+    assert project.config.task_prefix == "feat"
