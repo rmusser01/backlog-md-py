@@ -75,6 +75,23 @@ def test_root_config_rejects_default_backlog_directory_symlinked_outside(tmp_pat
         discover_project(project_root)
 
 
+def test_root_config_rejects_default_backlog_directory_self_symlink(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (tmp_path / "backlog").symlink_to("backlog", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(tmp_path)
+
+
+def test_root_config_rejects_default_backlog_directory_two_link_symlink_cycle(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (tmp_path / "backlog").symlink_to("alternate-backlog", target_is_directory=True)
+    (tmp_path / "alternate-backlog").symlink_to("backlog", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(tmp_path)
+
+
 def test_nested_backlog_config_rejects_backlog_directory_symlinked_outside(tmp_path):
     project_root = tmp_path / "project"
     outside = tmp_path / "outside"

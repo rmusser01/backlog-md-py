@@ -54,14 +54,12 @@ def assert_trusted_subpath(root: Path, candidate: Path) -> Path:
     Containment alone is too weak here. A link to a sibling *inside* the project
     resolves within the root and would pass, yet ``backlog/docs ->
     backlog/decisions`` silently redirects every document write into the
-    decisions directory, where documents overwrite decision files. So each
-    component must resolve to exactly itself: ``current`` is already resolved, so
-    ``current / part`` equals its own resolution only when ``part`` is a real
-    entry -- either a genuine directory or one that does not exist yet, since
-    ``Path.resolve()`` is non-strict and leaves a missing tail untouched. Only a
-    symlink breaks that equality, so any link in the chain is refused regardless
-    of where it points. Deliberately relocating ``backlog/docs`` elsewhere on
-    disk is refused too; a trusted base has to be the directory it names.
+    decisions directory, where documents overwrite decision files. Each
+    component is therefore checked directly for being a symlink before resolution.
+    Missing entries remain valid because ``Path.is_symlink()`` uses ``lstat`` and
+    returns false when the component does not exist. Deliberately relocating
+    ``backlog/docs`` elsewhere on disk is refused too; a trusted base has to be
+    the directory it names.
 
     ``root`` itself is resolved once up front and is exempt, which is what keeps
     a project reached through a symlink working (macOS ``/tmp`` ->
@@ -75,9 +73,10 @@ def assert_trusted_subpath(root: Path, candidate: Path) -> Path:
     current = resolved_root
     for part in relative.parts:
         next_path = current / part
+        is_symlink = next_path.is_symlink()
         # Escapes keep their containment message; this only resolves the link.
         resolved_next = assert_path_within_base(current, next_path)
-        if resolved_next != next_path:
+        if is_symlink or resolved_next != next_path:
             raise PathComponentRedirectError(base=current, candidate=next_path)
         current = resolved_next
     return current
