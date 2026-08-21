@@ -125,7 +125,7 @@ def test_ci_runs_ruff_and_quality_baselines_as_blocking_gates():
     steps_by_name = {step["name"]: step for step in lint_steps}
 
     ruff_step = steps_by_name["Run Ruff"]
-    assert "ruff check src tests" in ruff_step["run"]
+    assert ruff_step["run"] == "python -m ruff check src tests scripts"
     assert "continue-on-error" not in ruff_step
     assert ruff_step.get("if") is None
 
@@ -136,6 +136,20 @@ def test_ci_runs_ruff_and_quality_baselines_as_blocking_gates():
 
     # A failing lint job has to be able to fail the workflow.
     assert "continue-on-error" not in workflow["jobs"]["lint"]
+
+
+def test_quality_tool_versions_and_documented_gates_are_bounded():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    dev_dependencies = pyproject["project"]["optional-dependencies"]["dev"]
+    contributing = Path("CONTRIBUTING.md").read_text(encoding="utf-8")
+    release = Path("RELEASE.md").read_text(encoding="utf-8")
+
+    assert "mypy>=1.11.0,<2.4.0" in dev_dependencies
+    for document in (contributing, release):
+        assert "python scripts/check_quality_baseline.py" in document
+        assert "mypy` is advisory" not in document
+        assert "python -m mypy` is advisory" not in document
+        assert "python -m ruff check src tests scripts" in document
 
 
 def test_ruff_lint_configuration_has_no_stale_per_file_ignores():

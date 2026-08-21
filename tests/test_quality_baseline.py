@@ -40,6 +40,19 @@ def test_parse_ruff_statistics_counts_rules(checker):
     assert checker["parse_ruff_statistics"](output) == Counter({"E501": 45, "B009": 2})
 
 
+def test_ruff_baseline_rules_exactly_match_configured_ignores(checker):
+    assert checker["load_configured_ruff_ignores"]() == set(checker["RUFF_BASELINE"])
+
+
+def test_main_fails_before_running_tools_when_ruff_rule_sets_drift(checker, monkeypatch, capsys):
+    globals_ = checker["main"].__globals__
+    monkeypatch.setitem(globals_, "load_configured_ruff_ignores", lambda: {"E501", "UNKNOWN"})
+    monkeypatch.setitem(globals_, "run_tool", lambda command: pytest.fail(f"unexpected tool call: {command}"))
+
+    assert checker["main"]() == 2
+    assert "Ruff baseline rules do not match" in capsys.readouterr().err
+
+
 def test_baseline_deltas_report_increases_and_improvements(checker):
     expected = {"a": 2, "b": 1}
 

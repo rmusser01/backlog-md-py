@@ -119,15 +119,16 @@ Run from a clean release-candidate checkout:
 uv run --extra dev python -m pytest tests -v
 uv run --extra dev --extra tui python -m pytest tests -q
 uv run --extra dev python -m bandit -r src
-uv run --extra dev python -m ruff check src tests
+uv run --extra dev python -m ruff check src tests scripts
+uv run --extra dev python scripts/check_quality_baseline.py
 git diff --check
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
 ```
 
-`ruff check` is a blocking CI gate, so it must pass before the release commit
-merges. `uv run --extra dev python -m mypy` is advisory: it currently reports a
-known baseline of pre-existing errors and does not block CI or the release.
+Both static-analysis commands are blocking CI gates. The quality-baseline
+checker runs mypy and ignored Ruff rules against exact reviewed counts, so any
+diagnostic change must be included deliberately in the release commit.
 
 Smoke the built wheel in a fresh environment:
 

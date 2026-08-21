@@ -43,7 +43,9 @@ Documentation = "https://github.com/rmusser01/backlog-md-py/tree/main/docs"
 dev = [
   "bandit>=1.7.0",
   "build>=1.2.0",
-  "mypy>=1.11.0",
+  # The exact baseline parser is verified against mypy 2.3.x diagnostics.
+  # Review and re-measure the baseline before raising this ceiling.
+  "mypy>=1.11.0,<2.4.0",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
   # Upper bound keeps the blocking lint gate deterministic: new ruff minors can

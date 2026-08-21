@@ -6,11 +6,13 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tomllib
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 TIMEOUT_SECONDS = 180
 MYPY_BASELINE = {
     "src/backlog_py/browser/service.py": 24,
@@ -42,6 +44,18 @@ _RUFF_STATISTIC = re.compile(r"^\s*(\d+)\s+([A-Z][A-Z0-9]+)\b")
 
 class ToolFailure(RuntimeError):
     """A quality tool could not produce trustworthy diagnostics."""
+
+
+def load_configured_ruff_ignores(path: Path = PYPROJECT_PATH) -> set[str]:
+    """Load the ignored Ruff rules that must have exact baselines."""
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+        ignores = config["tool"]["ruff"]["lint"]["ignore"]
+        if not isinstance(ignores, list) or not all(isinstance(rule, str) for rule in ignores):
+            raise TypeError("tool.ruff.lint.ignore must be a list of strings")
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
+        raise ToolFailure(f"unable to read Ruff ignores from {path}: {exc}") from exc
+    return set(ignores)
 
 
 def parse_mypy_output(output: str, repo_root: Path = REPO_ROOT) -> Counter[str]:
@@ -103,6 +117,13 @@ def run_tool(command: list[str]) -> str:
 def main() -> int:
     """Compare current diagnostics with the complete checked-in baselines."""
     try:
+        configured_ignores = load_configured_ruff_ignores()
+        baseline_rules = set(RUFF_BASELINE)
+        if configured_ignores != baseline_rules:
+            raise ToolFailure(
+                "Ruff baseline rules do not match tool.ruff.lint.ignore: "
+                f"configured={sorted(configured_ignores)}, baseline={sorted(baseline_rules)}"
+            )
         mypy_counts = parse_mypy_output(run_tool([sys.executable, "-m", "mypy"]))
         ruff_counts: Counter[str] = Counter()
         for rule in RUFF_BASELINE:
