@@ -1,5 +1,6 @@
 import json
 import shutil
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +17,20 @@ from backlog_py.storage.project import discover_project
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
+
+
+def test_browser_service_supports_ipv6_loopback(tmp_path, ipv6_loopback_available):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="::1", port=0)
+    try:
+        assert service.server.address_family == socket.AF_INET6
+        assert service.root_url == f"http://[::1]:{service.port}/"
+    finally:
+        service.shutdown()
 
 
 def test_browser_service_module_does_not_embed_full_board_assets():

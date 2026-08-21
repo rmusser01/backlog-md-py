@@ -139,6 +139,25 @@ def test_daemon_start_launches_foreground_service_and_writes_runtime(tmp_path, m
     assert read_runtime_record(ensure_state_layout()).pid == 43210
 
 
+def test_daemon_start_brackets_ipv6_runtime_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+
+    class FakeProcess:
+        pid = 43215
+
+    monkeypatch.setattr(
+        "backlog_py.daemon.lifecycle.subprocess.Popen",
+        lambda command, **kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        "backlog_py.daemon.lifecycle._wait_for_daemon_healthy", lambda *args, **kwargs: True
+    )
+
+    status = daemon_start(host="::1", port=18892)
+
+    assert status.record.endpoint == "http://[::1]:18892/mcp"
+
+
 def test_daemon_start_forwards_the_remote_opt_in_to_the_child(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
     launches = []

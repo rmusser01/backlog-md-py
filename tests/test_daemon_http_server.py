@@ -1,10 +1,20 @@
 import json
+import socket
 import urllib.error
 import urllib.request
 
 import pytest
 
 from backlog_py.mcp.http_server import create_mcp_http_server, start_mcp_http_server
+
+
+def test_mcp_http_server_supports_ipv6_loopback(ipv6_loopback_available):
+    service = start_mcp_http_server(host="::1", port=0, token="secret")
+    try:
+        assert service.server.address_family == socket.AF_INET6
+        assert service.endpoint == f"http://[::1]:{service.port}/mcp"
+    finally:
+        service.shutdown()
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10", "example.test"])

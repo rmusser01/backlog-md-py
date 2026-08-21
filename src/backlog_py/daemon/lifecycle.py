@@ -24,6 +24,7 @@ from backlog_py.runtime.state import (
     read_runtime_record,
     write_runtime_record,
 )
+from backlog_py.security.http import http_url
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18765
@@ -154,7 +155,7 @@ def daemon_start(
         _prune_state_dir(layout)
         log_path = allocate_log_path(layout)
         token = os.urandom(32).hex()
-        endpoint = f"http://{host}:{port}/mcp"
+        endpoint = http_url(host, port, "/mcp")
         command = [
             sys.executable,
             "-m",
@@ -261,7 +262,7 @@ def _wait_for_daemon_healthy(
     squats on the port would satisfy it while our child dies on a bind failure.
     Only the freshly minted token proves the listener is the child we launched.
     """
-    url = f"http://{_bracketed_host(host)}:{port}/status"
+    url = http_url(host, port, "/status")
     headers = {"Authorization": f"Bearer {token}"}
     deadline = time.monotonic() + max(timeout, 0)
     while time.monotonic() < deadline:
@@ -296,14 +297,8 @@ def _terminate_process(process: "subprocess.Popen[bytes]") -> None:
                 process.wait(timeout=2)
 
 
-def _bracketed_host(host: str) -> str:
-    if ":" in host and not host.startswith("["):
-        return f"[{host}]"
-    return host
-
-
 def _status_url(record: RuntimeRecord) -> str:
-    return f"http://{_bracketed_host(record.host)}:{record.port}/status"
+    return http_url(record.host, record.port, "/status")
 
 
 def _daemon_endpoint_owned(record: RuntimeRecord) -> bool | None:

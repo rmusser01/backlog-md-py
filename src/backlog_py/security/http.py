@@ -21,6 +21,18 @@ DEFAULT_HTTP_PORT = 80
 LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
+def bracketed_host(host: str) -> str:
+    """Bracket an IPv6 literal for use in a URL authority."""
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def http_url(host: str, port: int, path: str = "") -> str:
+    """Build an HTTP URL, bracketing IPv6 literals when needed."""
+    return f"http://{bracketed_host(host)}:{port}{path}"
+
+
 def parse_host_header(value: str) -> tuple[str, int | None] | None:
     """Split a Host header into ``(hostname, port)``; ``None`` when malformed.
 

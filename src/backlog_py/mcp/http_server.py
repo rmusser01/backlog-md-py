@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import socket
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -11,7 +12,7 @@ from typing import Mapping
 from urllib.parse import urlparse
 
 from backlog_py.mcp.protocol import McpRequestContext, handle_jsonrpc_text
-from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback
+from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback, http_url
 
 
 # The daemon exposes the whole MCP surface, including every write tool, behind a
@@ -78,7 +79,8 @@ def create_mcp_http_server(
         raise ValueError("MCP HTTP daemon token is required")
     if not allow_remote and host not in LOOPBACK_HOSTS:
         raise ValueError("MCP HTTP daemon only supports loopback hosts")
-    server = McpThreadingHTTPServer((host, port), _McpHttpHandler)
+    server_class = _McpIPv6ThreadingHTTPServer if ":" in host else McpThreadingHTTPServer
+    server = server_class((host, port), _McpHttpHandler)
     server.daemon_token = token
     server.mcp_context = context or McpRequestContext()
     server.allow_remote = bool(allow_remote)
@@ -113,7 +115,7 @@ def start_mcp_http_server(
 def endpoint_for_server(server: ThreadingHTTPServer) -> str:
     """Return the server's `/mcp` endpoint URL."""
     host, port = server.server_address[:2]
-    return f"http://{host}:{port}/mcp"
+    return http_url(str(host), int(port), "/mcp")
 
 
 class McpThreadingHTTPServer(ThreadingHTTPServer):
@@ -122,6 +124,10 @@ class McpThreadingHTTPServer(ThreadingHTTPServer):
     daemon_token: str
     mcp_context: McpRequestContext
     allow_remote: bool = False
+
+
+class _McpIPv6ThreadingHTTPServer(McpThreadingHTTPServer):
+    address_family = socket.AF_INET6
 
 
 class _McpHttpHandler(BaseHTTPRequestHandler):
