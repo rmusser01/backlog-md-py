@@ -70,15 +70,8 @@ jobs:
       - name: Run Ruff
         run: python -m ruff check src tests
 
-      - name: Run mypy
-        # Advisory only: mypy runs against a known baseline of pre-existing
-        # errors on a codebase that was never type checked. The baseline count
-        # and the burn-down plan live in [tool.mypy] in pyproject.toml and are
-        # deliberately not restated here - two copies of one number is how they
-        # drifted apart last time. Drop continue-on-error once the baseline is
-        # clean, so a green CI run keeps meaning "safe to tag and publish".
-        continue-on-error: true
-        run: python -m mypy
+      - name: Run quality baselines
+        run: python scripts/check_quality_baseline.py
 
   package:
     name: Package build

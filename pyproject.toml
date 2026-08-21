@@ -87,16 +87,16 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
-# Ratchet list. Every entry below is a rule the tree genuinely violates today.
-# Fix the code, then delete the entry. Re-measure rather than adjusting a count
-# by eye; the counts below are diagnostics, not files, and were taken with
-# ruff 0.16.1 as:
+# Ratchet list. Every entry below is measured exactly by
+# scripts/check_quality_baseline.py, the source of truth for diagnostic counts.
+# Fix the code, then update the script and this list in the same reviewed change.
+# The counts were taken with ruff 0.16.1 as:
 #   ruff check --select <RULE> --statistics src tests   # with `ignore` emptied
 ignore = [
   # 45 lines over the 120-char limit (39 src, 6 tests); the longest single line
   # is 777 chars in src/backlog_py/compat/inventory.py.
   "E501",
-  # 59 unsorted/ungrouped import blocks (30 src, 29 tests) across 56 files.
+  # 61 unsorted/ungrouped import blocks (32 src, 29 tests).
   # `ruff check --select I001 --fix src tests` clears this in one pass.
   "I001",
   # 32 uses of `datetime.timezone.utc` instead of `datetime.UTC` (21 src, 11 tests).
@@ -132,15 +132,7 @@ files = ["src"]
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_unused_configs = true
-# Ratchet plan. This comment is the single source of truth for the baseline;
-# .github/workflows/ci.yml points here rather than repeating the number.
-#
-# `python -m mypy` (no arguments - it reads `files` above) reports 60 errors
-# across 14 files, mostly [arg-type], concentrated in browser/service.py (24)
-# and tui/data.py (11). The CI step therefore runs with
-# `continue-on-error: true`. Burn the list down file by file, then drop
-# `continue-on-error` from ci.yml and start enabling strict flags here.
-#
-# The number is the whole point of a ratchet, so re-measure it - never adjust it
-# by eye - whenever it changes:
-#   uv run --extra dev python -m mypy | tail -1
+# scripts/check_quality_baseline.py is the source of truth for the exact
+# per-file baseline. It runs `python -m mypy` with no arguments so this `files`
+# target remains authoritative. Reduce the checked-in baseline in the same
+# reviewed change as each type fix, then start enabling strict flags here.

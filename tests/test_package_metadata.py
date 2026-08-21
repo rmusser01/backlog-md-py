@@ -116,15 +116,8 @@ def test_vendored_mermaid_notice_ships_with_the_bundle():
     assert "MIT" in notice.read_text(encoding="utf-8")
 
 
-def test_ci_runs_ruff_as_a_blocking_gate_and_mypy_as_advisory():
-    """The release story says "ruff is blocking"; pin that to the workflow.
-
-    `ruff check` passing is what the release checklist and RELEASE.md lean on
-    when they call a green CI run "safe to tag and publish", so a stray
-    `continue-on-error` on that step would quietly hollow out the gate. mypy is
-    the opposite: it runs against a known baseline and must stay advisory until
-    the baseline is burned down.
-    """
+def test_ci_runs_ruff_and_quality_baselines_as_blocking_gates():
+    """Static-analysis regressions must fail the lint job."""
     workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())
 
     assert "lint" in workflow["jobs"]
@@ -136,9 +129,10 @@ def test_ci_runs_ruff_as_a_blocking_gate_and_mypy_as_advisory():
     assert "continue-on-error" not in ruff_step
     assert ruff_step.get("if") is None
 
-    mypy_step = steps_by_name["Run mypy"]
-    assert "mypy" in mypy_step["run"]
-    assert mypy_step["continue-on-error"] is True
+    baseline_step = steps_by_name["Run quality baselines"]
+    assert baseline_step["run"] == "python scripts/check_quality_baseline.py"
+    assert "continue-on-error" not in baseline_step
+    assert baseline_step.get("if") is None
 
     # A failing lint job has to be able to fail the workflow.
     assert "continue-on-error" not in workflow["jobs"]["lint"]
