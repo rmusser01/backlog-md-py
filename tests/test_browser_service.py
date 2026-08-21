@@ -18,6 +18,15 @@ from backlog_py.storage.project import discover_project
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
+QUEUE_ONLY_TASK_FIELDS = {
+    "dependencyIds",
+    "effectiveStatus",
+    "leaseExpiresAt",
+    "leaseOwner",
+    "orchestrationVersion",
+    "queueCategory",
+    "validationIssues",
+}
 
 
 def test_browser_service_supports_ipv6_loopback(tmp_path, ipv6_loopback_available):
@@ -621,6 +630,43 @@ def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
             "metadata": {},
         }
     ]
+
+
+def test_browser_task_detail_omits_queue_fields_for_archived_task(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    MutableRepository.from_path(repo).archive_task("TASK-1")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert task["path"] == "backlog/archive/tasks/task-1 - Example-task.md"
+    assert QUEUE_ONLY_TASK_FIELDS.isdisjoint(task)
+    assert task["runHistoryIssues"] == []
+
+
+def test_browser_task_detail_keeps_terminal_queue_fields_for_completed_task(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    repository = MutableRepository.from_path(repo)
+    repository.edit_task("TASK-1", status="Done")
+    repository.complete_task("TASK-1")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert task["path"] == "backlog/completed/task-1 - Example-task.md"
+    assert task["queueCategory"] == "terminal"
 
 
 @pytest.mark.parametrize(
@@ -1779,6 +1825,8 @@ def test_browser_task_archive_endpoint_archives_task_under_project_lock(tmp_path
     assert lock_operations == [(repo, "browser_task_archive")]
     assert task["id"] == "TASK-1"
     assert task["path"] == "backlog/archive/tasks/task-1 - Example-task.md"
+    assert QUEUE_ONLY_TASK_FIELDS.isdisjoint(task)
+    assert task["runHistoryIssues"] == []
     assert board["columns"]["In Progress"] == []
     assert _archived_task_file(repo).is_file()
     assert not _task_file_exists(repo)

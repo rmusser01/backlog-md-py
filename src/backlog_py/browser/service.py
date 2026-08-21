@@ -471,10 +471,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
                 return
-            queue_item = queue_item_for_task(
-                repository,
-                task,
-                policy=load_orchestration_policy(self.server.project),
+            queue_item = (
+                None
+                if _is_archived_task(self.server.project, task)
+                else queue_item_for_task(
+                    repository,
+                    task,
+                    policy=load_orchestration_policy(self.server.project),
+                )
             )
             self._send_json(
                 HTTPStatus.OK,
@@ -1241,7 +1245,7 @@ def _task_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
-    queue_item: OrchestrationQueueItem,
+    queue_item: OrchestrationQueueItem | None,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
     payload: dict[str, object] = {
@@ -1256,7 +1260,8 @@ def _task_payload(
         "createdDate": _metadata_string(frontmatter.get("created_date")),
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
     }
-    payload.update(_queue_item_payload(queue_item))
+    if queue_item is not None:
+        payload.update(_queue_item_payload(queue_item))
     return payload
 
 
@@ -1264,7 +1269,7 @@ def _task_detail_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
-    queue_item: OrchestrationQueueItem,
+    queue_item: OrchestrationQueueItem | None,
 ) -> dict[str, object]:
     payload = _task_payload(task, project=project, queue_item=queue_item)
     description = task.description_or_legacy_body
@@ -1291,9 +1296,15 @@ def _task_detail_payload(
     return payload
 
 
-def _queue_item_for_response(project: BacklogProject, task: TaskRecord) -> OrchestrationQueueItem:
+def _queue_item_for_response(project: BacklogProject, task: TaskRecord) -> OrchestrationQueueItem | None:
+    if _is_archived_task(project, task):
+        return None
     repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     return queue_item_for_task(repository, task, policy=load_orchestration_policy(project))
+
+
+def _is_archived_task(project: BacklogProject, task: TaskRecord) -> bool:
+    return task.path.is_relative_to(project.backlog_dir / "archive" / "tasks")
 
 
 def _checklist_payload(task: TaskRecord, marker: str) -> list[dict[str, object]]:
