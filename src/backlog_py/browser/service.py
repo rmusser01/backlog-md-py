@@ -192,7 +192,11 @@ def build_board_payload(project: BacklogProject, *, queue_category_filter: str |
     category_filter = _normalize_queue_category_filter(queue_category_filter)
     unfiltered_columns = {
         status: [
-            _task_payload(task, project=project, queue_item=queue_items.get(task.id.casefold()))
+            _task_payload(
+                task,
+                project=project,
+                queue_item=queue_items.get(task.id.casefold()) or _queue_item_for_response(project, task),
+            )
             for task in tasks
         ]
         for status, tasks in board.items()
@@ -583,7 +587,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.CREATED, {"task": _task_detail_payload(task, project=self.server.project)})
+            queue_item = _queue_item_for_response(self.server.project, task)
+            self._send_json(
+                HTTPStatus.CREATED,
+                {"task": _task_detail_payload(task, project=self.server.project, queue_item=queue_item)},
+            )
             return
 
         edit_task_id = _task_edit_endpoint_task_id(path)
@@ -604,7 +612,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            queue_item = _queue_item_for_response(self.server.project, task)
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, queue_item=queue_item)},
+            )
             return
 
         checklist_task_id = _task_checklist_endpoint_task_id(path)
@@ -625,7 +637,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            queue_item = _queue_item_for_response(self.server.project, task)
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, queue_item=queue_item)},
+            )
             return
 
         archive_task_id = _task_archive_endpoint_task_id(path)
@@ -645,7 +661,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            queue_item = _queue_item_for_response(self.server.project, task)
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, queue_item=queue_item)},
+            )
             return
 
         task_id = _status_endpoint_task_id(path)
@@ -670,7 +690,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        self._send_json(HTTPStatus.OK, {"task": _task_payload(task, project=self.server.project)})
+        queue_item = _queue_item_for_response(self.server.project, task)
+        self._send_json(
+            HTTPStatus.OK,
+            {"task": _task_payload(task, project=self.server.project, queue_item=queue_item)},
+        )
 
     def log_message(self, format: str, *args: object) -> None:
         _ = format, args
@@ -1217,7 +1241,7 @@ def _task_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
-    queue_item: OrchestrationQueueItem | None = None,
+    queue_item: OrchestrationQueueItem,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
     payload: dict[str, object] = {
@@ -1232,9 +1256,6 @@ def _task_payload(
         "createdDate": _metadata_string(frontmatter.get("created_date")),
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
     }
-    if queue_item is None:
-        repository = ReadOnlyRepository(project, refresh_remote_refs=False)
-        queue_item = queue_item_for_task(repository, task, policy=load_orchestration_policy(project))
     payload.update(_queue_item_payload(queue_item))
     return payload
 
@@ -1243,7 +1264,7 @@ def _task_detail_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
-    queue_item: OrchestrationQueueItem | None = None,
+    queue_item: OrchestrationQueueItem,
 ) -> dict[str, object]:
     payload = _task_payload(task, project=project, queue_item=queue_item)
     description = task.description_or_legacy_body
@@ -1268,6 +1289,11 @@ def _task_detail_payload(
         }
     )
     return payload
+
+
+def _queue_item_for_response(project: BacklogProject, task: TaskRecord) -> OrchestrationQueueItem:
+    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    return queue_item_for_task(repository, task, policy=load_orchestration_policy(project))
 
 
 def _checklist_payload(task: TaskRecord, marker: str) -> list[dict[str, object]]:

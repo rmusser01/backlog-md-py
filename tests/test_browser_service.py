@@ -1,3 +1,4 @@
+import inspect
 import json
 import shutil
 import socket
@@ -39,6 +40,13 @@ def test_browser_service_module_does_not_embed_full_board_assets():
     assert "<style>" not in source
     assert "<script>" not in source
     assert "let draggedTaskId = null;" not in source
+
+
+def test_browser_task_payloads_require_explicit_queue_items():
+    from backlog_py.browser import service as browser_service
+
+    for payload_builder in (browser_service._task_payload, browser_service._task_detail_payload):
+        assert inspect.signature(payload_builder).parameters["queue_item"].default is inspect.Parameter.empty
 
 
 def test_browser_board_asset_uses_static_javascript_escape_sequences():
