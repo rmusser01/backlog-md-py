@@ -13,6 +13,7 @@ from click.testing import CliRunner
 
 from backlog_py import __version__
 from backlog_py.cli.main import main
+from backlog_py.daemon import DaemonOwnershipError
 from backlog_py.daemon.lifecycle import (
     DaemonNotRunningError,
     DaemonStartError,
@@ -263,6 +264,24 @@ def test_daemon_stop_does_not_signal_a_reused_pid(tmp_path, monkeypatch):
     assert result is False
     assert kills == [], "signalled a PID that is no longer our daemon"
     assert read_runtime_record(layout) is None
+
+
+def test_daemon_stop_does_not_signal_when_ownership_is_uncertain(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    layout = ensure_state_layout()
+    record = _record(pid=12345)
+    write_runtime_record(record, layout)
+    kills = []
+
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.is_pid_alive", lambda pid: True)
+    monkeypatch.setattr("backlog_py.daemon.lifecycle.os.kill", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr("backlog_py.daemon.lifecycle._daemon_endpoint_owned", lambda record: None)
+
+    with pytest.raises(DaemonOwnershipError, match="unable to verify daemon ownership"):
+        daemon_stop(force=True)
+
+    assert kills == []
+    assert read_runtime_record(layout) == record
 
 
 def test_daemon_status_treats_reused_pid_as_not_running(tmp_path, monkeypatch):

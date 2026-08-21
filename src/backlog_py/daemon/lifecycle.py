@@ -37,6 +37,10 @@ class DaemonStartError(RuntimeError):
     """Raised when a freshly launched daemon never becomes healthy."""
 
 
+class DaemonOwnershipError(RuntimeError):
+    """Raised when daemon process ownership cannot be verified safely."""
+
+
 class DaemonStopTimeoutError(TimeoutError):
     """Raised when a daemon process does not exit before the stop timeout."""
 
@@ -219,10 +223,15 @@ def _daemon_stop_locked(*, force: bool, timeout: float) -> bool:
     if not is_pid_alive(record.pid):
         delete_runtime_record(layout)
         return False
-    if _daemon_endpoint_owned(record) is False:
+    ownership = _daemon_endpoint_owned(record)
+    if ownership is False:
         # The PID was reused by an unrelated process; never signal it.
         delete_runtime_record(layout)
         return False
+    if ownership is None:
+        raise DaemonOwnershipError(
+            f"unable to verify daemon ownership for process {record.pid}"
+        )
 
     os.kill(record.pid, signal.SIGTERM)
     if _wait_for_exit(record.pid, timeout):

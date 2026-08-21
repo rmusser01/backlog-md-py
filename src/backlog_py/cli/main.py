@@ -42,6 +42,7 @@ from backlog_py.daemon.lifecycle import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DaemonNotRunningError,
+    DaemonOwnershipError,
     DaemonStartError,
     daemon_ensure,
     daemon_start,
@@ -1548,7 +1549,7 @@ def daemon_stop_command(force: bool) -> None:
     """Stop the singleton daemon."""
     try:
         stopped = daemon_stop(force=force)
-    except TimeoutError as exc:
+    except (DaemonOwnershipError, TimeoutError) as exc:
         raise click.ClickException(str(exc)) from exc
     if stopped:
         click.echo("Stopped daemon.")
