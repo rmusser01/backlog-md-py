@@ -533,3 +533,36 @@ def test_active_branch_task_history_ignores_non_first_parent_merge_diff(tmp_path
     assert [(snapshot.relative_path, snapshot.source, snapshot.committed_at) for snapshot in snapshots] == [
         ("backlog/tasks/task-1 - unchanged.md", source, float(base_time))
     ]
+
+
+def test_active_branch_task_reads_normalize_root_backlog_bucket_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo, backlog_dir=".").project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/root-backlog")
+    path = _task(project, "task-1 - root.md")
+    source = path.read_text(encoding="utf-8")
+    _commit(repo, "add root backlog task")
+    _git(repo, "checkout", "-q", "main")
+
+    byte_calls: list[tuple[str, ...]] = []
+    original_byte_runner = git_module._run_git_bytes
+
+    def tracked_byte_runner(work_dir: Path, *args: str):
+        byte_calls.append(args)
+        return original_byte_runner(work_dir, *args)
+
+    monkeypatch.setattr(git_module, "_run_git_bytes", tracked_byte_runner)
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert [(snapshot.relative_path, snapshot.source) for snapshot in snapshots] == [
+        ("tasks/task-1 - root.md", source)
+    ]
+    assert len(byte_calls) == 2
+    assert byte_calls[0][-2:] == ("tasks", "completed")
+    assert byte_calls[1][-1:] == ("tasks",)

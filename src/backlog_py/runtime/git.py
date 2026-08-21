@@ -410,10 +410,18 @@ def _split_ref_line(line: str) -> tuple[str | None, str | None, float | None]:
     return parts[0].strip(), parts[1].strip(), timestamp
 
 
+def _task_bucket_paths(backlog_path: str) -> tuple[str, ...]:
+    return tuple(
+        posixpath.normpath(posixpath.join(backlog_path, directory))
+        for directory in ("tasks", "completed")
+    )
+
+
 def _task_paths_for_ref(
     work_dir: Path, ref: str, backlog_path: str, fallback_timestamp: float
 ) -> dict[str, float]:
     """Return live task paths and latest timestamps from one NUL-framed log."""
+    bucket_paths = _task_bucket_paths(backlog_path)
     result = _run_git_bytes(
         work_dir,
         "--literal-pathspecs",
@@ -429,8 +437,7 @@ def _task_paths_for_ref(
         "--first-parent",
         ref,
         "--",
-        f"{backlog_path}/tasks",
-        f"{backlog_path}/completed",
+        *bucket_paths,
     )
     if result.returncode != 0:
         return {}
@@ -476,10 +483,11 @@ def _task_sources_for_ref(
     backlog_path: str,
     paths: dict[str, float],
 ) -> dict[str, str]:
+    bucket_paths = _task_bucket_paths(backlog_path)
     roots = [
-        f"{backlog_path}/{directory}"
-        for directory in ("tasks", "completed")
-        if any(path.startswith(f"{backlog_path}/{directory}/") for path in paths)
+        bucket_path
+        for bucket_path in bucket_paths
+        if any(path.startswith(f"{bucket_path}/") for path in paths)
     ]
     if not roots:
         return {}
