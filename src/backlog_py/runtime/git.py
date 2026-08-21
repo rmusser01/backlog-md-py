@@ -424,7 +424,9 @@ def _task_paths_for_ref(
         "--format=%x00%ct",
         "--name-status",
         "--no-renames",
+        # Old-compatible first-parent merge diffs; avoids false timestamps from parent two.
         "-m",
+        "--first-parent",
         ref,
         "--",
         f"{backlog_path}/tasks",

@@ -395,6 +395,7 @@ def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
             "--name-status",
             "--no-renames",
             "-m",
+            "--first-parent",
             "refs/heads/feature/batched",
             "--",
             "backlog/tasks",
@@ -488,4 +489,47 @@ def test_active_branch_task_reads_preserve_merge_history_without_diff_merges(
 
     assert [(snapshot.relative_path, snapshot.source, snapshot.committed_at) for snapshot in snapshots] == [
         ("backlog/tasks/task-1 - merged.md", source, float(base_time + 2))
+    ]
+
+
+def test_active_branch_task_history_ignores_non_first_parent_merge_diff(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/keep-first-parent")
+    path = _task(project, "task-1 - unchanged.md")
+    source = path.read_text(encoding="utf-8")
+    base_time = int(time()) - 60
+    _commit(repo, "add task", when=base_time)
+
+    _git(repo, "checkout", "-q", "-b", "side")
+    path.write_text(f"{source}\nside changed this task\n", encoding="utf-8")
+    _commit(repo, "change task on side", when=base_time + 1)
+    _git(repo, "checkout", "-q", "feature/keep-first-parent")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _commit(repo, "feature work", when=base_time + 2)
+    merge_dates = {
+        "GIT_AUTHOR_DATE": f"@{base_time + 3} +0000",
+        "GIT_COMMITTER_DATE": f"@{base_time + 3} +0000",
+    }
+    _git(
+        repo,
+        "merge",
+        "--no-ff",
+        "-s",
+        "ours",
+        "-qm",
+        "keep first-parent task",
+        "side",
+        **merge_dates,
+    )
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "branch", "-D", "side")
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert [(snapshot.relative_path, snapshot.source, snapshot.committed_at) for snapshot in snapshots] == [
+        ("backlog/tasks/task-1 - unchanged.md", source, float(base_time))
     ]
