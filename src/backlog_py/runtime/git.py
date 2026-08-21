@@ -91,6 +91,7 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if config.bypass_git_hooks:
         commit_args.append("--no-verify")
     commit_args.extend(("-m", f"backlog: {operation}"))
+    commit_args.extend(("--only", "--", *pathspecs))
     commit = _run_git(context.work_dir, *commit_args)
     if commit.returncode == 0:
         return
