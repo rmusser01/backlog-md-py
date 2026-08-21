@@ -440,6 +440,7 @@ def _task_paths_for_ref(
         "--format=%x00%ct",
         "--raw",
         "--no-abbrev",
+        "--relative",
         "--no-renames",
         # Old-compatible first-parent merge diffs; avoids false timestamps from parent two.
         "-m",

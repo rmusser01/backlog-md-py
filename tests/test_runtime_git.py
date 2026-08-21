@@ -394,6 +394,7 @@ def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
             "--format=%x00%ct",
             "--raw",
             "--no-abbrev",
+            "--relative",
             "--no-renames",
             "-m",
             "--first-parent",
@@ -593,3 +594,37 @@ def test_active_branch_task_reads_raw_blobs_ignoring_archive_attributes(tmp_path
     snapshots = git_module.list_active_branch_task_snapshots(project)
 
     assert {snapshot.relative_path: snapshot.source for snapshot in snapshots} == expected
+
+
+def test_active_branch_task_reads_are_relative_to_nested_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    project_root = repo / "pkg"
+    project_root.mkdir(parents=True)
+    _git_init(repo)
+    project = init_project(project_root).project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/nested-task")
+    path = _task(project, "task-1 - nested-branch.md")
+    source = path.read_text(encoding="utf-8")
+    _commit(repo, "add nested task")
+    _git(repo, "checkout", "-q", "main")
+
+    byte_calls: list[tuple[str, ...]] = []
+    original_byte_runner = git_module._run_git_bytes
+
+    def tracked_byte_runner(work_dir: Path, *args: str, **kwargs):
+        byte_calls.append(args)
+        return original_byte_runner(work_dir, *args, **kwargs)
+
+    monkeypatch.setattr(git_module, "_run_git_bytes", tracked_byte_runner)
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert [(snapshot.relative_path, snapshot.source) for snapshot in snapshots] == [
+        ("backlog/tasks/task-1 - nested-branch.md", source)
+    ]
+    assert len(byte_calls) == 2
+    assert "--relative" in byte_calls[0]
+    assert byte_calls[1] == ("cat-file", "--batch")
