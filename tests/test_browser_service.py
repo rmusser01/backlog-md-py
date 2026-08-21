@@ -615,6 +615,76 @@ def test_browser_task_detail_endpoint_returns_readonly_sections(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    ("dependency_status", "expected_category"),
+    [
+        (None, "eligible"),
+        ("Done", "eligible"),
+        ("To Do", "blocked_by_dependencies"),
+    ],
+)
+def test_browser_task_detail_uses_one_repository_without_refresh_or_full_queue(
+    tmp_path,
+    monkeypatch,
+    dependency_status,
+    expected_category,
+):
+    repo = _copy_fixture_repo(tmp_path)
+    mutable = MutableRepository.from_path(repo)
+    if dependency_status is not None:
+        mutable.create_task(title="Dependency", task_id="TASK-2", status=dependency_status)
+        mutable.edit_task("TASK-1", status="To Do", dependencies=["TASK-2"])
+    else:
+        mutable.edit_task("TASK-1", status="To Do")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+    from backlog_py.core import repository as repository_module
+    from backlog_py.orchestration import service as orchestration_service
+    from backlog_py.orchestration.reports import queue_report
+
+    expected_item = next(
+        item
+        for item in queue_report(repository_module.ReadOnlyRepository(project, refresh_remote_refs=False)).items
+        if item.task_id == "TASK-1"
+    )
+    constructions = []
+    remote_refreshes = []
+    full_queue_calls = []
+    real_repository = repository_module.ReadOnlyRepository
+    real_queue = orchestration_service.OrchestrationService.queue
+
+    class CountingReadOnlyRepository(real_repository):
+        def __init__(self, *args, **kwargs):
+            constructions.append(kwargs.get("refresh_remote_refs", True))
+            super().__init__(*args, **kwargs)
+
+    def counting_queue(self, *, include_completed=False):
+        full_queue_calls.append(include_completed)
+        return real_queue(self, include_completed=include_completed)
+
+    monkeypatch.setattr(browser_service, "ReadOnlyRepository", CountingReadOnlyRepository)
+    monkeypatch.setattr(orchestration_service, "ReadOnlyRepository", CountingReadOnlyRepository)
+    monkeypatch.setattr(orchestration_service.OrchestrationService, "queue", counting_queue)
+    monkeypatch.setattr(
+        repository_module,
+        "maybe_fetch_remote_refs",
+        lambda project: remote_refreshes.append(project.root),
+    )
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        task = _get_json(f"{service.root_url}api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert constructions == [False]
+    assert remote_refreshes == []
+    assert full_queue_calls == []
+    assert task["queueCategory"] == expected_item.category == expected_category
+    assert task["dependencyIds"] == expected_item.dependency_ids
+
+
 def test_browser_task_detail_reports_malformed_run_history_as_validation_issue(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     _task_file(repo).write_text(

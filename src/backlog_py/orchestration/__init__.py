@@ -58,6 +58,7 @@ from backlog_py.orchestration.reports import (
     list_active_claims,
     list_eligible_tasks,
     list_stale_leases,
+    queue_item_for_task,
     queue_report,
     summarize_orchestration,
 )
@@ -117,6 +118,7 @@ __all__ = [
     "load_orchestration_policy",
     "parse_orchestration",
     "parse_run_history",
+    "queue_item_for_task",
     "queue_report",
     "render_run_history_entry",
     "resolve_orchestration_actor",

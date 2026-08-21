@@ -99,6 +99,23 @@ def queue_report(
     return OrchestrationQueueReport(items=items, by_category=dict(sorted(counts.items())))
 
 
+def queue_item_for_task(
+    repository: ReadOnlyRepository,
+    task: TaskRecord,
+    policy: OrchestrationPolicy | None = None,
+    now: datetime | None = None,
+) -> OrchestrationQueueItem:
+    active_policy = policy or OrchestrationPolicy.default()
+    return categorize_task(
+        task,
+        policy=active_policy,
+        complete_task_ids=_complete_task_ids(repository),
+        now=_coerce_now(now),
+        run_history_issues=_run_history_validation_issues(task),
+        project_root=repository.project.root,
+    )
+
+
 def categorize_task(
     task: TaskRecord,
     *,

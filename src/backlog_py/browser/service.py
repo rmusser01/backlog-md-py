@@ -29,7 +29,9 @@ from backlog_py.orchestration import (
     OrchestrationService,
     OrchestrationRunEvent,
     ValidationIssue,
+    load_orchestration_policy,
     parse_run_history,
+    queue_item_for_task,
 )
 from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback, http_url
@@ -460,11 +462,20 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
             try:
-                task = ReadOnlyRepository(self.server.project).get_task(task_id)
+                repository = ReadOnlyRepository(self.server.project, refresh_remote_refs=False)
+                task = repository.get_task(task_id)
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
                 return
-            self._send_json(HTTPStatus.OK, _task_detail_payload(task, project=self.server.project))
+            queue_item = queue_item_for_task(
+                repository,
+                task,
+                policy=load_orchestration_policy(self.server.project),
+            )
+            self._send_json(
+                HTTPStatus.OK,
+                _task_detail_payload(task, project=self.server.project, queue_item=queue_item),
+            )
             return
         if path in {"", "/", "/index.html"}:
             self._send_html(
@@ -1222,14 +1233,19 @@ def _task_payload(
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
     }
     if queue_item is None:
-        queue_item = _queue_item_for_task(project, task.id)
-    if queue_item is not None:
-        payload.update(_queue_item_payload(queue_item))
+        repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+        queue_item = queue_item_for_task(repository, task, policy=load_orchestration_policy(project))
+    payload.update(_queue_item_payload(queue_item))
     return payload
 
 
-def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
-    payload = _task_payload(task, project=project)
+def _task_detail_payload(
+    task: TaskRecord,
+    *,
+    project: BacklogProject,
+    queue_item: OrchestrationQueueItem | None = None,
+) -> dict[str, object]:
+    payload = _task_payload(task, project=project, queue_item=queue_item)
     description = task.description_or_legacy_body
     implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
     final_summary = _section_content(task, "FINAL_SUMMARY")
@@ -1437,14 +1453,6 @@ def _render_task_meta(
     if not badges:
         return ""
     return f'        <div class="task-meta">{"".join(badges)}</div>'
-
-
-def _queue_item_for_task(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
-    normalized = task_id.casefold()
-    for item in OrchestrationService(project).queue(include_completed=True).items:
-        if item.task_id.casefold() == normalized:
-            return item
-    return None
 
 
 def _queue_item_payload(item: OrchestrationQueueItem) -> dict[str, object]:

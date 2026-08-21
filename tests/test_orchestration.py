@@ -7,6 +7,7 @@ import yaml
 from backlog_py.core.repository import ReadOnlyRepository
 from backlog_py.core.repository import TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.orchestration import reports
 from backlog_py.orchestration import (
     OrchestrationPolicy,
     OrchestrationValidationError,
@@ -366,6 +367,30 @@ def test_summarize_orchestration_counts_effective_statuses(tmp_path):
     assert summary.eligible_count == 1
     assert summary.active_claim_count == 0
     assert summary.stale_lease_count == 0
+
+
+@pytest.mark.parametrize(
+    ("dependency_status", "expected_category"),
+    [
+        (None, "eligible"),
+        ("Done", "eligible"),
+        ("To Do", "blocked_by_dependencies"),
+    ],
+)
+def test_queue_item_for_task_matches_queue_report(tmp_path, dependency_status, expected_category):
+    tasks: dict[str, dict[str, object]] = {"TASK-1": {"status": "To Do"}}
+    if dependency_status is not None:
+        tasks["TASK-1"]["dependencies"] = ["TASK-2"]
+        tasks["TASK-2"] = {"status": dependency_status}
+    repository = ReadOnlyRepository.from_path(_repo_with_tasks(tmp_path, tasks))
+    task = repository.get_task("TASK-1")
+    now = _utc("2026-05-13T00:00:00Z")
+
+    focused = reports.queue_item_for_task(repository, task, now=now)
+    expected = next(item for item in reports.queue_report(repository, now=now).items if item.task_id == task.id)
+
+    assert focused == expected
+    assert focused.category == expected_category
 
 
 @pytest.mark.parametrize(
