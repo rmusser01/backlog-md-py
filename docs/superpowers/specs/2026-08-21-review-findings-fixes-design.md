@@ -21,7 +21,7 @@ The repair pass covers these confirmed behaviors:
 
 ### Trust-boundary fixes
 
-Markdown URL validation will use one strict policy in both the Python renderer and browser rich editor: remove browser-normalized ASCII control whitespace before parsing, allow relative URLs, and allow only `http`, `https`, and `mailto` absolute schemes. Regression tests will cover tab, carriage-return, newline, and NUL variants rather than only the contiguous `javascript:` spelling.
+Markdown URL validation will use one strict policy in both the Python renderer and browser rich editor: reject any URL containing a C0 or DEL control character, allow relative URLs, and allow only `http`, `https`, and `mailto` absolute schemes. Regression tests will cover tab, carriage-return, newline, and NUL variants rather than only the contiguous `javascript:` spelling.
 
 Project discovery will validate the default backlog directory itself as a trusted subpath before constructing `BacklogProject`. A symlink in any managed anchor component will be rejected before config loading or mutation. Explicit project-relative `backlogDirectory` values will retain their current containment behavior.
 
@@ -41,7 +41,7 @@ The browser and MCP servers will select an IPv6-capable `ThreadingHTTPServer` wh
 
 Active-branch discovery will batch Git metadata/content reads per ref instead of launching subprocesses for every task. Browser task-detail reads will disable remote refresh and avoid rebuilding the full orchestration queue when the required queue data can be passed or computed once.
 
-CI will compare mypy's current error total to a checked baseline and fail only on increases, preserving the existing burn-down workflow. Ruff debt will use targeted enforcement where it can be added mechanically; this pass will not reformat the entire tree or resolve all existing ignored violations.
+CI will run one stdlib-only baseline checker and fail when mypy exceeds its current 60-error baseline or any globally ignored Ruff rule exceeds its measured baseline: `E501=45`, `I001=59`, `UP017=32`, `UP035=21`, `UP037=13`, `B904=4`, and `B009=2`. Lower counts pass without changing the baseline, so debt can be burned down independently; baseline updates must be deliberate code review changes. The existing blocking Ruff command remains in place. This pass will not reformat the entire tree or resolve all existing ignored violations.
 
 ## Error Handling
 
