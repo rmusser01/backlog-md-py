@@ -39,9 +39,20 @@ The browser and MCP servers will select an IPv6-capable `ThreadingHTTPServer` wh
 
 ### Performance and CI guardrails
 
-Active-branch discovery will batch Git metadata/content reads per ref instead of launching subprocesses for every task. Browser task-detail reads will disable remote refresh and avoid rebuilding the full orchestration queue when the required queue data can be passed or computed once.
+Active-branch discovery will use at most two Git subprocesses per ref: one batched history read for per-path timestamps and one batched content read for task Markdown. Subprocess count must therefore remain constant as task count grows.
 
-CI will run one stdlib-only baseline checker and fail when mypy exceeds its current 60-error baseline or any globally ignored Ruff rule exceeds its measured baseline: `E501=45`, `I001=59`, `UP017=32`, `UP035=21`, `UP037=13`, `B904=4`, and `B009=2`. Lower counts pass without changing the baseline, so debt can be burned down independently; baseline updates must be deliberate code review changes. The existing blocking Ruff command remains in place. This pass will not reformat the entire tree or resolve all existing ignored violations.
+Browser task-detail reads will reuse one `ReadOnlyRepository(refresh_remote_refs=False)` for lookup and orchestration data. They will categorize only the requested task using the shared orchestration categorizer and the completed-task ID set required for dependency status; they must not construct a full `OrchestrationQueueReport`, refresh remotes, or create a second repository.
+
+CI will run one stdlib-only baseline checker. Mypy baselines will be exact per-file counts totalling 60: browser/service.py=24, tui/data.py=11, runtime/locks.py=4, core/repository.py=4, tui/models.py=3, cli/main.py=3, tui/widgets.py=2, orchestration/reports.py=2, mcp/tools.py=2, and one each in tui/screens.py, tui/app.py, orchestration/service.py, mcp/protocol.py, and mcp/http_server.py. Globally ignored Ruff rule baselines will also be exact: `E501=45`, `I001=59`, `UP017=32`, `UP035=21`, `UP037=13`, `B904=4`, and `B009=2`. Any increase or decrease fails with an instruction to update the checked baseline deliberately in the same reviewed change. The existing blocking Ruff command remains in place. This pass will not reformat the entire tree or resolve all existing ignored violations.
+
+## Implementation Workstreams
+
+The implementation plan will keep four independently testable workstreams:
+
+1. Security boundaries: Markdown URL validation and trusted project anchors.
+2. Git/process safety: path-limited auto-commit and fail-closed daemon shutdown.
+3. Filesystem/network correctness: mode-preserving atomic replacement and IPv6 binding/URL formatting.
+4. Performance/CI: bounded active-branch Git processes, single-task browser categorization, and exact quality baselines.
 
 ## Error Handling
 
