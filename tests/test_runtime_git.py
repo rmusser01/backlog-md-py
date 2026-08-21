@@ -140,6 +140,28 @@ def test_timestamps_resolve_for_non_ascii_filenames(tmp_path: Path) -> None:
     assert timestamps[path] != inf, "a non-ASCII filename reported no timestamp"
 
 
+def test_timestamps_treat_configured_backlog_path_as_literal(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo, backlog_dir=":(top)weird").project
+    path = _task(project, "task-1 - literal.md")
+    _commit(repo, "seed")
+
+    assert current_task_snapshot_timestamps(project, [path])[path] != inf
+
+
+def test_timestamps_resolve_for_filename_with_newline(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    path = _task(project, "task-1 - line\nbreak.md")
+    _commit(repo, "seed")
+
+    assert current_task_snapshot_timestamps(project, [path])[path] != inf
+
+
 def test_non_utf8_path_in_git_output_does_not_crash_the_scan(tmp_path: Path) -> None:
     """With core.quotePath=false git emits raw bytes, which need not be UTF-8.
 
@@ -289,18 +311,18 @@ def test_log_falls_back_when_diff_merges_is_unsupported(
     path = _task(project, "task-1 - oldgit.md")
     _commit(repo, "seed")
 
-    original = git_module._run_git
+    original = git_module._run_git_bytes
     rejected: list[tuple[str, ...]] = []
 
     def without_diff_merges(work_dir, *args, **kwargs):
         if any(arg.startswith("--diff-merges") for arg in args):
             rejected.append(args)
             return subprocess.CompletedProcess(
-                ["git", *args], 129, "", "error: unknown option `diff-merges=first-parent'"
+                ["git", *args], 129, b"", b"error: unknown option `diff-merges=first-parent'"
             )
         return original(work_dir, *args, **kwargs)
 
-    monkeypatch.setattr(git_module, "_run_git", without_diff_merges)
+    monkeypatch.setattr(git_module, "_run_git_bytes", without_diff_merges)
 
     timestamps = current_task_snapshot_timestamps(project, [path])
 

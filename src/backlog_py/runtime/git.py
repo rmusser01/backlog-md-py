@@ -185,7 +185,14 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
     Returns ``None`` when git status fails, so callers can fail closed.
     """
     result = _run_git(
-        work_dir, "status", "--porcelain", "-z", "--untracked-files=all", "--", *scope
+        work_dir,
+        "--literal-pathspecs",
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=all",
+        "--",
+        *scope,
     )
     if result.returncode != 0:
         return None
@@ -208,32 +215,54 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
 
 def _last_commit_timestamps(work_dir: Path, scope: Sequence[str]) -> dict[str, float]:
     """Most recent commit timestamp per path under ``scope``, in one log walk."""
-    log_args = ("-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only")
+    log_args = (
+        "--literal-pathspecs",
+        "-c",
+        "core.quotePath=false",
+        "log",
+        "-z",
+        "--format=%x00%ct",
+        "--name-only",
+    )
     # `--name-only` prints nothing for a merge commit, so a file whose content was
     # produced while resolving a conflict would be attributed to an older ancestor
     # instead of the merge. Ordinary merges are simplified out of a path-limited
     # log and so are unaffected. `--diff-merges` needs git >= 2.31; older git
     # rejects the option outright, which would report *every* task as unknown, so
     # fall back to the plain walk when git says it does not know the option.
-    result = _run_git(work_dir, *log_args, "--diff-merges=first-parent", "HEAD", "--", *scope)
-    if result.returncode != 0 and "diff-merges" in (result.stderr or ""):
-        result = _run_git(work_dir, *log_args, "HEAD", "--", *scope)
+    result = _run_git_bytes(
+        work_dir, *log_args, "--diff-merges=first-parent", "HEAD", "--", *scope
+    )
+    if result.returncode != 0 and b"diff-merges" in (result.stderr or b""):
+        result = _run_git_bytes(work_dir, *log_args, "HEAD", "--", *scope)
     if result.returncode != 0:
         return {}
     timestamps: dict[str, float] = {}
-    for chunk in result.stdout.split("\0"):
-        if not chunk.strip():
+    records = result.stdout.split(b"\0")
+    index = 0
+    while index < len(records):
+        if records[index]:
+            index += 1
             continue
-        lines = [line for line in chunk.splitlines() if line.strip()]
-        if not lines:
+        index += 1
+        if index >= len(records) or not records[index]:
             continue
         try:
-            committed_at = float(lines[0].strip())
+            committed_at = float(records[index])
         except ValueError:
+            index += 1
             continue
-        for name in lines[1:]:
+        index += 1
+        first_path = True
+        while index < len(records) and records[index]:
+            raw_path = records[index]
+            if first_path:
+                raw_path = raw_path.removeprefix(b"\n")
+                first_path = False
+            name = os.fsdecode(raw_path)
             # log walks newest-first, so the first sighting is the latest commit.
             timestamps.setdefault(name, committed_at)
+            index += 1
     return timestamps
 
 
