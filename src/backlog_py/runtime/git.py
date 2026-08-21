@@ -416,6 +416,7 @@ def _task_paths_for_ref(
     """Return live task paths and latest timestamps from one NUL-framed log."""
     result = _run_git_bytes(
         work_dir,
+        "--literal-pathspecs",
         "-c",
         "core.quotePath=false",
         "log",
@@ -423,7 +424,7 @@ def _task_paths_for_ref(
         "--format=%x00%ct",
         "--name-status",
         "--no-renames",
-        "--diff-merges=first-parent",
+        "-m",
         ref,
         "--",
         f"{backlog_path}/tasks",
@@ -480,7 +481,9 @@ def _task_sources_for_ref(
     ]
     if not roots:
         return {}
-    result = _run_git_bytes(work_dir, "archive", "--format=tar", ref, "--", *roots)
+    result = _run_git_bytes(
+        work_dir, "--literal-pathspecs", "archive", "--format=tar", ref, "--", *roots
+    )
     if result.returncode != 0:
         return {}
 

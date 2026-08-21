@@ -384,14 +384,108 @@ def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
     snapshots = git_module.list_active_branch_task_snapshots(project)
     freshness = git_module.read_index_git_freshness(project)
 
-    history_calls = [args for args in byte_calls if "log" in args]
-    content_calls = [args for args in byte_calls if "archive" in args]
-    assert len(history_calls) == 1, history_calls
-    assert len(content_calls) == 1, content_calls
+    assert byte_calls == [
+        (
+            "--literal-pathspecs",
+            "-c",
+            "core.quotePath=false",
+            "log",
+            "-z",
+            "--format=%x00%ct",
+            "--name-status",
+            "--no-renames",
+            "-m",
+            "refs/heads/feature/batched",
+            "--",
+            "backlog/tasks",
+            "backlog/completed",
+        ),
+        (
+            "--literal-pathspecs",
+            "archive",
+            "--format=tar",
+            "refs/heads/feature/batched",
+            "--",
+            "backlog/tasks",
+        ),
+    ]
     assert all("log" not in args and "show" not in args and "ls-tree" not in args for args in text_calls)
     assert [snapshot.relative_path for snapshot in snapshots] == sorted(sources)
     assert {snapshot.relative_path: snapshot.source for snapshot in snapshots} == sources
     assert {snapshot.relative_path: snapshot.committed_at for snapshot in snapshots} == committed_at
     assert freshness["active_refs"] == [
         {"ref": "refs/heads/feature/batched", "timestamp": float(base_time + 2)}
+    ]
+
+
+def test_active_branch_task_reads_treat_configured_backlog_path_as_literal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo, backlog_dir=":(top)weird").project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/literal-pathspec")
+    path = _task(project, "task-1 - literal.md")
+    source = path.read_text(encoding="utf-8")
+    _commit(repo, "add literal-path task")
+    _git(repo, "checkout", "-q", "main")
+
+    byte_calls: list[tuple[str, ...]] = []
+    original_byte_runner = git_module._run_git_bytes
+
+    def tracked_byte_runner(work_dir: Path, *args: str):
+        byte_calls.append(args)
+        return original_byte_runner(work_dir, *args)
+
+    monkeypatch.setattr(git_module, "_run_git_bytes", tracked_byte_runner)
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert [(snapshot.relative_path, snapshot.source) for snapshot in snapshots] == [
+        (":(top)weird/tasks/task-1 - literal.md", source)
+    ]
+    assert len(byte_calls) == 2
+    assert all(args[0] == "--literal-pathspecs" for args in byte_calls)
+
+
+def test_active_branch_task_reads_preserve_merge_history_without_diff_merges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/merged-task")
+    _git(repo, "checkout", "-q", "-b", "side")
+    path = _task(project, "task-1 - merged.md")
+    source = path.read_text(encoding="utf-8")
+    base_time = int(time()) - 60
+    _commit(repo, "add task on side", when=base_time)
+    _git(repo, "checkout", "-q", "feature/merged-task")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _commit(repo, "feature work", when=base_time + 1)
+    merge_dates = {
+        "GIT_AUTHOR_DATE": f"@{base_time + 2} +0000",
+        "GIT_COMMITTER_DATE": f"@{base_time + 2} +0000",
+    }
+    _git(repo, "merge", "--no-ff", "-qm", "merge side", "side", **merge_dates)
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "branch", "-D", "side")
+
+    original_byte_runner = git_module._run_git_bytes
+
+    def without_diff_merges(work_dir: Path, *args: str):
+        if any(arg.startswith("--diff-merges") for arg in args):
+            raise AssertionError("active branch history requires Git >= 2.31")
+        return original_byte_runner(work_dir, *args)
+
+    monkeypatch.setattr(git_module, "_run_git_bytes", without_diff_merges)
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert [(snapshot.relative_path, snapshot.source, snapshot.committed_at) for snapshot in snapshots] == [
+        ("backlog/tasks/task-1 - merged.md", source, float(base_time + 2))
     ]
