@@ -34,6 +34,7 @@ def test_browser_board_asset_uses_static_javascript_escape_sequences():
     assert r".split(/[\\n,]/)" not in source
     assert r'"\\n"' not in source
     assert r"const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);" in source
+    assert r'if (/[\u0000-\u001f\u007f]/.test(rawValue)) return "#";' in source
 
 
 def test_browser_service_serves_health_board_json_and_html(tmp_path):
@@ -1035,7 +1036,10 @@ def test_browser_markdown_preview_endpoint_returns_safe_rendered_html(tmp_path):
     assert "<li>item</li>" in html
 
 
-def test_browser_markdown_preview_endpoint_renders_safe_links(tmp_path):
+@pytest.mark.parametrize(
+    "unsafe_href", ["javascript:alert(1)", "java\tscript:alert(1)", "java\x00script:alert(1)"]
+)
+def test_browser_markdown_preview_endpoint_renders_safe_links(tmp_path, unsafe_href):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
@@ -1045,7 +1049,7 @@ def test_browser_markdown_preview_endpoint_renders_safe_links(tmp_path):
     try:
         response = _post_json_response(
             f"{service.root_url}/api/markdown/preview",
-            {"markdown": "[Docs](docs/setup.md) [Bad](javascript:alert(1))"},
+            {"markdown": f"[Docs](docs/setup.md) [Bad]({unsafe_href})"},
         )
     finally:
         service.shutdown()
@@ -1054,7 +1058,30 @@ def test_browser_markdown_preview_endpoint_renders_safe_links(tmp_path):
     html = response["body"]["html"]
     assert '<a href="docs/setup.md">Docs</a>' in html
     assert '<a href="#">Bad</a>' in html
-    assert "javascript:alert" not in html
+    assert unsafe_href.replace("\t", "").replace("\x00", "") not in html
+
+
+@pytest.mark.parametrize(
+    "unsafe_href",
+    [
+        "java\tscript:alert(1)",
+        "java\nscript:alert(1)",
+        "java\rscript:alert(1)",
+        "java\x00script:alert(1)",
+        "\thttps://example.test",
+        "https://example.test\n",
+        "https://example.test\x7f",
+    ],
+)
+def test_browser_markdown_preview_endpoint_renders_safe_links_from_raw_url_controls(unsafe_href):
+    # The endpoint's block parser normalizes LF/CR before inline rendering, so exercise
+    # the inline preview renderer directly to preserve every raw control character.
+    from backlog_py.browser.service import _render_inline_markdown
+
+    html = _render_inline_markdown(f"[Bad]({unsafe_href})")
+
+    assert '<a href="#">Bad</a>' in html
+    assert unsafe_href.translate(dict.fromkeys(range(32)) | {127: None}) not in html
 
 
 def test_browser_markdown_preview_endpoint_does_not_render_links_inside_code_spans(tmp_path):

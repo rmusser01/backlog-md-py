@@ -1396,7 +1396,12 @@ def _render_markdown_link(match: re.Match[str]) -> str:
     return f'<a href="{href}">{label}</a>'
 
 
+_URL_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def _safe_markdown_href(href: str) -> str:
+    if _URL_CONTROL_CHARACTERS.search(href):
+        return "#"
     value = href.strip()
     scheme = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):", value)
     if scheme and scheme.group(1).lower() not in {"http", "https", "mailto"}:

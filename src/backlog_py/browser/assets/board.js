@@ -442,7 +442,9 @@
     }
 
     function safeRichHref(href) {
-      const value = String(href || "").trim();
+      const rawValue = String(href || "");
+      if (/[\u0000-\u001f\u007f]/.test(rawValue)) return "#";
+      const value = rawValue.trim();
       if (!value) return "";
       const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(value);
       if (scheme && !/^(https?|mailto)$/i.test(scheme[1])) return "#";
