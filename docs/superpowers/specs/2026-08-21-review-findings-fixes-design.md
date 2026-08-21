@@ -43,7 +43,7 @@ Active-branch discovery will use at most two Git subprocesses per ref: one batch
 
 Browser task-detail reads will reuse one `ReadOnlyRepository(refresh_remote_refs=False)` for lookup and orchestration data. They will categorize only the requested task using the shared orchestration categorizer and the completed-task ID set required for dependency status; they must not construct a full `OrchestrationQueueReport`, refresh remotes, or create a second repository.
 
-CI will run one stdlib-only baseline checker. Mypy baselines will be exact per-file counts totalling 60: browser/service.py=24, tui/data.py=11, runtime/locks.py=4, core/repository.py=4, tui/models.py=3, cli/main.py=3, tui/widgets.py=2, orchestration/reports.py=2, mcp/tools.py=2, and one each in tui/screens.py, tui/app.py, orchestration/service.py, mcp/protocol.py, and mcp/http_server.py. Globally ignored Ruff rule baselines will also be exact: `E501=45`, `I001=59`, `UP017=32`, `UP035=21`, `UP037=13`, `B904=4`, and `B009=2`. Any increase or decrease fails with an instruction to update the checked baseline deliberately in the same reviewed change. The existing blocking Ruff command remains in place. This pass will not reformat the entire tree or resolve all existing ignored violations.
+CI will run one stdlib-only baseline checker. Mypy baselines will be exact per-file counts totalling 59: browser/service.py=24, tui/data.py=11, runtime/locks.py=4, core/repository.py=4, tui/models.py=3, cli/main.py=3, tui/widgets.py=2, orchestration/reports.py=2, mcp/tools.py=2, and one each in tui/screens.py, tui/app.py, orchestration/service.py, and mcp/protocol.py. The original review measured 60 errors in 14 files, but Task 6's IPv6 URL fix intentionally removed the single `mcp/http_server.py` `[str-bytes-safe]` diagnostic by normalizing the server address with `str(host)` and `int(port)`. Globally ignored Ruff rule baselines will also be exact: `E501=45`, `I001=59`, `UP017=32`, `UP035=21`, `UP037=13`, `B904=4`, and `B009=2`. Any increase or decrease fails with an instruction to update the checked baseline deliberately in the same reviewed change. The existing blocking Ruff command remains in place. This pass will not reformat the entire tree or resolve all existing ignored violations.
 
 ## Implementation Workstreams
 
@@ -73,7 +73,7 @@ Every production change follows red-green-refactor:
 ## Non-goals
 
 - Refactoring every high-complexity CLI/browser/repository function.
-- Eliminating all 60 existing mypy errors in this pass.
+- Eliminating all 59 remaining mypy errors in this pass.
 - Replacing Loguru or removing the mutation-surface inventory.
 - Changing the documented trust model for explicitly configured shell callbacks.
 - Adding dependencies or building a new abstraction layer for isolated fixes.

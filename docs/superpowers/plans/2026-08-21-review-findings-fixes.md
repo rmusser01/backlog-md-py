@@ -341,6 +341,8 @@ Expected: the script and blocking CI step do not exist.
 
 Resolve the repository root as `Path(__file__).resolve().parents[1]` and run every tool with that `cwd`. Store the exact spec baselines as dictionaries. Run mypy exactly as `[sys.executable, "-m", "mypy"]`; `pyproject.toml` already supplies `files = ["src"]`, and the checker tests must assert that configured target remains present. Accept mypy's normal diagnostic exit codes 0/1, parse only lines containing `: error:`, and normalize every reported path to a repository-relative POSIX path before comparing the complete per-file counter. Run Ruff once per ignored rule as `[sys.executable, "-m", "ruff", "check", "--select", rule, "--config", "lint.ignore=[]", "--statistics", "src", "tests"]`; accept diagnostic exits 0/1 and parse the exact rule count. Treat missing tools, timeouts, undecodable output, and exit codes above 1 as checker failures rather than baseline mismatches. Print added/removed count deltas and return nonzero on any mismatch, including improvements, so baseline reductions must be reviewed in the same change.
 
+The original review measured 60 mypy errors in 14 files. Task 6's IPv6 URL fix intentionally removes the one `mcp/http_server.py` `[str-bytes-safe]` diagnostic by passing `str(host)` and `int(port)` to the shared URL builder, so the implemented exact baseline is 59 errors in 13 files. Pin that reviewed reduction in checker tests rather than silently omitting the file.
+
 - [ ] **Step 4: Wire the blocking CI step and verify GREEN**
 
 Replace the advisory mypy step with `python scripts/check_quality_baseline.py`; keep the existing blocking Ruff step. Update comments in `pyproject.toml` to identify the script as the source of truth.
@@ -352,7 +354,7 @@ Run:
 .venv/bin/python scripts/check_quality_baseline.py
 ```
 
-Expected: both commands PASS with 60 mypy errors and the seven exact Ruff counts.
+Expected: both commands PASS with the intentionally reduced 59 mypy errors and the seven exact Ruff counts.
 
 - [ ] **Step 5: Commit**
 

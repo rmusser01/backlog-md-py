@@ -98,7 +98,7 @@ ignore = [
   # 45 lines over the 120-char limit (39 src, 6 tests); the longest single line
   # is 777 chars in src/backlog_py/compat/inventory.py.
   "E501",
-  # 61 unsorted/ungrouped import blocks (32 src, 29 tests).
+  # 59 unsorted/ungrouped import blocks (30 src, 29 tests).
   # `ruff check --select I001 --fix src tests` clears this in one pass.
   "I001",
   # 32 uses of `datetime.timezone.utc` instead of `datetime.UTC` (21 src, 11 tests).
@@ -136,5 +136,9 @@ warn_unused_ignores = false
 warn_unused_configs = true
 # scripts/check_quality_baseline.py is the source of truth for the exact
 # per-file baseline. It runs `python -m mypy` with no arguments so this `files`
-# target remains authoritative. Reduce the checked-in baseline in the same
-# reviewed change as each type fix, then start enabling strict flags here.
+# target remains authoritative. The original review measured 60 errors in 14
+# files, including one mcp/http_server.py [str-bytes-safe] error. Task 6's IPv6
+# URL fix intentionally normalized that server address through str(host) and
+# int(port), leaving the reviewed branch baseline at 59 errors in 13 files.
+# Reduce the checked-in baseline in the same reviewed change as each further
+# type fix, then start enabling strict flags here.

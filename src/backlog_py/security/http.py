@@ -13,7 +13,6 @@ server has to depend on the other.
 """
 from __future__ import annotations
 
-
 # Port assumed when a Host header carries none. It is never an ephemeral port, so
 # a header without a port cannot accidentally match a bound server.
 DEFAULT_HTTP_PORT = 80

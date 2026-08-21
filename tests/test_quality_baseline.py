@@ -44,6 +44,19 @@ def test_ruff_baseline_rules_exactly_match_configured_ignores(checker):
     assert checker["load_configured_ruff_ignores"]() == set(checker["RUFF_BASELINE"])
 
 
+def test_reviewed_baselines_record_branch_fixes_instead_of_omitting_diagnostics(checker):
+    design = Path("docs/superpowers/specs/2026-08-21-review-findings-fixes-design.md").read_text(encoding="utf-8")
+    plan = Path("docs/superpowers/plans/2026-08-21-review-findings-fixes.md").read_text(encoding="utf-8")
+
+    assert checker["RUFF_BASELINE"]["I001"] == 59
+    assert sum(checker["MYPY_BASELINE"].values()) == 59
+    assert "src/backlog_py/mcp/http_server.py" not in checker["MYPY_BASELINE"]
+    for document in (design, plan):
+        assert "mcp/http_server.py" in document
+        assert "str-bytes-safe" in document
+        assert "intentionally" in document
+
+
 def test_main_fails_before_running_tools_when_ruff_rule_sets_drift(checker, monkeypatch, capsys):
     globals_ = checker["main"].__globals__
     monkeypatch.setitem(globals_, "load_configured_ruff_ignores", lambda: {"E501", "UNKNOWN"})
