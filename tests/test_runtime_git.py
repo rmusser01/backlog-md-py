@@ -363,11 +363,11 @@ def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
         text_calls.append(args)
         return original_text_runner(work_dir, *args)
 
-    def tracked_byte_runner(work_dir: Path, *args: str):
+    def tracked_byte_runner(work_dir: Path, *args: str, **kwargs):
         byte_calls.append(args)
         if original_byte_runner is None:
             raise AssertionError("active branch reads did not use a binary git runner")
-        return original_byte_runner(work_dir, *args)
+        return original_byte_runner(work_dir, *args, **kwargs)
 
     def forbidden_per_path_helper(*args, **kwargs):
         raise AssertionError("active branch reads called a per-path timestamp helper")
@@ -392,7 +392,8 @@ def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
             "log",
             "-z",
             "--format=%x00%ct",
-            "--name-status",
+            "--raw",
+            "--no-abbrev",
             "--no-renames",
             "-m",
             "--first-parent",
@@ -402,12 +403,8 @@ def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
             "backlog/completed",
         ),
         (
-            "--literal-pathspecs",
-            "archive",
-            "--format=tar",
-            "refs/heads/feature/batched",
-            "--",
-            "backlog/tasks",
+            "cat-file",
+            "--batch",
         ),
     ]
     assert all("log" not in args and "show" not in args and "ls-tree" not in args for args in text_calls)
@@ -436,9 +433,9 @@ def test_active_branch_task_reads_treat_configured_backlog_path_as_literal(
     byte_calls: list[tuple[str, ...]] = []
     original_byte_runner = git_module._run_git_bytes
 
-    def tracked_byte_runner(work_dir: Path, *args: str):
+    def tracked_byte_runner(work_dir: Path, *args: str, **kwargs):
         byte_calls.append(args)
-        return original_byte_runner(work_dir, *args)
+        return original_byte_runner(work_dir, *args, **kwargs)
 
     monkeypatch.setattr(git_module, "_run_git_bytes", tracked_byte_runner)
 
@@ -448,7 +445,8 @@ def test_active_branch_task_reads_treat_configured_backlog_path_as_literal(
         (":(top)weird/tasks/task-1 - literal.md", source)
     ]
     assert len(byte_calls) == 2
-    assert all(args[0] == "--literal-pathspecs" for args in byte_calls)
+    assert byte_calls[0][0] == "--literal-pathspecs"
+    assert byte_calls[1] == ("cat-file", "--batch")
 
 
 def test_active_branch_task_reads_preserve_merge_history_without_diff_merges(
@@ -478,10 +476,10 @@ def test_active_branch_task_reads_preserve_merge_history_without_diff_merges(
 
     original_byte_runner = git_module._run_git_bytes
 
-    def without_diff_merges(work_dir: Path, *args: str):
+    def without_diff_merges(work_dir: Path, *args: str, **kwargs):
         if any(arg.startswith("--diff-merges") for arg in args):
             raise AssertionError("active branch history requires Git >= 2.31")
-        return original_byte_runner(work_dir, *args)
+        return original_byte_runner(work_dir, *args, **kwargs)
 
     monkeypatch.setattr(git_module, "_run_git_bytes", without_diff_merges)
 
@@ -552,9 +550,9 @@ def test_active_branch_task_reads_normalize_root_backlog_bucket_paths(
     byte_calls: list[tuple[str, ...]] = []
     original_byte_runner = git_module._run_git_bytes
 
-    def tracked_byte_runner(work_dir: Path, *args: str):
+    def tracked_byte_runner(work_dir: Path, *args: str, **kwargs):
         byte_calls.append(args)
-        return original_byte_runner(work_dir, *args)
+        return original_byte_runner(work_dir, *args, **kwargs)
 
     monkeypatch.setattr(git_module, "_run_git_bytes", tracked_byte_runner)
 
@@ -565,4 +563,33 @@ def test_active_branch_task_reads_normalize_root_backlog_bucket_paths(
     ]
     assert len(byte_calls) == 2
     assert byte_calls[0][-2:] == ("tasks", "completed")
-    assert byte_calls[1][-1:] == ("tasks",)
+    assert byte_calls[1] == ("cat-file", "--batch")
+
+
+def test_active_branch_task_reads_raw_blobs_ignoring_archive_attributes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/archive-attributes")
+    ignored = _task(project, "task-1 - ignored.md")
+    substituted = _task(project, "task-2 - substituted.md")
+    substituted.write_text(
+        substituted.read_text(encoding="utf-8") + "\n$Format:%H$\n", encoding="utf-8"
+    )
+    (repo / ".gitattributes").write_text(
+        '"backlog/tasks/task-1 - ignored.md" export-ignore\n'
+        '"backlog/tasks/task-2 - substituted.md" export-subst\n',
+        encoding="utf-8",
+    )
+    expected = {
+        ignored.relative_to(repo).as_posix(): ignored.read_text(encoding="utf-8"),
+        substituted.relative_to(repo).as_posix(): substituted.read_text(encoding="utf-8"),
+    }
+    _commit(repo, "add attributed tasks")
+    _git(repo, "checkout", "-q", "main")
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert {snapshot.relative_path: snapshot.source for snapshot in snapshots} == expected

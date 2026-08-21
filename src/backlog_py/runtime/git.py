@@ -3,13 +3,11 @@ from __future__ import annotations
 import os
 import posixpath
 import sys
-import tarfile
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 from math import inf
 from pathlib import Path, PurePosixPath
 from time import monotonic
@@ -84,12 +82,12 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if not _has_changes_in(context.work_dir, pathspecs):
         return
 
-    add = _run_git(context.work_dir, "add", "-A", "--", *pathspecs)
+    add = _run_git(context.work_dir, "--literal-pathspecs", "add", "-A", "--", *pathspecs)
     if add.returncode != 0:
         logger.warning("Skipping auto-commit for {}: git add failed: {}", operation, _git_error(add))
         return
 
-    commit_args = ["commit"]
+    commit_args = ["--literal-pathspecs", "commit"]
     if config.bypass_git_hooks:
         commit_args.append("--no-verify")
     commit_args.extend(("-m", f"backlog: {operation}"))
@@ -98,7 +96,7 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if commit.returncode == 0:
         return
 
-    _run_git(context.work_dir, "reset", "--", *pathspecs)
+    _run_git(context.work_dir, "--literal-pathspecs", "reset", "--", *pathspecs)
     logger.warning("Skipping auto-commit for {}: git commit failed: {}", operation, _git_error(commit))
 
 
@@ -254,14 +252,14 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     snapshots: list[GitTaskSnapshot] = []
     for ref, fallback_timestamp in _recent_branch_refs(project):
         paths = _task_paths_for_ref(work_dir, ref, backlog_path, fallback_timestamp)
-        sources = _task_sources_for_ref(work_dir, ref, backlog_path, paths)
+        sources = _task_sources_for_ref(work_dir, paths)
         for relative_path in sorted(sources):
             snapshots.append(
                 GitTaskSnapshot(
                     ref=ref,
                     relative_path=relative_path,
                     source=sources[relative_path],
-                    committed_at=paths.get(relative_path, fallback_timestamp),
+                    committed_at=paths.get(relative_path, (fallback_timestamp, ""))[0],
                 )
             )
     return snapshots
@@ -325,14 +323,24 @@ def _is_git_worktree(work_dir: Path) -> bool:
 
 
 def _has_project_changes(work_dir: Path) -> bool:
-    result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", ".")
+    result = _run_git(
+        work_dir, "--literal-pathspecs", "status", "--porcelain", "--untracked-files=all", "--", "."
+    )
     return bool(result.stdout.strip()) if result.returncode == 0 else False
 
 
 def _has_changes_in(work_dir: Path, pathspecs: list[str]) -> bool:
     if not pathspecs:
         return False
-    result = _run_git(work_dir, "status", "--porcelain", "--untracked-files=all", "--", *pathspecs)
+    result = _run_git(
+        work_dir,
+        "--literal-pathspecs",
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *pathspecs,
+    )
     return bool(result.stdout.strip()) if result.returncode == 0 else False
 
 
@@ -419,7 +427,7 @@ def _task_bucket_paths(backlog_path: str) -> tuple[str, ...]:
 
 def _task_paths_for_ref(
     work_dir: Path, ref: str, backlog_path: str, fallback_timestamp: float
-) -> dict[str, float]:
+) -> dict[str, tuple[float, str]]:
     """Return live task paths and latest timestamps from one NUL-framed log."""
     bucket_paths = _task_bucket_paths(backlog_path)
     result = _run_git_bytes(
@@ -430,7 +438,8 @@ def _task_paths_for_ref(
         "log",
         "-z",
         "--format=%x00%ct",
-        "--name-status",
+        "--raw",
+        "--no-abbrev",
         "--no-renames",
         # Old-compatible first-parent merge diffs; avoids false timestamps from parent two.
         "-m",
@@ -442,7 +451,7 @@ def _task_paths_for_ref(
     if result.returncode != 0:
         return {}
 
-    paths: dict[str, float] = {}
+    paths: dict[str, tuple[float, str]] = {}
     seen: set[str] = set()
     records = result.stdout.split(b"\0")
     index = 0
@@ -458,12 +467,12 @@ def _task_paths_for_ref(
         except ValueError:
             committed_at = fallback_timestamp
         index += 1
-        first_status = True
+        first_entry = True
         while index < len(records) and records[index]:
-            status = records[index]
-            if first_status:
-                status = status.removeprefix(b"\n")
-                first_status = False
+            metadata = records[index]
+            if first_entry:
+                metadata = metadata.removeprefix(b"\n")
+                first_entry = False
             index += 1
             if index >= len(records) or not records[index]:
                 break
@@ -472,44 +481,56 @@ def _task_paths_for_ref(
             if relative_path in seen:
                 continue
             seen.add(relative_path)
-            if status[:1] != b"D" and _is_task_markdown_path(relative_path, backlog_path):
-                paths[relative_path] = committed_at
+            fields = metadata.split()
+            if (
+                len(fields) == 5
+                and fields[0].startswith(b":")
+                and fields[1] in {b"100644", b"100755"}
+                and fields[4][:1] != b"D"
+                and _is_task_markdown_path(relative_path, backlog_path)
+            ):
+                paths[relative_path] = (committed_at, fields[3].decode("ascii"))
     return paths
 
 
 def _task_sources_for_ref(
     work_dir: Path,
-    ref: str,
-    backlog_path: str,
-    paths: dict[str, float],
+    paths: dict[str, tuple[float, str]],
 ) -> dict[str, str]:
-    bucket_paths = _task_bucket_paths(backlog_path)
-    roots = [
-        bucket_path
-        for bucket_path in bucket_paths
-        if any(path.startswith(f"{bucket_path}/") for path in paths)
-    ]
-    if not roots:
+    requested = sorted(paths.items())
+    if not requested:
         return {}
     result = _run_git_bytes(
-        work_dir, "--literal-pathspecs", "archive", "--format=tar", ref, "--", *roots
+        work_dir,
+        "cat-file",
+        "--batch",
+        input_data=b"".join(f"{blob_id}\n".encode() for _, (_, blob_id) in requested),
     )
     if result.returncode != 0:
         return {}
 
     sources: dict[str, str] = {}
-    try:
-        with tarfile.open(fileobj=BytesIO(result.stdout), mode="r:") as archive:
-            for member in archive.getmembers():
-                if not member.isreg() or not _is_task_markdown_path(member.name, backlog_path):
-                    continue
-                archived = archive.extractfile(member)
-                if archived is None:
-                    continue
-                sources[member.name] = archived.read().decode(
-                    sys.getfilesystemencoding(), errors="surrogateescape"
-                )
-    except (OSError, tarfile.TarError):
+    offset = 0
+    for relative_path, _ in requested:
+        header_end = result.stdout.find(b"\n", offset)
+        if header_end < 0:
+            return {}
+        header = result.stdout[offset:header_end].split()
+        if len(header) != 3 or header[1] != b"blob":
+            return {}
+        try:
+            size = int(header[2])
+        except ValueError:
+            return {}
+        start = header_end + 1
+        end = start + size
+        if end >= len(result.stdout) or result.stdout[end : end + 1] != b"\n":
+            return {}
+        sources[relative_path] = result.stdout[start:end].decode(
+            sys.getfilesystemencoding(), errors="surrogateescape"
+        )
+        offset = end + 1
+    if offset != len(result.stdout):
         return {}
     return sources
 
@@ -564,8 +585,10 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
 
 
-def _run_git_bytes(work_dir: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    """Run git without decoding output, for NUL-framed names and archives."""
+def _run_git_bytes(
+    work_dir: Path, *args: str, input_data: bytes | None = None
+) -> subprocess.CompletedProcess[bytes]:
+    """Run git without decoding binary input or output."""
     command = ["git", *args]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
     try:
@@ -574,6 +597,7 @@ def _run_git_bytes(work_dir: Path, *args: str) -> subprocess.CompletedProcess[by
             cwd=work_dir,
             check=False,
             capture_output=True,
+            input=input_data,
             timeout=GIT_COMMAND_TIMEOUT_SECONDS,
             env=env,
         )

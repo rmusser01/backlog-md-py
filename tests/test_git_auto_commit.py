@@ -106,6 +106,48 @@ def test_auto_commit_keeps_unrelated_staged_file_out_of_nested_project_commit(
     assert _git(repo, "diff", "--cached", "--name-only") == "unrelated.txt"
 
 
+def test_auto_commit_treats_nested_configured_backlog_path_as_literal(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = tmp_path / "repo"
+    project_root = repo / "nested"
+    backlog_dir = project_root / ":(top)weird"
+    (backlog_dir / "tasks").mkdir(parents=True)
+    config_path = project_root / "backlog.config.yml"
+    config_path.write_text(
+        "projectName: literal\nbacklogDirectory: ':(top)weird'\nautoCommit: true\n",
+        encoding="utf-8",
+    )
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    project = BacklogProject(
+        root=project_root,
+        backlog_dir=backlog_dir,
+        config_path=config_path,
+        config=BacklogConfig(project_name="literal", auto_commit=True),
+    )
+    (repo / "unrelated.txt").write_text("pre-staged\n", encoding="utf-8")
+    _git(repo, "add", "unrelated.txt")
+
+    def mutate() -> str:
+        (repo / "weird" / "tasks").mkdir(parents=True)
+        (repo / "weird" / "tasks" / "decoy.md").write_text("decoy\n", encoding="utf-8")
+        (backlog_dir / "tasks" / "task-2 - Literal.md").write_text(
+            "id: TASK-2\ntitle: Literal\n", encoding="utf-8"
+        )
+        return "created"
+
+    with_project_write_lock(project, "task_create", mutate)
+
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD") == (
+        "nested/:(top)weird/tasks/task-2 - Literal.md"
+    )
+    assert _git(repo, "diff", "--cached", "--name-only") == "unrelated.txt"
+    assert "?? weird/tasks/decoy.md" in _status_entries(repo)
+
+
 def test_project_write_lock_runs_git_hooks_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
     repo = _git_backlog_repo(tmp_path, auto_commit=True, bypass_git_hooks=False)
