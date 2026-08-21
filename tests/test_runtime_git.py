@@ -16,6 +16,7 @@ import os
 import subprocess
 from math import inf
 from pathlib import Path
+from time import time
 
 import pytest
 
@@ -325,3 +326,72 @@ def test_worktree_probe_is_rechecked_after_its_ttl(
     _git_init(parent)
 
     assert git_module._is_git_worktree(child) is True, "worktree probe served a stale cached answer"
+
+
+def test_active_branch_task_reads_are_batched_per_ref_and_filename_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/batched")
+
+    committed_at: dict[str, float] = {}
+    sources: dict[str, str] = {}
+    base_time = int(time()) - 60
+    names = [
+        "task-1 - alpha.md",
+        "task-2 - line\nrecord\x1e.md",
+        "task-3 - omega.md",
+    ]
+    for index, name in enumerate(names):
+        path = _task(project, name)
+        sources[path.relative_to(repo).as_posix()] = path.read_text(encoding="utf-8")
+        timestamp = base_time + index
+        committed_at[path.relative_to(repo).as_posix()] = float(timestamp)
+        _commit(repo, f"add task {index + 1}", when=timestamp)
+    _git(repo, "checkout", "-q", "main")
+
+    text_calls: list[tuple[str, ...]] = []
+    byte_calls: list[tuple[str, ...]] = []
+    original_text_runner = git_module._run_git
+    original_byte_runner = getattr(git_module, "_run_git_bytes", None)
+
+    def tracked_text_runner(work_dir: Path, *args: str):
+        text_calls.append(args)
+        return original_text_runner(work_dir, *args)
+
+    def tracked_byte_runner(work_dir: Path, *args: str):
+        byte_calls.append(args)
+        if original_byte_runner is None:
+            raise AssertionError("active branch reads did not use a binary git runner")
+        return original_byte_runner(work_dir, *args)
+
+    def forbidden_per_path_helper(*args, **kwargs):
+        raise AssertionError("active branch reads called a per-path timestamp helper")
+
+    monkeypatch.setattr(git_module, "_run_git", tracked_text_runner)
+    monkeypatch.setattr(git_module, "_run_git_bytes", tracked_byte_runner, raising=False)
+    monkeypatch.setattr(
+        git_module, "_ref_commit_timestamp", forbidden_per_path_helper, raising=False
+    )
+    monkeypatch.setattr(
+        git_module, "_ref_path_commit_timestamp", forbidden_per_path_helper, raising=False
+    )
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+    freshness = git_module.read_index_git_freshness(project)
+
+    history_calls = [args for args in byte_calls if "log" in args]
+    content_calls = [args for args in byte_calls if "archive" in args]
+    assert len(history_calls) == 1, history_calls
+    assert len(content_calls) == 1, content_calls
+    assert all("log" not in args and "show" not in args and "ls-tree" not in args for args in text_calls)
+    assert [snapshot.relative_path for snapshot in snapshots] == sorted(sources)
+    assert {snapshot.relative_path: snapshot.source for snapshot in snapshots} == sources
+    assert {snapshot.relative_path: snapshot.committed_at for snapshot in snapshots} == committed_at
+    assert freshness["active_refs"] == [
+        {"ref": "refs/heads/feature/batched", "timestamp": float(base_time + 2)}
+    ]

@@ -3,13 +3,15 @@ from __future__ import annotations
 import os
 import posixpath
 import sys
+import tarfile
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from math import inf
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from time import monotonic
 
 from loguru import logger
@@ -250,18 +252,16 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
         return []
 
     snapshots: list[GitTaskSnapshot] = []
-    for ref in _recent_branch_refs(project):
-        paths = _task_paths_for_ref(work_dir, ref, backlog_path)
-        for relative_path, committed_at in paths.items():
-            show = _run_git(work_dir, "show", f"{ref}:{relative_path}")
-            if show.returncode != 0:
-                continue
+    for ref, fallback_timestamp in _recent_branch_refs(project):
+        paths = _task_paths_for_ref(work_dir, ref, backlog_path, fallback_timestamp)
+        sources = _task_sources_for_ref(work_dir, ref, backlog_path, paths)
+        for relative_path in sorted(sources):
             snapshots.append(
                 GitTaskSnapshot(
                     ref=ref,
                     relative_path=relative_path,
-                    source=show.stdout,
-                    committed_at=committed_at,
+                    source=sources[relative_path],
+                    committed_at=paths.get(relative_path, fallback_timestamp),
                 )
             )
     return snapshots
@@ -287,11 +287,7 @@ def read_index_git_freshness(project: BacklogProject) -> dict[str, object]:
         return freshness
 
     freshness["active_refs"] = [
-        {
-            "ref": ref,
-            "timestamp": _ref_commit_timestamp(work_dir, ref),
-        }
-        for ref in _recent_branch_refs(project)
+        {"ref": ref, "timestamp": timestamp} for ref, timestamp in _recent_branch_refs(project)
     ]
     return freshness
 
@@ -370,7 +366,7 @@ def _relative_backlog_path(project: BacklogProject) -> str | None:
         return None
 
 
-def _recent_branch_refs(project: BacklogProject) -> list[str]:
+def _recent_branch_refs(project: BacklogProject) -> list[tuple[str, float]]:
     days = max(project.config.active_branch_days, 0)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
     namespaces = ["refs/heads"]
@@ -395,7 +391,7 @@ def _recent_branch_refs(project: BacklogProject) -> list[str]:
         if timestamp < cutoff:
             continue
         refs.append((timestamp, refname))
-    return [ref for _, ref in sorted(refs)]
+    return [(ref, timestamp) for timestamp, ref in sorted(refs)]
 
 
 def _current_branch_name(work_dir: Path) -> str:
@@ -414,12 +410,20 @@ def _split_ref_line(line: str) -> tuple[str | None, str | None, float | None]:
     return parts[0].strip(), parts[1].strip(), timestamp
 
 
-def _task_paths_for_ref(work_dir: Path, ref: str, backlog_path: str) -> dict[str, float]:
-    result = _run_git(
+def _task_paths_for_ref(
+    work_dir: Path, ref: str, backlog_path: str, fallback_timestamp: float
+) -> dict[str, float]:
+    """Return live task paths and latest timestamps from one NUL-framed log."""
+    result = _run_git_bytes(
         work_dir,
-        "ls-tree",
-        "-r",
-        "--name-only",
+        "-c",
+        "core.quotePath=false",
+        "log",
+        "-z",
+        "--format=%x00%ct",
+        "--name-status",
+        "--no-renames",
+        "--diff-merges=first-parent",
         ref,
         "--",
         f"{backlog_path}/tasks",
@@ -427,40 +431,86 @@ def _task_paths_for_ref(work_dir: Path, ref: str, backlog_path: str) -> dict[str
     )
     if result.returncode != 0:
         return {}
-    return {
-        line.strip(): _ref_path_commit_timestamp(work_dir, ref, line.strip())
-        for line in result.stdout.splitlines()
-        if _is_task_markdown_path(line.strip(), backlog_path)
-    }
+
+    paths: dict[str, float] = {}
+    seen: set[str] = set()
+    records = result.stdout.split(b"\0")
+    index = 0
+    while index < len(records):
+        if records[index]:
+            index += 1
+            continue
+        index += 1
+        if index >= len(records) or not records[index]:
+            continue
+        try:
+            committed_at = float(records[index])
+        except ValueError:
+            committed_at = fallback_timestamp
+        index += 1
+        first_status = True
+        while index < len(records) and records[index]:
+            status = records[index]
+            if first_status:
+                status = status.removeprefix(b"\n")
+                first_status = False
+            index += 1
+            if index >= len(records) or not records[index]:
+                break
+            relative_path = os.fsdecode(records[index])
+            index += 1
+            if relative_path in seen:
+                continue
+            seen.add(relative_path)
+            if status[:1] != b"D" and _is_task_markdown_path(relative_path, backlog_path):
+                paths[relative_path] = committed_at
+    return paths
 
 
-def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
-    result = _run_git(work_dir, "log", "-1", "--format=%ct", ref)
+def _task_sources_for_ref(
+    work_dir: Path,
+    ref: str,
+    backlog_path: str,
+    paths: dict[str, float],
+) -> dict[str, str]:
+    roots = [
+        f"{backlog_path}/{directory}"
+        for directory in ("tasks", "completed")
+        if any(path.startswith(f"{backlog_path}/{directory}/") for path in paths)
+    ]
+    if not roots:
+        return {}
+    result = _run_git_bytes(work_dir, "archive", "--format=tar", ref, "--", *roots)
     if result.returncode != 0:
-        return 0.0
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return 0.0
+        return {}
 
-
-def _ref_path_commit_timestamp(work_dir: Path, ref: str, relative_path: str) -> float:
-    result = _run_git(work_dir, "log", "-1", "--format=%ct", ref, "--", relative_path)
-    if result.returncode != 0 or not result.stdout.strip():
-        return _ref_commit_timestamp(work_dir, ref)
+    sources: dict[str, str] = {}
     try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return _ref_commit_timestamp(work_dir, ref)
+        with tarfile.open(fileobj=BytesIO(result.stdout), mode="r:") as archive:
+            for member in archive.getmembers():
+                if not member.isreg() or not _is_task_markdown_path(member.name, backlog_path):
+                    continue
+                archived = archive.extractfile(member)
+                if archived is None:
+                    continue
+                sources[member.name] = archived.read().decode(
+                    sys.getfilesystemencoding(), errors="surrogateescape"
+                )
+    except (OSError, tarfile.TarError):
+        return {}
+    return sources
 
 
 def _is_task_markdown_path(relative_path: str, backlog_path: str) -> bool:
+    parts = relative_path.split("/")
+    backlog_parts = PurePosixPath(backlog_path).parts
     return (
         relative_path.endswith(".md")
-        and (
-            relative_path.startswith(f"{backlog_path}/tasks/")
-            or relative_path.startswith(f"{backlog_path}/completed/")
-        )
+        and not relative_path.startswith("/")
+        and not any(part in {"", ".", ".."} for part in parts)
+        and len(parts) > len(backlog_parts) + 1
+        and tuple(parts[: len(backlog_parts)]) == backlog_parts
+        and parts[len(backlog_parts)] in {"tasks", "completed"}
     )
 
 
@@ -499,3 +549,27 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
         )
     except OSError as exc:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
+
+
+def _run_git_bytes(work_dir: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """Run git without decoding output, for NUL-framed names and archives."""
+    command = ["git", *args]
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
+    try:
+        return subprocess.run(  # nosec B603
+            command,
+            cwd=work_dir,
+            check=False,
+            capture_output=True,
+            timeout=GIT_COMMAND_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            command,
+            124,
+            b"",
+            f"git command timed out after {GIT_COMMAND_TIMEOUT_SECONDS}s".encode(),
+        )
+    except OSError as exc:
+        return subprocess.CompletedProcess(command, 127, b"", os.fsencode(str(exc)))
