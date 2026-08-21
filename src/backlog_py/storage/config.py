@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +8,7 @@ import yaml
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.storage.atomic import atomic_replace_text
 
 
 _KEY_ALIASES = {
@@ -194,26 +193,7 @@ def _atomic_write_text(path: Path, content: str, base: Path | None = None) -> No
         safe_path = assert_path_within_base(base if base is not None else path.parent, path)
     except PathContainmentError as exc:
         raise ValueError(str(exc)) from exc
-    temp_name: str | None = None
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        newline="",  # write content verbatim; no platform newline translation
-        dir=safe_path.parent,
-        prefix=f".{safe_path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temp_file:
-        temp_name = temp_file.name
-        temp_file.write(content)
-        temp_file.flush()
-        os.fsync(temp_file.fileno())
-    try:
-        os.replace(temp_name, safe_path)
-    except Exception:
-        if temp_name is not None:
-            Path(temp_name).unlink(missing_ok=True)
-        raise
+    atomic_replace_text(safe_path, content)
 
 
 def _optional_string_list(value: Any) -> list[str] | None:

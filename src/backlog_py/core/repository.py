@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +24,7 @@ from backlog_py.runtime.git import (
 )
 from backlog_py.search.simple import ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.storage.atomic import atomic_replace_text
 from backlog_py.storage.config import load_config
 from backlog_py.storage.project import discover_project
 
@@ -1079,26 +1079,7 @@ def _atomic_write_text(path: Path, content: str, base: Path | None = None) -> No
     vacuously true and lets a planted directory symlink redirect the write.
     """
     safe_path = _mutation_path(base if base is not None else path.parent, path)
-    temp_name: str | None = None
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        newline="",  # write content verbatim; the code manages \r\n itself
-        dir=safe_path.parent,
-        prefix=f".{safe_path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temp_file:
-        temp_name = temp_file.name
-        temp_file.write(content)
-        temp_file.flush()
-        os.fsync(temp_file.fileno())
-    try:
-        os.replace(temp_name, safe_path)
-    except Exception:
-        if temp_name is not None:
-            Path(temp_name).unlink(missing_ok=True)
-        raise
+    atomic_replace_text(safe_path, content)
 
 
 def _mutation_path(base: Path, candidate: Path) -> Path:
