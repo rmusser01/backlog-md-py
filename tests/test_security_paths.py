@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from backlog_py.security.paths import (
+    PathComponentRedirectError,
     PathContainmentError,
     assert_path_within_base,
     assert_trusted_subpath,
@@ -118,6 +119,25 @@ def test_assert_trusted_subpath_allows_missing_directory(tmp_path):
     missing = root / "backlog" / "archive" / "milestones"
 
     assert assert_trusted_subpath(root, missing) == root.resolve() / "backlog" / "archive" / "milestones"
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, OSError])
+def test_assert_trusted_subpath_normalizes_resolve_error_for_symlink_cycle(tmp_path, monkeypatch, error_type):
+    root = tmp_path / "proj"
+    root.mkdir()
+    anchor = root / "backlog"
+    _symlink(anchor, Path("backlog"))
+    real_resolve = Path.resolve
+
+    def resolve_with_loop_error(path, strict=False):
+        if path == anchor:
+            raise error_type("Symlink loop")
+        return real_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve_with_loop_error)
+
+    with pytest.raises(PathComponentRedirectError, match="symlink"):
+        assert_trusted_subpath(root, anchor)
 
 
 def test_assert_trusted_subpath_allows_root_reached_through_symlink(tmp_path):

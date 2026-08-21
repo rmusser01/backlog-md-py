@@ -75,7 +75,12 @@ def assert_trusted_subpath(root: Path, candidate: Path) -> Path:
         next_path = current / part
         is_symlink = next_path.is_symlink()
         # Escapes keep their containment message; this only resolves the link.
-        resolved_next = assert_path_within_base(current, next_path)
+        try:
+            resolved_next = assert_path_within_base(current, next_path)
+        except (OSError, RuntimeError) as exc:
+            if is_symlink:
+                raise PathComponentRedirectError(base=current, candidate=next_path) from exc
+            raise
         if is_symlink or resolved_next != next_path:
             raise PathComponentRedirectError(base=current, candidate=next_path)
         current = resolved_next
