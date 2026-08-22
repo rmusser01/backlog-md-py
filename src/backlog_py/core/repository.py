@@ -445,13 +445,25 @@ def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
 
 def _load_active_branch_records(project: BacklogProject) -> list[_VisibleTaskRecord]:
     records: list[_VisibleTaskRecord] = []
+    # Sixty branches carrying the same task file is sixty snapshots of one blob.
+    # Parsing is by far the most expensive step per snapshot, and its result
+    # depends only on the content, so it is done once per distinct blob.
+    parsed_by_blob: dict[str, ParsedTaskMarkdown | None] = {}
     for snapshot in list_active_branch_task_snapshots(project):
         bucket = _bucket_for_snapshot(project, snapshot.relative_path)
         if bucket is None:
             continue
-        try:
-            parsed = parse_task_markdown(snapshot.source)
-        except ValueError:
+        if snapshot.blob_id in parsed_by_blob:
+            parsed = parsed_by_blob[snapshot.blob_id]
+        else:
+            try:
+                parsed = parse_task_markdown(snapshot.source)
+            except ValueError:
+                # Remember the failure too: an unparsable file on one branch is
+                # unparsable on all sixty.
+                parsed = None
+            parsed_by_blob[snapshot.blob_id] = parsed
+        if parsed is None:
             continue
         records.append(
             _VisibleTaskRecord(
