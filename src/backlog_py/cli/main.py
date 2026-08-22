@@ -860,7 +860,9 @@ def _load_tui_runner() -> Callable[[BacklogProject], None]:
         from backlog_py.tui import app as tui_app
     except ModuleNotFoundError as exc:
         if exc.name == "textual":
-            raise click.ClickException("Install with backlog-md-py[tui] to use the Textual TUI.") from exc
+            from backlog_py.tui import install_hint
+
+            raise click.ClickException(install_hint()) from exc
         raise
     except RuntimeError as exc:
         if exc.__class__.__name__ == "TuiDependencyError":
