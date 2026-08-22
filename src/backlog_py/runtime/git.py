@@ -5,7 +5,7 @@ import posixpath
 import sys
 # autoCommit intentionally invokes local git with fixed argv and no shell.
 import subprocess  # nosec B404
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import inf
@@ -205,7 +205,7 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
     return dirty
 
 
-def _last_commit_timestamps(work_dir: Path, scope: Sequence[str]) -> dict[str, float]:
+def _last_commit_timestamps(work_dir: Path, scope: Sequence[str], ref: str = "HEAD") -> dict[str, float]:
     """Most recent commit timestamp per path under ``scope``, in one log walk."""
     log_args = ("-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only")
     # `--name-only` prints nothing for a merge commit, so a file whose content was
@@ -214,9 +214,9 @@ def _last_commit_timestamps(work_dir: Path, scope: Sequence[str]) -> dict[str, f
     # log and so are unaffected. `--diff-merges` needs git >= 2.31; older git
     # rejects the option outright, which would report *every* task as unknown, so
     # fall back to the plain walk when git says it does not know the option.
-    result = _run_git(work_dir, *log_args, "--diff-merges=first-parent", "HEAD", "--", *scope)
+    result = _run_git(work_dir, *log_args, "--diff-merges=first-parent", ref, "--", *scope)
     if result.returncode != 0 and "diff-merges" in (result.stderr or ""):
-        result = _run_git(work_dir, *log_args, "HEAD", "--", *scope)
+        result = _run_git(work_dir, *log_args, ref, "--", *scope)
     if result.returncode != 0:
         return {}
     timestamps: dict[str, float] = {}
@@ -248,22 +248,95 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     if backlog_path is None:
         return []
 
-    snapshots: list[GitTaskSnapshot] = []
+    entries: list[tuple[str, str, str, float]] = []
     for ref in _recent_branch_refs(project):
-        paths = _task_paths_for_ref(work_dir, ref, backlog_path)
-        for relative_path, committed_at in paths.items():
-            show = _run_git(work_dir, "show", f"{ref}:{relative_path}")
-            if show.returncode != 0:
-                continue
-            snapshots.append(
-                GitTaskSnapshot(
-                    ref=ref,
-                    relative_path=relative_path,
-                    source=show.stdout,
-                    committed_at=committed_at,
-                )
+        for relative_path, (oid, committed_at) in _task_entries_for_ref(
+            work_dir, ref, backlog_path
+        ).items():
+            entries.append((ref, relative_path, oid, committed_at))
+
+    # Branches overwhelmingly share task files, and a shared file is one blob
+    # with one id, so the unique-id set is a small fraction of the entry count.
+    sources = _blob_contents(work_dir, {oid for _, _, oid, _ in entries})
+
+    snapshots: list[GitTaskSnapshot] = []
+    for ref, relative_path, oid, committed_at in entries:
+        source = sources.get(oid)
+        if source is None:
+            continue
+        snapshots.append(
+            GitTaskSnapshot(
+                ref=ref,
+                relative_path=relative_path,
+                source=source,
+                committed_at=committed_at,
             )
+        )
     return snapshots
+
+
+def _blob_contents(work_dir: Path, oids: Collection[str]) -> dict[str, str]:
+    """Read every blob id in one ``git cat-file --batch`` process.
+
+    A `git show` per file per branch forked two subprocesses per task per branch;
+    a project with 67 active branches and ~2300 tasks each never finished a scan.
+    Requesting object ids rather than ``<ref>:<path>`` also keeps the request
+    stream free of any path bytes, which --batch delimits by newline.
+    """
+    requests = sorted(oids)
+    if not requests:
+        return {}
+
+    stdin = "".join(f"{oid}\n" for oid in requests).encode("ascii")
+    result = _run_git_bytes(work_dir, "cat-file", "--batch", stdin=stdin)
+    if result.returncode != 0:
+        return {}
+
+    encoding = sys.getfilesystemencoding()
+    contents: dict[str, str] = {}
+    output = result.stdout
+    offset = 0
+    for oid in requests:
+        end_of_header = output.find(b"\n", offset)
+        if end_of_header == -1:
+            break
+        header = output[offset:end_of_header]
+        offset = end_of_header + 1
+        # "<oid> <type> <size>" for a hit; "<request> missing" (or "ambiguous")
+        # otherwise, and those carry no payload to skip.
+        fields = header.rsplit(b" ", 2)
+        if len(fields) != 3 or not fields[2].isdigit():
+            continue
+        size = int(fields[2])
+        payload = output[offset : offset + size]
+        offset += size + 1  # git terminates each payload with a newline
+        if fields[1] == b"blob":
+            contents[oid] = payload.decode(encoding, "surrogateescape")
+    return contents
+
+
+def _run_git_bytes(work_dir: Path, *args: str, stdin: bytes) -> subprocess.CompletedProcess[bytes]:
+    """`_run_git` for commands whose output is length-delimited binary.
+
+    `cat-file --batch` sizes its payloads in bytes, so the stream cannot be
+    decoded before it is framed.
+    """
+    command = ["git", *args]
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
+    try:
+        return subprocess.run(  # nosec B603
+            command,
+            cwd=work_dir,
+            check=False,
+            capture_output=True,
+            input=stdin,
+            timeout=GIT_COMMAND_TIMEOUT_SECONDS,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(command, 124, b"", b"")
+    except OSError:
+        return subprocess.CompletedProcess(command, 127, b"", b"")
 
 
 def read_index_git_freshness(project: BacklogProject) -> dict[str, object]:
@@ -413,12 +486,18 @@ def _split_ref_line(line: str) -> tuple[str | None, str | None, float | None]:
     return parts[0].strip(), parts[1].strip(), timestamp
 
 
-def _task_paths_for_ref(work_dir: Path, ref: str, backlog_path: str) -> dict[str, float]:
+def _task_entries_for_ref(
+    work_dir: Path, ref: str, backlog_path: str
+) -> dict[str, tuple[str, float]]:
+    """Blob id and last-commit timestamp for every task file at ``ref``."""
     result = _run_git(
         work_dir,
+        # Without this git C-quotes any non-ASCII name, and the quoted form
+        # matches neither the log walk's output nor a path on disk.
+        "-c",
+        "core.quotePath=false",
         "ls-tree",
         "-r",
-        "--name-only",
         ref,
         "--",
         f"{backlog_path}/tasks",
@@ -426,11 +505,36 @@ def _task_paths_for_ref(work_dir: Path, ref: str, backlog_path: str) -> dict[str
     )
     if result.returncode != 0:
         return {}
-    return {
-        line.strip(): _ref_path_commit_timestamp(work_dir, ref, line.strip())
-        for line in result.stdout.splitlines()
-        if _is_task_markdown_path(line.strip(), backlog_path)
-    }
+    # "<mode> <type> <oid>\t<path>"
+    oids: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        metadata, tab, name = line.partition("\t")
+        if not tab:
+            continue
+        fields = metadata.split()
+        if len(fields) != 3 or fields[1] != "blob":
+            continue
+        if _is_task_markdown_path(name, backlog_path):
+            oids[name] = fields[2]
+    names = list(oids)
+    if not names:
+        return {}
+    # One log walk for the whole ref instead of one per task file.
+    committed = _last_commit_timestamps(
+        work_dir, [f"{backlog_path}/tasks", f"{backlog_path}/completed"], ref=ref
+    )
+    # A path the walk never reported (an unsimplified merge, a shallow clone)
+    # falls back to the ref tip, as the per-file form did — resolved at most once.
+    ref_tip: float | None = None
+    entries: dict[str, tuple[str, float]] = {}
+    for name in names:
+        committed_at = committed.get(name)
+        if committed_at is None:
+            if ref_tip is None:
+                ref_tip = _ref_commit_timestamp(work_dir, ref)
+            committed_at = ref_tip
+        entries[name] = (oids[name], committed_at)
+    return entries
 
 
 def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
@@ -441,16 +545,6 @@ def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
         return float(result.stdout.strip())
     except ValueError:
         return 0.0
-
-
-def _ref_path_commit_timestamp(work_dir: Path, ref: str, relative_path: str) -> float:
-    result = _run_git(work_dir, "log", "-1", "--format=%ct", ref, "--", relative_path)
-    if result.returncode != 0 or not result.stdout.strip():
-        return _ref_commit_timestamp(work_dir, ref)
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return _ref_commit_timestamp(work_dir, ref)
 
 
 def _is_task_markdown_path(relative_path: str, backlog_path: str) -> bool:
