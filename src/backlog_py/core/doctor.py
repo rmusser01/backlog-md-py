@@ -155,33 +155,64 @@ def _requote_title(source: str) -> str:
 
 
 def _close_unterminated_sections(source: str) -> str:
-    """Insert a missing SECTION END marker before the next heading, or at the end."""
+    """Insert an END marker only for a section that never closes.
+
+    An owned section may legitimately span headings — a NOTES block with its own
+    ``###`` sub-headings is common — so the presence of a heading says nothing.
+    Only the absence of a matching END anywhere below the BEGIN does. Closing at
+    the first heading instead corrupted two real task files that already carried
+    their END at the bottom, giving them one BEGIN and two ENDs.
+    """
     lines = source.split("\n")
-    open_name: str | None = None
-    result: list[str] = []
-    for line in lines:
-        begin = _SECTION_BEGIN_RE.match(line)
-        end = _SECTION_END_RE.match(line)
-        if open_name is not None and (
-            _HEADING_RE.match(line) or (begin is not None and begin.group("name") != open_name)
-        ):
-            # Close the run of blank lines *before* the heading, not after it.
-            while result and not result[-1].strip():
-                result.pop()
-            result.append(f"<!-- SECTION:{open_name}:END -->")
-            result.append("")
-            open_name = None
-        if begin is not None:
-            open_name = begin.group("name")
-        elif end is not None and end.group("name") == open_name:
-            open_name = None
-        result.append(line)
-    if open_name is not None:
-        while result and not result[-1].strip():
-            result.pop()
-        result.append(f"<!-- SECTION:{open_name}:END -->")
-        result.append("")
-    return "\n".join(result)
+    # Line index -> marker to insert *before* that line. len(lines) means EOF.
+    insertions: dict[int, str] = {}
+    index = 0
+    while index < len(lines):
+        begin = _SECTION_BEGIN_RE.match(lines[index])
+        if begin is None:
+            index += 1
+            continue
+        name = begin.group("name")
+        closing = _find_section_end(lines, index + 1, name)
+        if closing is not None:
+            index = closing + 1
+            continue
+        # Unterminated. The author's intent ends where the next heading starts;
+        # running to EOF would swallow every following section into this one.
+        stop = next(
+            (i for i in range(index + 1, len(lines)) if _HEADING_RE.match(lines[i])),
+            len(lines),
+        )
+        insertions[stop] = f"<!-- SECTION:{name}:END -->"
+        index += 1
+
+    if not insertions:
+        return source
+
+    closed: list[str] = []
+    for index, line in enumerate(lines):
+        if index in insertions:
+            _append_marker(closed, insertions[index])
+        closed.append(line)
+    if len(lines) in insertions:
+        _append_marker(closed, insertions[len(lines)])
+    return "\n".join(closed)
+
+
+def _find_section_end(lines: list[str], start: int, name: str) -> int | None:
+    for index in range(start, len(lines)):
+        end = _SECTION_END_RE.match(lines[index])
+        if end is not None and end.group("name") == name:
+            return index
+    return None
+
+
+def _append_marker(closed: list[str], marker: str) -> None:
+    """Place the marker against the section's last line, not after its blank run."""
+    while closed and not closed[-1].strip():
+        closed.pop()
+    closed.append(marker)
+    closed.append("")
 
 
 def _task_files(project: BacklogProject) -> list[Path]:

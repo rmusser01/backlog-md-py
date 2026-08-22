@@ -177,3 +177,46 @@ def test_doctor_fix_does_not_touch_duplicate_ids(tmp_path: Path) -> None:
     assert result.exit_code != 0
     assert original.exists() and rival.exists(), "doctor deleted a file it was not asked to resolve"
     assert "TASK-1" in result.output
+
+
+SECTION_SPANNING_HEADINGS = """---
+id: TASK-5
+title: Watchlists: profile the screen push
+status: To Do
+created_date: '2026-01-01'
+---
+
+## Investigation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Opening paragraph.
+
+### 1. A heading inside the notes
+
+More prose that belongs to the same owned section.
+<!-- SECTION:NOTES:END -->
+"""
+
+
+def test_repair_leaves_a_section_that_closes_after_an_inner_heading() -> None:
+    """An owned section may span headings; only a missing END may be inserted.
+
+    Closing at the first heading after BEGIN corrupted two real task files
+    (task-15460, task-15462): each already had its END at the bottom, so the
+    repair produced one BEGIN and two ENDs.
+    """
+    repaired = repair_task_source(SECTION_SPANNING_HEADINGS)
+
+    assert repaired is not None, "the unquoted title still needs repairing"
+    assert repaired.count("<!-- SECTION:NOTES:END -->") == 1
+    assert repaired.count("<!-- SECTION:NOTES:BEGIN -->") == 1
+    assert "title: 'Watchlists: profile the screen push'" in repaired
+
+
+def test_repair_closes_an_unterminated_section_before_the_next_heading() -> None:
+    """When there is no END anywhere, the section ends where the next one starts."""
+    repaired = repair_task_source(UNTERMINATED_SECTION)
+
+    assert repaired is not None
+    assert repaired.count("<!-- SECTION:DESCRIPTION:END -->") == 1
+    assert repaired.index("<!-- SECTION:DESCRIPTION:END -->") < repaired.index("## Acceptance Criteria")
