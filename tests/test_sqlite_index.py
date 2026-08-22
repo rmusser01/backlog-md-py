@@ -143,3 +143,39 @@ def test_sqlite_index_fingerprint_tracks_config_and_backlog_inputs(tmp_path, mon
     (repo / ".backlog" / "tasks").mkdir(parents=True)
     backlog_changed = build_project_fingerprint(_project(repo), include_active_branch_snapshots=True)
     assert backlog_changed != config_changed
+
+
+def _count_git_calls_during_index_rebuild(tmp_path: Path, monkeypatch, task_count: int) -> int:
+    from backlog_py.core.repository import MutableRepository
+    from backlog_py.runtime import git as git_module
+
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("BACKLOG_PY_SQLITE_INDEX", "1")
+    repo = _copy_fixture_repo(tmp_path)
+    mutable_repository = MutableRepository.from_path(repo)
+    for index in range(2, task_count + 1):
+        mutable_repository.create_task(title=f"Task {index}", task_id=f"TASK-{index}", status="To Do")
+
+    calls = 0
+    real_run_git = git_module._run_git
+
+    def counting_run_git(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_run_git(*args, **kwargs)
+
+    monkeypatch.setattr(git_module, "_run_git", counting_run_git)
+    ReadOnlyRepository.from_path(repo).list_tasks()
+    return calls
+
+
+def test_sqlite_index_rebuild_does_not_run_git_once_per_task_file(tmp_path, monkeypatch):
+    """Regression guard for #161: a rebuild must not re-introduce the #160 cost.
+
+    `committed_at` is written to the index and never read back, so stamping every
+    source with it made each rebuild pay three git subprocesses per task file.
+    """
+    small = _count_git_calls_during_index_rebuild(tmp_path / "small", monkeypatch, task_count=3)
+    large = _count_git_calls_during_index_rebuild(tmp_path / "large", monkeypatch, task_count=30)
+
+    assert small == large, f"index rebuild scales with task count ({small} for 3 tasks, {large} for 30)"
