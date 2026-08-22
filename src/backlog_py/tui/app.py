@@ -6,6 +6,7 @@ from typing import Callable
 from backlog_py.core import editing
 from backlog_py.core.editing import edit_via_scratch_copy
 from backlog_py.core.models import BacklogProject
+from backlog_py.tui import install_hint
 from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.security.paths import assert_path_within_base
 from backlog_py.tui.data import BoardDataSource, DaemonReadError, LocalBoardDataSource, create_board_data_source
@@ -25,8 +26,6 @@ from backlog_py.tui.models import (
     select_after_refresh,
 )
 
-
-INSTALL_HINT = "Install with backlog-md-py[tui] to use the Textual TUI."
 
 
 class TuiDependencyError(RuntimeError):
@@ -55,7 +54,7 @@ try:
     from backlog_py.tui.screens import BoardScreen
 except ModuleNotFoundError as exc:
     if exc.name == "textual":
-        raise TuiDependencyError(INSTALL_HINT) from exc
+        raise TuiDependencyError(install_hint()) from exc
     raise
 
 
