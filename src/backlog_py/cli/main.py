@@ -19,6 +19,9 @@ from backlog_py.compat.report import build_compatibility_report, build_release_e
 from backlog_py.core.agents import AgentInstructionError, AgentInstructionUpdate, update_agent_instruction_files
 from backlog_py.core.board_export import export_board_to_file, update_readme_with_board
 from backlog_py.core.decisions import DecisionMutationError, DecisionRecord, DecisionService
+from backlog_py.core.doctor import DoctorReport
+from backlog_py.core.doctor import diagnose as doctor_diagnose
+from backlog_py.core.doctor import repair as doctor_repair
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.drafts import DraftService
 from backlog_py.core.init import InitProjectError, InitProjectResult, init_project
@@ -932,6 +935,73 @@ def _edit_board_task(ctx: click.Context) -> None:
     if not task_id:
         raise click.ClickException("Task id is required.")
     _edit_task_in_configured_editor(ctx, _repository(ctx).get_task(task_id))
+
+
+@main.command("doctor")
+@click.option("--fix", is_flag=True, help="Repair the mechanically fixable files in place.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON output.")
+@click.pass_context
+def doctor_command(ctx: click.Context, fix: bool, as_json: bool) -> None:
+    """Report task files no command can read, and ids claimed by several files.
+
+    Both are dropped silently during a normal read, so a task can disappear from
+    the board with nothing but a log line to say so. Exits non-zero when anything
+    is still wrong, which makes it usable as a pre-commit or CI check.
+    """
+    project = _project(ctx)
+    if fix:
+        report = _locked_write(
+            ctx,
+            "doctor --fix",
+            lambda: doctor_repair(project),
+        )
+    else:
+        report = doctor_diagnose(project)
+
+    if as_json:
+        click.echo(json.dumps(_doctor_payload(report), sort_keys=True))
+    else:
+        _echo_doctor_report(report)
+    if not report.ok:
+        raise SystemExit(1)
+
+
+def _doctor_payload(report: DoctorReport) -> dict[str, object]:
+    return {
+        "ok": report.ok,
+        "repaired": [str(path) for path in report.repaired],
+        "unreadable": [
+            {"path": str(broken.path), "reason": broken.reason} for broken in report.unreadable
+        ],
+        "duplicateIds": [
+            {"id": duplicate.task_id, "paths": [str(path) for path in duplicate.paths]}
+            for duplicate in report.duplicate_ids
+        ],
+    }
+
+
+def _echo_doctor_report(report: DoctorReport) -> None:
+    for path in report.repaired:
+        click.echo(f"Repaired: {path}")
+    for broken in report.unreadable:
+        click.echo(f"Unreadable: {broken.path}")
+        click.echo(f"  {broken.reason.splitlines()[0] if broken.reason else 'unknown error'}")
+    for duplicate in report.duplicate_ids:
+        click.echo(f"Duplicate id {duplicate.task_id}:")
+        for path in duplicate.paths:
+            click.echo(f"  {path}")
+    if report.ok:
+        click.echo("No problems found." if not report.repaired else "All findings repaired.")
+        return
+    click.echo("")
+    click.echo(
+        f"{len(report.unreadable)} unreadable file(s), "
+        f"{len(report.duplicate_ids)} duplicate id(s)."
+    )
+    if report.unreadable:
+        click.echo("Run `backlog-py doctor --fix` to repair the mechanical ones.")
+    if report.duplicate_ids:
+        click.echo("Duplicate ids need a human: renumber or remove one of the files.")
 
 
 @main.command("overview")

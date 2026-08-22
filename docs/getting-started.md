@@ -116,6 +116,24 @@ backlog-py compat status --json
 For the longer command catalog and Python helper examples, see
 [integration.md](integration.md).
 
+## Checking Task Files
+
+A task file with malformed frontmatter is skipped during every read, and an id
+claimed by two files makes one of them invisible. Both are reported only as log
+lines, so `doctor` collects them:
+
+```bash
+backlog-py --cwd /path/to/project doctor          # report; exits 1 if anything is wrong
+backlog-py --cwd /path/to/project doctor --json
+backlog-py --cwd /path/to/project doctor --fix    # repair the mechanical cases
+```
+
+`--fix` re-quotes a frontmatter title that breaks YAML and closes an owned
+section whose `:END` marker is missing, then re-parses; a file it cannot repair
+is left untouched. Duplicate ids are never resolved automatically — choosing
+which file keeps the id is a human decision. The non-zero exit makes `doctor`
+usable as a pre-commit or CI check.
+
 ## Browser Board
 
 Start the optional loopback browser board without opening a browser:
