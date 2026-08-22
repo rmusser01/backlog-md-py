@@ -1,4 +1,5 @@
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
@@ -220,3 +221,62 @@ def test_repository_search_filters_by_status_priority_and_modified_files(tmp_pat
     assert [task.id for task in repository.search_tasks("task", priority="HIGH")] == ["TASK-1"]
     assert [task.id for task in repository.search_tasks(modified_files=["components/button"])] == ["TASK-1"]
     assert [task.id for task in repository.search_tasks(modified_files=["SERVER"])] == ["TASK-2"]
+
+
+def _count_git_calls(monkeypatch, repo: Path, task_count: int) -> int:
+    from backlog_py.runtime import git as git_module
+
+    mutable_repository = MutableRepository.from_path(repo)
+    for index in range(2, task_count + 1):
+        mutable_repository.create_task(title=f"Task {index}", task_id=f"TASK-{index}", status="To Do")
+
+    calls = 0
+    real_run_git = git_module._run_git
+
+    def counting_run_git(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_run_git(*args, **kwargs)
+
+    monkeypatch.setattr(git_module, "_run_git", counting_run_git)
+    ReadOnlyRepository.from_path(repo).list_tasks()
+    return calls
+
+
+def test_listing_tasks_does_not_run_git_once_per_task_file(tmp_path, monkeypatch):
+    """Snapshot timestamps only break duplicate-id ties, so unique ids must cost no git calls.
+
+    Regression guard for #160: three git subprocesses per task file made read
+    commands scale with repository size (293s for 2318 tasks).
+    """
+    small = _count_git_calls(monkeypatch, _copy_fixture_repo(tmp_path / "small"), task_count=3)
+    large = _count_git_calls(monkeypatch, _copy_fixture_repo(tmp_path / "large"), task_count=30)
+
+    assert small == large, f"git invocations scale with task count ({small} for 3 tasks, {large} for 30)"
+
+
+def test_duplicate_task_id_still_resolves_to_the_newer_snapshot(tmp_path, monkeypatch):
+    from backlog_py.core import repository as repository_module
+
+    repo = _copy_fixture_repo(tmp_path)
+    checkout_task = ReadOnlyRepository.from_path(repo).get_task("TASK-1")
+    branch_task = replace(checkout_task, title="Newer branch copy")
+
+    monkeypatch.setattr(
+        repository_module,
+        "_current_branch_records",
+        lambda project, bucket, task_dir: (
+            [repository_module._VisibleTaskRecord(bucket, checkout_task, lambda: 100.0)]
+            if bucket == "tasks"
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "_load_active_branch_records",
+        lambda project: [repository_module._VisibleTaskRecord("tasks", branch_task, lambda: 200.0)],
+    )
+
+    tasks = ReadOnlyRepository.from_path(repo).list_tasks()
+
+    assert [task.title for task in tasks] == ["Newer branch copy"]

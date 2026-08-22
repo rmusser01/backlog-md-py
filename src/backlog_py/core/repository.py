@@ -6,9 +6,10 @@ import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import cache
 from math import isfinite
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import yaml
 from loguru import logger
@@ -70,7 +71,16 @@ class TaskRecord:
 class _VisibleTaskRecord:
     bucket: str
     task: TaskRecord
-    committed_at: float
+    resolve_committed_at: Callable[[], float]
+
+    @property
+    def committed_at(self) -> float:
+        """Snapshot timestamp, resolved on first use.
+
+        Resolving costs three git subprocesses per task file, and the value is
+        only read to break duplicate-id ties, so it must stay lazy.
+        """
+        return self.resolve_committed_at()
 
 
 class ReadOnlyRepository:
@@ -325,9 +335,13 @@ def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
 
 def _current_branch_records(project: BacklogProject, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
     return [
-        _VisibleTaskRecord(bucket, task, current_task_snapshot_timestamp(project, task.path))
+        _VisibleTaskRecord(bucket, task, _lazy_snapshot_timestamp(project, task.path))
         for task in _load_tasks_from_dir(task_dir)
     ]
+
+
+def _lazy_snapshot_timestamp(project: BacklogProject, path: Path) -> Callable[[], float]:
+    return cache(lambda: current_task_snapshot_timestamp(project, path))
 
 
 def _load_active_branch_records(project: BacklogProject) -> list[_VisibleTaskRecord]:
@@ -344,7 +358,7 @@ def _load_active_branch_records(project: BacklogProject) -> list[_VisibleTaskRec
             _VisibleTaskRecord(
                 bucket=bucket,
                 task=_task_record_from_parsed(project.root / snapshot.relative_path, parsed),
-                committed_at=snapshot.committed_at,
+                resolve_committed_at=lambda committed_at=snapshot.committed_at: committed_at,
             )
         )
     return records
