@@ -15,6 +15,7 @@ from time import monotonic
 from loguru import logger
 
 from backlog_py.core.models import BacklogConfig, BacklogProject
+from backlog_py.runtime import progress
 from backlog_py.storage.config import load_config
 
 
@@ -248,8 +249,12 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     if backlog_path is None:
         return []
 
+    refs = _recent_branch_refs(project)
     entries: list[tuple[str, str, str, float]] = []
-    for ref in _recent_branch_refs(project):
+    for index, ref in enumerate(refs, start=1):
+        # This walk takes minutes on a project with many active branches, and
+        # said nothing at all while it ran.
+        progress.report(f"Reading branch {index}/{len(refs)}: {ref.rsplit('/', 1)[-1]}")
         for relative_path, (oid, committed_at) in _task_entries_for_ref(
             work_dir, ref, backlog_path
         ).items():
@@ -257,7 +262,9 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
 
     # Branches overwhelmingly share task files, and a shared file is one blob
     # with one id, so the unique-id set is a small fraction of the entry count.
-    sources = _blob_contents(work_dir, {oid for _, _, oid, _ in entries})
+    unique_blobs = {oid for _, _, oid, _ in entries}
+    progress.report(f"Reading {len(unique_blobs)} task versions from {len(refs)} branches")
+    sources = _blob_contents(work_dir, unique_blobs)
 
     snapshots: list[GitTaskSnapshot] = []
     for ref, relative_path, oid, committed_at in entries:

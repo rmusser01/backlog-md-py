@@ -70,6 +70,7 @@ from backlog_py.storage.config import (
     replace_definition_of_done_defaults,
     set_config_value,
 )
+from backlog_py.runtime import progress
 from backlog_py.runtime.locks import LockTimeoutError, with_init_lock, with_project_write_lock
 from backlog_py.runtime.state import RuntimeRecord, runtime_status
 from backlog_py.security.paths import PathContainmentError
@@ -180,6 +181,10 @@ class _BacklogGroup(click.Group):
 def main(ctx: click.Context, cwd: Path | None) -> None:
     """Python compatibility clone of Backlog.md."""
     ctx.obj = {"cwd": cwd}
+    # Only the plain CLI turns progress on. It writes to stderr, which the TUI
+    # is painting -- the same collision that put log lines through the board in
+    # backlog-md-py#174 -- so this must never be enabled by a TTY check alone.
+    progress.enable()
 
 
 @main.command("init")
