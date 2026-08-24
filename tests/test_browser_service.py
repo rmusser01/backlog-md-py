@@ -2473,3 +2473,34 @@ def test_browser_board_payload_scans_the_project_once(tmp_path, monkeypatch):
 
     assert payload["columns"], "the payload should still carry the board"
     assert len(scanned) == len(set(scanned)), f"a directory was scanned twice: {scanned}"
+
+
+def test_task_detail_endpoint_scans_the_project_once(tmp_path, monkeypatch):
+    """Rendering one card must not read every task file twice.
+
+    `get_task` scanned the project, then the queue lookup scanned it again to
+    find that one task's queue item: 3.2s to render a single card on a 2310-task
+    project.
+    """
+    from backlog_py.browser.service import start_browser_service
+    from backlog_py.core import repository as repository_module
+
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        _get_json(f"{service.root_url}/api/board")  # warm anything cached at startup
+        scanned: list[str] = []
+        real_load = repository_module._load_tasks_from_dir
+
+        def counting(task_dir):
+            scanned.append(str(task_dir))
+            return real_load(task_dir)
+
+        monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert detail["id"] == "TASK-1"
+    assert len(scanned) == len(set(scanned)), f"a directory was scanned twice: {scanned}"
