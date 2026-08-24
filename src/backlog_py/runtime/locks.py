@@ -258,11 +258,34 @@ def prune_stale_locks(*, min_age_seconds: float = DEFAULT_LOCK_PRUNE_AGE_SECONDS
         if metadata is None or _lock_owner_may_be_live(metadata):
             continue
         metadata_stat = _stat(metadata_path)
-        if metadata_stat is None or metadata_stat.st_mtime > cutoff:
+        if metadata_stat is None:
+            continue
+        # The age gate exists so a lock released moments ago is not swept out
+        # from under a process about to reacquire it. A lock whose project
+        # directory no longer exists has no such future: nothing can take it
+        # again, and until it ages out it keeps a deleted worktree or a test's
+        # temp directory listed in `daemon status`.
+        if metadata_stat.st_mtime > cutoff and not _project_root_is_gone(metadata):
             continue
         lock_path = _lock_path_for_metadata(metadata_path)
         removed.extend(_remove_dead_lock(lock_path, metadata_path, metadata_stat))
     return removed
+
+
+def _project_root_is_gone(metadata: dict[str, object]) -> bool:
+    """Whether this lock names a project directory that no longer exists.
+
+    Only a recorded absolute path counts. Anything unreadable, relative, or
+    simply absent from the metadata is treated as still present, so an odd
+    record is kept rather than pruned on a guess.
+    """
+    project_root = metadata.get("project_root")
+    if not isinstance(project_root, str) or not project_root:
+        return False
+    try:
+        return not Path(project_root).is_dir()
+    except OSError:
+        return False
 
 
 def _lock_path_for_metadata(metadata_path: Path) -> Path:

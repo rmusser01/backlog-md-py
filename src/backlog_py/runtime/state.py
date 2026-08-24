@@ -135,11 +135,16 @@ def runtime_status(record: RuntimeRecord) -> dict[str, object]:
     from backlog_py.runtime.locks import list_runtime_locks
 
     locks = list_runtime_locks()
+    # Belt and braces with the pruner: a project can vanish between prunes, and
+    # an operator reading this should not be told the daemon knows about a
+    # directory that is not there.
     known_projects = sorted(
         {
             str(lock["project_root"])
             for lock in locks
-            if lock.get("kind") == "project" and isinstance(lock.get("project_root"), str)
+            if lock.get("kind") == "project"
+            and isinstance(lock.get("project_root"), str)
+            and Path(str(lock["project_root"])).is_dir()
         }
     )
     return {
