@@ -2504,3 +2504,80 @@ def test_task_detail_endpoint_scans_the_project_once(tmp_path, monkeypatch):
 
     assert detail["id"] == "TASK-1"
     assert len(scanned) == len(set(scanned)), f"a directory was scanned twice: {scanned}"
+
+
+def test_repeat_board_requests_do_not_rescan_an_unchanged_project(tmp_path, monkeypatch):
+    """A board unchanged on disk must not be rebuilt from the task files again.
+
+    Every request re-read and re-rendered the whole project: 1.7s per request at
+    2310 tasks, and the SSE revision poll did it on every tick for every open
+    tab. Stat-ing those files instead costs 27ms.
+    """
+    from backlog_py.browser.service import start_browser_service
+    from backlog_py.core import repository as repository_module
+
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        first = _get_json(f"{service.root_url}/api/board")
+        scanned: list[str] = []
+        real_load = repository_module._load_tasks_from_dir
+
+        def counting(task_dir):
+            scanned.append(str(task_dir))
+            return real_load(task_dir)
+
+        monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
+        second = _get_json(f"{service.root_url}/api/board")
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert scanned == [], f"an unchanged project was scanned again: {scanned}"
+    assert second["revision"] == first["revision"]
+    assert detail["id"] == "TASK-1"
+
+
+def test_a_changed_task_file_invalidates_the_cached_board(tmp_path):
+    """The cache must never outlive the state it describes."""
+    from backlog_py.browser.service import start_browser_service
+
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before = _get_json(f"{service.root_url}/api/board")
+        task_path = repo / "backlog" / "tasks" / "task-1 - Example-task.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace("Example task", "Renamed task"),
+            encoding="utf-8",
+        )
+        after = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert before["columns"]["In Progress"][0]["title"] == "Example task"
+    assert after["columns"]["In Progress"][0]["title"] == "Renamed task"
+    assert after["revision"] != before["revision"]
+
+
+def test_the_queue_category_filter_does_not_leak_into_the_cached_payload(tmp_path):
+    """Filtering is a view of the cached board, not a different board."""
+    from backlog_py.browser.service import start_browser_service
+
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        unfiltered = _get_json(f"{service.root_url}/api/board")
+        filtered = _get_json(f"{service.root_url}/api/board?queueCategory=eligible")
+        again = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert filtered["queueCategoryFilter"] == "eligible"
+    assert again["queueCategoryFilter"] is None
+    assert again["columns"] == unfiltered["columns"], "a filtered request poisoned the cache"
+    # The revision identifies project state, so a view filter must not change it.
+    assert filtered["revision"] == unfiltered["revision"]
