@@ -15,7 +15,7 @@ from backlog_py.runtime.git import read_index_git_freshness
 from backlog_py.runtime.state import resolve_state_dir
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # A rebuild reads Markdown outside of the index write transaction, so the tree
 # can move underneath it. The fingerprint is re-taken afterwards and the rebuild
@@ -53,7 +53,6 @@ class IndexedTaskSource:
     bucket: str
     relative_path: str
     source: str
-    committed_at: float
 
 
 def index_path_for_project(project: BacklogProject) -> Path:
@@ -275,8 +274,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 ordinal INTEGER PRIMARY KEY,
                 bucket TEXT NOT NULL,
                 relative_path TEXT NOT NULL,
-                source TEXT NOT NULL,
-                committed_at REAL NOT NULL
+                source TEXT NOT NULL
             )
             """
         )
@@ -359,11 +357,11 @@ def _replace_task_sources(
     connection.execute("DELETE FROM task_sources")
     connection.executemany(
         """
-        INSERT INTO task_sources (ordinal, bucket, relative_path, source, committed_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO task_sources (ordinal, bucket, relative_path, source)
+        VALUES (?, ?, ?, ?)
         """,
         [
-            (index, source.bucket, source.relative_path, source.source, source.committed_at)
+            (index, source.bucket, source.relative_path, source.source)
             for index, source in enumerate(sources)
         ],
     )
@@ -375,14 +373,13 @@ def _replace_task_sources(
 
 def _read_task_sources(connection: sqlite3.Connection) -> list[IndexedTaskSource]:
     rows = connection.execute(
-        "SELECT bucket, relative_path, source, committed_at FROM task_sources ORDER BY ordinal"
+        "SELECT bucket, relative_path, source FROM task_sources ORDER BY ordinal"
     ).fetchall()
     return [
         IndexedTaskSource(
             bucket=str(row["bucket"]),
             relative_path=str(row["relative_path"]),
             source=str(row["source"]),
-            committed_at=float(row["committed_at"]),
         )
         for row in rows
     ]
