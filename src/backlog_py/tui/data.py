@@ -89,7 +89,11 @@ class LocalBoardDataSource:
 
     def load_board(self) -> BoardSnapshot:
         repository = ReadOnlyRepository(self.project)
-        return board_snapshot_from_local(self.project, repository.board(), source="local")
+        # One repository for the board and the queue: the instance caches its
+        # scan, so reusing it halves startup and keeps both views consistent.
+        return board_snapshot_from_local(
+            self.project, repository.board(), source="local", repository=repository
+        )
 
     def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
         return _search_project(self.project, query, limit=limit)

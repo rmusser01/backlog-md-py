@@ -191,8 +191,25 @@ class OrchestrationService:
 
         return with_project_write_lock(self.project, "orchestration_split_task", mutate)
 
-    def queue(self, *, include_completed: bool = False) -> OrchestrationQueueReport:
-        repository = ReadOnlyRepository(self.project, refresh_remote_refs=False)
+    def queue(
+        self,
+        *,
+        include_completed: bool = False,
+        repository: ReadOnlyRepository | None = None,
+    ) -> OrchestrationQueueReport:
+        """Report the orchestration queue.
+
+        Args:
+            include_completed: Include tasks in a terminal state.
+            repository: An already-loaded repository to read from. A caller that
+                has just scanned the project passes its own so the queue does
+                not repeat the scan -- and so both views describe one moment
+                rather than two.
+
+        Returns:
+            OrchestrationQueueReport: the queue as of that scan.
+        """
+        repository = repository or ReadOnlyRepository(self.project, refresh_remote_refs=False)
         return queue_report(
             repository,
             policy=load_orchestration_policy(self.project),
