@@ -161,7 +161,11 @@ def test_tools_list_contains_existing_task_search_tool():
     assert "project" not in project_status["inputSchema"]["required"]
     assert task_search["inputSchema"]["type"] == "object"
     assert "project" not in task_search["inputSchema"]["required"]
-    assert task_view["inputSchema"]["required"] == ["task_id"]
+    # A task id is still mandatory, in one spelling or the other: the schema
+    # says so with anyOf rather than by naming a single spelling as required.
+    assert task_view["inputSchema"]["required"] == []
+    assert {"required": ["task_id"]} in task_view["inputSchema"]["allOf"][0]["anyOf"]
+    assert {"required": ["taskId"]} in task_view["inputSchema"]["allOf"][0]["anyOf"]
     assert "id" in task_create["inputSchema"]["properties"]
     assert "status" in task_create["inputSchema"]["properties"]
     assert "parentTaskId" in task_create["inputSchema"]["properties"]
@@ -817,3 +821,30 @@ def test_handle_jsonrpc_text_reports_parse_error():
 
     assert response["id"] is None
     assert response["error"]["code"] == -32700
+
+
+def test_every_multi_word_tool_argument_accepts_both_spellings():
+    """A client that learned one tool's style must not be rejected by the next.
+
+    Ten of the eighteen tools with multi-word parameters aliased them to
+    camelCase and eight did not -- including `task_view`, `task_edit`,
+    `task_archive` and `task_complete`, which rejected `taskId` while every
+    response payload came back camelCase.
+    """
+    import inspect
+
+    from backlog_py.mcp.catalog import TOOL_DEFINITIONS
+
+    def camel(name: str) -> str:
+        head, *rest = name.split("_")
+        return head + "".join(word.capitalize() for word in rest)
+
+    missing: dict[str, list[str]] = {}
+    for definition in TOOL_DEFINITIONS:
+        parameters = set(inspect.signature(definition.handler).parameters)
+        snake = {name for name in parameters if "_" in name and name != "project"}
+        gaps = sorted(camel(name) for name in snake if camel(name) not in parameters)
+        if gaps:
+            missing[definition.name] = gaps
+
+    assert missing == {}, f"tools rejecting the camelCase spelling of their own arguments: {missing}"

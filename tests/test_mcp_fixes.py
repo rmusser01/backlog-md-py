@@ -489,3 +489,43 @@ def test_an_edit_made_outside_the_server_is_picked_up(tmp_path):
     )
 
     assert "Changed on disk" in _result_text(_call_tool(tmp_path, "task_list"))
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("task_view", {"taskId": "TASK-1"}),
+        ("task_edit", {"taskId": "TASK-1", "title": "Renamed through camelCase"}),
+        ("task_archive", {"taskId": "TASK-1"}),
+    ],
+)
+def test_task_tools_accept_the_camelcase_spelling(tmp_path, tool, arguments):
+    """`taskId` is the spelling a client guesses; it used to be rejected outright."""
+    _project(tmp_path)
+    _call_tool(tmp_path, "task_create", title="First task")
+
+    response = _call_tool(tmp_path, tool, **arguments)
+
+    assert "error" not in response, response.get("error")
+    assert response["result"]["isError"] is False
+
+
+def test_snake_case_still_works_after_aliasing(tmp_path):
+    """Adding an alias must not break the spelling the schema always advertised."""
+    _project(tmp_path)
+    _call_tool(tmp_path, "task_create", title="First task")
+
+    response = _call_tool(tmp_path, "task_view", task_id="TASK-1")
+
+    assert "error" not in response
+    assert "First task" in _result_text(response)
+
+
+def test_omitting_the_id_entirely_still_says_which_argument_is_missing(tmp_path):
+    """Accepting two spellings must not turn a missing id into a confusing error."""
+    _project(tmp_path)
+
+    response = _call_tool(tmp_path, "task_view")
+
+    assert response["error"]["code"] == -32602
+    assert "task_id" in response["error"]["message"]
