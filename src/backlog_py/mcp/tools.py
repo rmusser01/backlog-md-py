@@ -7,7 +7,8 @@ from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.drafts import DraftService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
 from backlog_py.core.models import BacklogProject
-from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
+from backlog_py.runtime.scan_cache import read_repository
+from backlog_py.core.repository import MutableRepository, TaskRecord
 from backlog_py.orchestration import (
     OrchestrationIdempotencyConflict,
     OrchestrationMutationResult,
@@ -40,7 +41,7 @@ class McpArgumentError(TypeError):
 def project_status(project: BacklogProject, recent_limit: int = 5, recentLimit: int | None = None) -> dict[str, Any]:
     """Return read-only project coordination status for multi-agent overlap checks."""
     limit = _int_argument(recentLimit if recentLimit is not None else recent_limit, "recentLimit", default=5)
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    repository = read_repository(project)
     active_tasks = repository.list_tasks()
     completed_tasks = repository.list_completed_tasks()
     tasks = [*active_tasks, *completed_tasks]
@@ -82,7 +83,7 @@ def task_search(
     file_filters = modified_files if modified_files is not None else modifiedFiles
     if not query.strip() and not _string_list(file_filters):
         return []
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    repository = read_repository(project)
     tasks = repository.search_tasks(
         query,
         status=status,
@@ -110,7 +111,7 @@ def task_list(
     if limit_value <= 0:
         return []
     parent_filter = parent_task_id if parent_task_id is not None else parentTaskId
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    repository = read_repository(project)
     if search is None:
         tasks = repository.list_tasks(
             status=status,
@@ -135,7 +136,7 @@ def task_list(
 
 def task_board(project: BacklogProject) -> dict[str, list[dict[str, Any]]]:
     """Return the task board grouped by configured project statuses."""
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    repository = read_repository(project)
     return {
         status: [_task_summary(project, task) for task in tasks]
         for status, tasks in repository.board().items()
@@ -144,7 +145,7 @@ def task_board(project: BacklogProject) -> dict[str, list[dict[str, Any]]]:
 
 def task_view(project: BacklogProject, task_id: str) -> dict[str, Any]:
     """Return one task through the read-only repository as a JSON-safe mapping."""
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    repository = read_repository(project)
     return _task_detail(project, repository.get_task(task_id))
 
 
@@ -364,7 +365,7 @@ def orchestration_status(
 ) -> dict[str, Any]:
     """Return orchestration queue status counts and items."""
     include = includeCompleted if includeCompleted is not None else include_completed
-    report = OrchestrationService(project).queue(include_completed=include)
+    report = OrchestrationService(project).queue(include_completed=include, repository=read_repository(project))
     return _orchestration_queue_report_payload(report)
 
 
@@ -375,7 +376,7 @@ def orchestration_queue(
 ) -> dict[str, Any]:
     """Return orchestration queue items."""
     include = includeCompleted if includeCompleted is not None else include_completed
-    report = OrchestrationService(project).queue(include_completed=include)
+    report = OrchestrationService(project).queue(include_completed=include, repository=read_repository(project))
     return _orchestration_queue_report_payload(report)
 
 
@@ -732,7 +733,7 @@ def _orchestration_record_run_response(
     conflict: dict[str, Any] | None = None,
     validation_issue: ValidationIssue | None = None,
 ) -> dict[str, Any]:
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    repository = read_repository(project)
     task = repository.get_task(task_id)
     history = parse_run_history(task.raw_source)
     queue_item = _orchestration_queue_item(project, task.id)
@@ -769,7 +770,7 @@ def _orchestration_record_run_response(
 
 
 def _orchestration_queue_item(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
-    report = OrchestrationService(project).queue(include_completed=True)
+    report = OrchestrationService(project).queue(include_completed=True, repository=read_repository(project))
     normalized = task_id.casefold()
     for item in report.items:
         if item.task_id.casefold() == normalized:
@@ -785,7 +786,7 @@ def _orchestration_queue_report_payload(report: Any) -> dict[str, Any]:
 
 
 def _orchestration_items_payload(project: BacklogProject, category: str) -> dict[str, Any]:
-    report = OrchestrationService(project).queue(include_completed=True)
+    report = OrchestrationService(project).queue(include_completed=True, repository=read_repository(project))
     return {
         "items": [_orchestration_queue_item_payload(item) for item in report.items if item.category == category],
     }

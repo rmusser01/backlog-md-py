@@ -8,19 +8,18 @@ import json
 import os
 import re
 import threading
-import time
 import webbrowser
 from dataclasses import dataclass
 from html import escape
 from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Mapping, Sequence
+from typing import Mapping, Sequence
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 
-from backlog_py.indexing.sqlite import _file_signature
+from backlog_py.runtime.scan_cache import ProjectScanCache
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
@@ -177,70 +176,6 @@ def run_browser_service_foreground(
         pass
     finally:
         server.server_close()
-
-
-class ProjectScanCache:
-    """Reuse one project scan across requests while the task files are unchanged.
-
-    Every request rebuilt the board from nothing: 2310 task files parsed for a
-    board, and again for a single task card. Stat-ing those files instead costs
-    27ms against 1.7s to parse them, so freshness is decided from a signature and
-    the parse is only repeated when something actually changed.
-
-    Correctness rests on `backlog_py.indexing.sqlite._file_signature`, which
-    already solves the hard part: a file touched within the last moment cannot be
-    ruled out by size and mtime alone, so its content is hashed instead.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._signature: str | None = None
-        self._repository: ReadOnlyRepository | None = None
-        self._board_payload: dict[str, object] | None = None
-
-    def repository(self, project: BacklogProject) -> ReadOnlyRepository:
-        """A repository whose scan is current for `project`."""
-        with self._lock:
-            self._refresh_locked(project)
-            assert self._repository is not None
-            return self._repository
-
-    def board_payload(
-        self, project: BacklogProject, build: Callable[[ReadOnlyRepository], dict[str, object]]
-    ) -> dict[str, object]:
-        """The unfiltered board payload, built at most once per project state."""
-        with self._lock:
-            self._refresh_locked(project)
-            assert self._repository is not None
-            if self._board_payload is None:
-                self._board_payload = build(self._repository)
-            return self._board_payload
-
-    def _refresh_locked(self, project: BacklogProject) -> None:
-        signature = _project_signature(project)
-        if signature != self._signature or self._repository is None:
-            self._signature = signature
-            # refresh_remote_refs stays off: a cached scan must not fire network
-            # calls on a request path.
-            self._repository = ReadOnlyRepository(project, refresh_remote_refs=False)
-            self._board_payload = None
-            # Warm the visible-record cache while still holding the lock, so two
-            # concurrent requests cannot both pay for the same scan. `get_task`
-            # consults this set first, so task detail is warmed by it too.
-            self._repository.board()
-
-
-def _project_signature(project: BacklogProject) -> str:
-    """A cheap fingerprint of every task file the repository can resolve."""
-    now_ns = time.time_ns()
-    signatures: list[dict[str, object]] = []
-    for bucket in ("tasks", "completed", "archive/tasks", "drafts"):
-        directory = project.backlog_dir.joinpath(*bucket.split("/"))
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.md")):
-            signatures.append(_file_signature(project.root, path, now_ns=now_ns))
-    return json.dumps(signatures, sort_keys=True, separators=(",", ":"))
 
 
 def build_board_payload(
