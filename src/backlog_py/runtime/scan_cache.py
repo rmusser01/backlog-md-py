@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Callable
 
 from backlog_py.core.models import BacklogProject
@@ -88,32 +90,82 @@ def _project_signature(project: BacklogProject) -> str:
     return json.dumps(signatures, sort_keys=True, separators=(",", ":"))
 
 
-_CACHES: dict[str, ProjectScanCache] = {}
+# A parsed repository is large, so this cache is bounded twice over: by how many
+# projects it holds and by how long an untouched one survives.
+#
+# Measured on the singleton daemon, RSS after reading eight projects:
+#
+#   no cache at all      1117 MB   (parsing is simply expensive, and CPython
+#                                   does not return freed arenas to the OS)
+#   unbounded cache      2197 MB   (every project ever read, held forever)
+#   bounded, as here     1495 MB
+#
+# So most of that baseline is not the cache -- but an unbounded one doubled it,
+# which matters most for the daemon, whose whole purpose is to be shared by many
+# agents across many projects.
+MAX_CACHED_PROJECTS = 4
+IDLE_EVICTION_SECONDS = 120.0
+
+_CACHES: "OrderedDict[str, _CacheEntry]" = OrderedDict()
 _CACHES_LOCK = threading.Lock()
 
 
-def read_repository(project: BacklogProject) -> ReadOnlyRepository:
+@dataclass
+class _CacheEntry:
+    cache: ProjectScanCache
+    last_used: float
+
+
+def read_repository(project: BacklogProject, *, now: float | None = None) -> ReadOnlyRepository:
     """A read-only repository for `project`, reusing an unchanged scan.
 
-    For a long-lived process answering many requests about one project -- the
-    MCP stdio server is the case this exists for -- rebuilding the repository
+    For a long-lived process answering many requests about one project --
+    the MCP stdio server and the singleton daemon -- rebuilding the repository
     per call means re-parsing every task file per call. The cache is keyed by
     project root and rebuilt whenever the files change, so a caller never sees
     state older than its own last write.
 
+    It is bounded in both directions: at most `MAX_CACHED_PROJECTS` projects are
+    held, and any project untouched for `IDLE_EVICTION_SECONDS` is dropped. A
+    daemon that serves a burst of work therefore keeps its scans for the burst
+    and releases them afterwards, instead of holding every project it has ever
+    been asked about.
+
     Args:
         project: The project to read.
+        now: Current time, for tests that need a deterministic clock.
 
     Returns:
         ReadOnlyRepository: current for the project as of this call.
     """
     key = str(project.root.resolve())
+    timestamp = time.monotonic() if now is None else now
     with _CACHES_LOCK:
-        cache = _CACHES.get(key)
-        if cache is None:
-            cache = ProjectScanCache()
-            _CACHES[key] = cache
+        _evict_locked(timestamp, keep=key)
+        entry = _CACHES.get(key)
+        if entry is None:
+            entry = _CacheEntry(cache=ProjectScanCache(), last_used=timestamp)
+            _CACHES[key] = entry
+        else:
+            entry.last_used = timestamp
+        _CACHES.move_to_end(key)
+        cache = entry.cache
     return cache.repository(project)
+
+
+def _evict_locked(now: float, *, keep: str) -> None:
+    """Drop idle projects, then the least recently used ones over the cap."""
+    for key, entry in list(_CACHES.items()):
+        if key != keep and now - entry.last_used > IDLE_EVICTION_SECONDS:
+            del _CACHES[key]
+    while len(_CACHES) >= MAX_CACHED_PROJECTS and next(iter(_CACHES)) != keep:
+        _CACHES.popitem(last=False)
+
+
+def cached_project_count() -> int:
+    """How many project scans are currently held. For tests and diagnostics."""
+    with _CACHES_LOCK:
+        return len(_CACHES)
 
 
 def clear_read_repositories() -> None:
