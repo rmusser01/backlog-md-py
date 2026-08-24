@@ -8,17 +8,19 @@ import json
 import os
 import re
 import threading
+import time
 import webbrowser
 from dataclasses import dataclass
 from html import escape
 from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 
+from backlog_py.indexing.sqlite import _file_signature
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
@@ -119,6 +121,7 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
     shutdown_in_progress: bool
     shutdown_lock: threading.Lock
     shutdown_requested_at: str | None
+    scan_cache: ProjectScanCache
 
 
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
@@ -133,6 +136,7 @@ def create_browser_server(*, project: BacklogProject, host: str, port: int) -> B
     server.shutdown_in_progress = False
     server.shutdown_requested_at = None
     server.shutdown_lock = threading.Lock()
+    server.scan_cache = ProjectScanCache()
     return server
 
 
@@ -175,16 +179,105 @@ def run_browser_service_foreground(
         server.server_close()
 
 
-def build_board_payload(project: BacklogProject, *, queue_category_filter: str | None = None) -> dict[str, object]:
-    """Return a JSON-serializable board snapshot for the browser service."""
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+class ProjectScanCache:
+    """Reuse one project scan across requests while the task files are unchanged.
+
+    Every request rebuilt the board from nothing: 2310 task files parsed for a
+    board, and again for a single task card. Stat-ing those files instead costs
+    27ms against 1.7s to parse them, so freshness is decided from a signature and
+    the parse is only repeated when something actually changed.
+
+    Correctness rests on `backlog_py.indexing.sqlite._file_signature`, which
+    already solves the hard part: a file touched within the last moment cannot be
+    ruled out by size and mtime alone, so its content is hashed instead.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._signature: str | None = None
+        self._repository: ReadOnlyRepository | None = None
+        self._board_payload: dict[str, object] | None = None
+
+    def repository(self, project: BacklogProject) -> ReadOnlyRepository:
+        """A repository whose scan is current for `project`."""
+        with self._lock:
+            self._refresh_locked(project)
+            assert self._repository is not None
+            return self._repository
+
+    def board_payload(
+        self, project: BacklogProject, build: Callable[[ReadOnlyRepository], dict[str, object]]
+    ) -> dict[str, object]:
+        """The unfiltered board payload, built at most once per project state."""
+        with self._lock:
+            self._refresh_locked(project)
+            assert self._repository is not None
+            if self._board_payload is None:
+                self._board_payload = build(self._repository)
+            return self._board_payload
+
+    def _refresh_locked(self, project: BacklogProject) -> None:
+        signature = _project_signature(project)
+        if signature != self._signature or self._repository is None:
+            self._signature = signature
+            # refresh_remote_refs stays off: a cached scan must not fire network
+            # calls on a request path.
+            self._repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+            self._board_payload = None
+            # Warm the visible-record cache while still holding the lock, so two
+            # concurrent requests cannot both pay for the same scan. `get_task`
+            # consults this set first, so task detail is warmed by it too.
+            self._repository.board()
+
+
+def _project_signature(project: BacklogProject) -> str:
+    """A cheap fingerprint of every task file the repository can resolve."""
+    now_ns = time.time_ns()
+    signatures: list[dict[str, object]] = []
+    for bucket in ("tasks", "completed", "archive/tasks", "drafts"):
+        directory = project.backlog_dir.joinpath(*bucket.split("/"))
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.md")):
+            signatures.append(_file_signature(project.root, path, now_ns=now_ns))
+    return json.dumps(signatures, sort_keys=True, separators=(",", ":"))
+
+
+def build_board_payload(
+    project: BacklogProject,
+    *,
+    queue_category_filter: str | None = None,
+    cache: ProjectScanCache | None = None,
+) -> dict[str, object]:
+    """Return a JSON-serializable board snapshot for the browser service.
+
+    Args:
+        project: The project to render.
+        queue_category_filter: Optional queue category to narrow columns to.
+        cache: Reuses an unchanged scan and its rendered columns across
+            requests. Without one, every call re-reads and re-renders the whole
+            project, which is what a fresh CLI invocation wants and what an HTTP
+            request emphatically does not.
+
+    Returns:
+        dict: the board payload, filtered by ``queue_category_filter``.
+    """
+    if cache is not None:
+        unfiltered = cache.board_payload(project, lambda repository: _board_payload_body(project, repository))
+    else:
+        repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+        unfiltered = _board_payload_body(project, repository)
+    return _apply_queue_category_filter(unfiltered, queue_category_filter)
+
+
+def _board_payload_body(project: BacklogProject, repository: ReadOnlyRepository) -> dict[str, object]:
+    """Build the unfiltered board payload from one repository scan."""
     board = repository.board()
     # Reuse the scan just done: the queue would otherwise build its own
     # repository and parse every task file a second time, on every request.
     queue_report = OrchestrationService(project).queue(repository=repository)
     queue_items = {item.task_id.casefold(): item for item in queue_report.items}
-    category_filter = _normalize_queue_category_filter(queue_category_filter)
-    unfiltered_columns = {
+    columns = {
         status: [
             _task_payload(task, project=project, queue_item=queue_items.get(task.id.casefold()))
             for task in tasks
@@ -199,14 +292,33 @@ def build_board_payload(project: BacklogProject, *, queue_category_filter: str |
         },
         "statuses": list(board.keys()),
         "queueCategories": sorted(queue_report.by_category),
+        "queueCategoryFilter": None,
+        "columns": columns,
+    }
+    payload["revision"] = _board_revision(payload)
+    return payload
+
+
+def _apply_queue_category_filter(
+    payload: Mapping[str, object], queue_category_filter: str | None
+) -> dict[str, object]:
+    """Narrow a cached, unfiltered payload without rebuilding it.
+
+    The revision is deliberately the *unfiltered* one: it identifies the project
+    state that change-detection watches, not the view a particular request asked
+    for.
+    """
+    category_filter = _normalize_queue_category_filter(queue_category_filter)
+    columns = payload.get("columns")
+    assert isinstance(columns, Mapping)
+    return {
+        **payload,
         "queueCategoryFilter": category_filter,
         "columns": {
             status: [task for task in tasks if _matches_queue_category_payload(task, category_filter)]
-            for status, tasks in unfiltered_columns.items()
+            for status, tasks in columns.items()
         },
     }
-    payload["revision"] = _board_revision({**payload, "queueCategoryFilter": None, "columns": unfiltered_columns})
-    return payload
 
 
 def _service_status_payload(server: BrowserThreadingHTTPServer) -> dict[str, object]:
@@ -395,6 +507,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 build_board_payload(
                     self.server.project,
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                    cache=self.server.scan_cache,
                 ),
             )
             return
@@ -455,7 +568,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
-            repository = ReadOnlyRepository(self.server.project)
+            repository = self.server.scan_cache.repository(self.server.project)
             try:
                 task = repository.get_task(task_id)
             except KeyError:
@@ -472,6 +585,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 render_board_html(
                     self.server.project,
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                    cache=self.server.scan_cache,
                 ),
             )
             return
@@ -740,7 +854,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         if shutdown_state["shutdownInProgress"]:
             event = _board_shutdown_sse_event(shutdown_state)
         else:
-            payload = build_board_payload(self.server.project)
+            # The revision poll runs on a timer for every open tab; without the
+            # cache it rebuilt the entire board on each tick.
+            payload = build_board_payload(self.server.project, cache=self.server.scan_cache)
             event = _board_revision_sse_event(str(payload.get("revision", "")))
         data = event.encode("utf-8")
         content_type = "text/event-stream; charset=utf-8"
@@ -826,9 +942,14 @@ def _vendored_mermaid_source() -> str:
     return _load_browser_text_resource("assets", "mermaid.min.js")
 
 
-def render_board_html(project: BacklogProject, *, queue_category_filter: str | None = None) -> str:
+def render_board_html(
+    project: BacklogProject,
+    *,
+    queue_category_filter: str | None = None,
+    cache: ProjectScanCache | None = None,
+) -> str:
     """Render a browser board with basic task creation, editing, and status movement."""
-    payload = build_board_payload(project, queue_category_filter=queue_category_filter)
+    payload = build_board_payload(project, queue_category_filter=queue_category_filter, cache=cache)
     project_name = escape(project.config.project_name)
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
