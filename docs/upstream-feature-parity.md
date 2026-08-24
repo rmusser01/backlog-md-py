@@ -157,8 +157,14 @@ larger task commands:
 - Read-only active branch accuracy: when `checkActiveBranches` is enabled,
   repository reads include task snapshots from local branches, and from remote
   branches when `remoteOperations` is enabled, whose branch tip is within
-  `activeBranchDays`. This uses `git for-each-ref`, `git ls-tree`, and
-  `git show` without checking out branches.
+  `activeBranchDays`. This uses `git for-each-ref`, `git ls-tree`, one
+  `git log` walk over the union of those refs, and one `git cat-file --batch`,
+  without checking out branches. Work is keyed on blob id rather than on
+  `(branch, path)`, so a task file shared by many branches is read, parsed, and
+  ranked once. When two files claim one task id, the newer *content* wins:
+  ranking uses the most recent commit that wrote that exact content at that
+  path on any scanned ref, and identical content on several branches therefore
+  ties and is resolved deterministically by path.
 - Loopback `backlog browser` service with `--port <port>`,
   `--no-open`, config-driven default port and auto-open behavior, health and
   board JSON endpoints, and a static board snapshot.
