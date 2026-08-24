@@ -134,6 +134,21 @@ is left untouched. Duplicate ids are never resolved automatically — choosing
 which file keeps the id is a human decision. The non-zero exit makes `doctor`
 usable as a pre-commit or CI check.
 
+## Faster Reads On A Large Project
+
+Reads parse every task file, which is the dominant cost once a project has
+thousands of tasks. An opt-in SQLite index caches that parse:
+
+```bash
+BACKLOG_PY_SQLITE_INDEX=1 backlog-py --cwd /path/to/project task list --plain
+```
+
+Measured on a 2318-task project: `overview` takes 1.5s without it and 0.7s with
+it warm, at the cost of ~0.7s the first time and after any task file changes.
+The index is a disposable cache keyed on a per-file signature -- delete it, or
+leave the variable unset, and nothing is lost. It is rebuilt automatically
+whenever a task file changes, so it cannot serve stale data.
+
 ## Browser Board
 
 Start the optional loopback browser board without opening a browser:
