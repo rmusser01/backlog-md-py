@@ -143,10 +143,13 @@ def task_board(project: BacklogProject) -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def task_view(project: BacklogProject, task_id: str) -> dict[str, Any]:
+def task_view(
+    project: BacklogProject, task_id: str | None = None, taskId: str | None = None
+) -> dict[str, Any]:
     """Return one task through the read-only repository as a JSON-safe mapping."""
+    identifier = _either_spelling(task_id, taskId, field="task_id")
     repository = read_repository(project)
-    return _task_detail(project, repository.get_task(task_id))
+    return _task_detail(project, repository.get_task(identifier))
 
 
 def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
@@ -232,8 +235,14 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
     return _locked(project, "mcp_task_create", mutate)
 
 
-def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str, Any]:
+def task_edit(
+    project: BacklogProject,
+    task_id: str | None = None,
+    taskId: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
     """Edit supported task sections through the safe mutation repository."""
+    task_id = _either_spelling(task_id, taskId, field="task_id")
     def mutate() -> dict[str, Any]:
         # Reload config like task_create: the long-lived daemon holds one
         # BacklogProject per request, and status validation must see the
@@ -304,21 +313,27 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
     return _locked(project, "mcp_task_edit", mutate)
 
 
-def task_archive(project: BacklogProject, task_id: str) -> dict[str, Any]:
+def task_archive(
+    project: BacklogProject, task_id: str | None = None, taskId: str | None = None
+) -> dict[str, Any]:
     """Move one active task to backlog/archive/tasks."""
+    identifier = _either_spelling(task_id, taskId, field="task_id")
     return _locked(
         project,
         "mcp_task_archive",
-        lambda: _task_detail(project, MutableRepository(project).archive_task(task_id)),
+        lambda: _task_detail(project, MutableRepository(project).archive_task(identifier)),
     )
 
 
-def task_complete(project: BacklogProject, task_id: str) -> dict[str, Any]:
+def task_complete(
+    project: BacklogProject, task_id: str | None = None, taskId: str | None = None
+) -> dict[str, Any]:
     """Move one Done task to backlog/completed."""
+    identifier = _either_spelling(task_id, taskId, field="task_id")
     return _locked(
         project,
         "mcp_task_complete",
-        lambda: _task_detail(project, MutableRepository(project).complete_task(task_id)),
+        lambda: _task_detail(project, MutableRepository(project).complete_task(identifier)),
     )
 
 
@@ -557,9 +572,12 @@ def document_list(project: BacklogProject, query: str | None = None, limit: int 
     return [_document_detail(project, document) for document in documents[:limit_value]]
 
 
-def document_view(project: BacklogProject, path_or_id: str) -> dict[str, Any]:
+def document_view(
+    project: BacklogProject, path_or_id: str | None = None, pathOrId: str | None = None
+) -> dict[str, Any]:
     """Return one document by docs-relative path or frontmatter id."""
-    return _document_detail(project, DocumentService(project).view_document(path_or_id))
+    identifier = _either_spelling(path_or_id, pathOrId, field="path_or_id")
+    return _document_detail(project, DocumentService(project).view_document(identifier))
 
 
 def document_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
@@ -579,8 +597,14 @@ def document_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
     )
 
 
-def document_update(project: BacklogProject, path_or_id: str, **kwargs: Any) -> dict[str, Any]:
+def document_update(
+    project: BacklogProject,
+    path_or_id: str | None = None,
+    pathOrId: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
     """Update a document's title, body, docs-relative directory, and metadata."""
+    path_or_id = _either_spelling(path_or_id, pathOrId, field="path_or_id")
     metadata = _document_update_metadata(
         _dict_value(kwargs.get("metadata"), "metadata"),
         _optional_mcp_string(_get_alias(kwargs, "type"), "type"),
@@ -639,11 +663,17 @@ def milestone_add(project: BacklogProject, name: str, description: str = "") -> 
 
 def milestone_rename(
     project: BacklogProject,
-    old_name: str,
-    new_name: str,
+    old_name: str | None = None,
+    new_name: str | None = None,
     update_tasks: bool = False,
+    oldName: str | None = None,
+    newName: str | None = None,
+    updateTasks: bool | None = None,
 ) -> dict[str, Any]:
     """Rename a milestone file and optionally update task references."""
+    old_name = _either_spelling(old_name, oldName, field="old_name")
+    new_name = _either_spelling(new_name, newName, field="new_name")
+    update_tasks = update_tasks if updateTasks is None else updateTasks
     return _locked(
         project,
         "mcp_milestone_rename",
@@ -654,8 +684,14 @@ def milestone_rename(
     )
 
 
-def milestone_remove(project: BacklogProject, name: str, clear_tasks: bool = False) -> dict[str, Any]:
+def milestone_remove(
+    project: BacklogProject,
+    name: str,
+    clear_tasks: bool = False,
+    clearTasks: bool | None = None,
+) -> dict[str, Any]:
     """Remove a milestone file and optionally clear task references."""
+    clear_tasks = clear_tasks if clearTasks is None else clearTasks
     return _locked(
         project,
         "mcp_milestone_remove",
@@ -1121,6 +1157,21 @@ def _dict_value(value: Any, field: str = "value") -> dict[str, Any] | None:
     if not isinstance(value, dict):
         raise McpArgumentError(f"{field} must be an object")
     return dict(value)
+
+
+def _either_spelling(snake: Any, camel: Any, *, field: str) -> Any:
+    """Take whichever spelling the caller used, or say which one is missing.
+
+    Ten of these tools already accepted both spellings and eight did not, so a
+    client that learned `parentTaskId` from one was rejected for sending
+    `taskId` to the next -- and the responses are camelCase throughout, which
+    makes that the natural guess.
+    """
+    if snake is not None:
+        return snake
+    if camel is not None:
+        return camel
+    raise McpArgumentError(f"missing a required argument: '{field}'")
 
 
 def _get_alias(mapping: dict[str, Any], *names: str) -> Any:
