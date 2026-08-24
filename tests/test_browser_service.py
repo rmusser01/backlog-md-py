@@ -2446,3 +2446,30 @@ def _post_json_response(
             "status": response.status,
             "body": json.loads(response.read().decode("utf-8")),
         }
+
+
+def test_browser_board_payload_scans_the_project_once(tmp_path, monkeypatch):
+    """Every request rebuilt the board from scratch, and did it twice over.
+
+    `build_board_payload` scanned once for the board and again inside the
+    orchestration queue. On a 2310-task project that was ~3.8s per request, with
+    the duplicate-id warnings logged twice each time.
+    """
+    from backlog_py.browser.service import build_board_payload
+    from backlog_py.core import repository as repository_module
+
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    scanned: list[str] = []
+    real_load = repository_module._load_tasks_from_dir
+
+    def counting(task_dir):
+        scanned.append(str(task_dir))
+        return real_load(task_dir)
+
+    monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
+    payload = build_board_payload(project)
+
+    assert payload["columns"], "the payload should still carry the board"
+    assert len(scanned) == len(set(scanned)), f"a directory was scanned twice: {scanned}"

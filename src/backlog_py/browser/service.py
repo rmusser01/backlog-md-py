@@ -179,7 +179,9 @@ def build_board_payload(project: BacklogProject, *, queue_category_filter: str |
     """Return a JSON-serializable board snapshot for the browser service."""
     repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     board = repository.board()
-    queue_report = OrchestrationService(project).queue()
+    # Reuse the scan just done: the queue would otherwise build its own
+    # repository and parse every task file a second time, on every request.
+    queue_report = OrchestrationService(project).queue(repository=repository)
     queue_items = {item.task_id.casefold(): item for item in queue_report.items}
     category_filter = _normalize_queue_category_filter(queue_category_filter)
     unfiltered_columns = {
