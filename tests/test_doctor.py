@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from backlog_py.cli.main import main
 from backlog_py.core.doctor import diagnose, repair_task_source
+from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.storage.project import discover_project
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
@@ -55,6 +56,32 @@ Body text with no end marker.
 ## Acceptance Criteria
 
 - [ ] #1 something
+"""
+
+VALID_ESCAPED_APOSTROPHE_WITH_UNTERMINATED_SECTION = """---
+id: TASK-5
+title: 'Owner''s task'
+status: To Do
+created_date: '2026-01-01'
+---
+
+## Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Body text with no end marker.
+"""
+
+INVALID_TITLE_WITH_UNTERMINATED_SECTION = """---
+id: TASK-6
+title: Console transcript: preserve multiple repairs
+status: To Do
+created_date: '2026-01-01'
+---
+
+## Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Body text with no end marker.
 """
 
 
@@ -136,6 +163,15 @@ def test_repair_closes_an_unterminated_owned_section() -> None:
     assert repaired.index("<!-- SECTION:DESCRIPTION:END -->") < repaired.index("## Acceptance Criteria")
 
 
+def test_repair_handles_multiple_independent_parse_errors() -> None:
+    repaired = repair_task_source(INVALID_TITLE_WITH_UNTERMINATED_SECTION)
+
+    assert repaired is not None
+    parsed = parse_task_markdown(repaired)
+    assert parsed.frontmatter["title"] == "Console transcript: preserve multiple repairs"
+    assert "<!-- SECTION:NOTES:END -->" in repaired
+
+
 def test_repair_leaves_a_healthy_file_alone() -> None:
     healthy = (FIXTURE_REPO / "backlog" / "tasks" / "task-1 - Example-task.md").read_text(encoding="utf-8")
 
@@ -164,6 +200,21 @@ def test_doctor_fix_repairs_files_and_then_passes(tmp_path: Path) -> None:
     assert "Console transcript: skip move_child" in broken.read_text(encoding="utf-8")
     assert diagnose(_project(repo)).ok
     assert _invoke(repo, "task", "list", "--plain").output.count("TASK-") >= 4
+
+
+def test_doctor_fix_preserves_a_valid_title_while_repairing_a_section(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    broken = _write(
+        repo,
+        "task-5 - escaped-apostrophe.md",
+        VALID_ESCAPED_APOSTROPHE_WITH_UNTERMINATED_SECTION,
+    )
+
+    fixed = _invoke(repo, "doctor", "--fix")
+
+    assert fixed.exit_code == 0, fixed.output
+    repaired = parse_task_markdown(broken.read_text(encoding="utf-8"))
+    assert repaired.frontmatter["title"] == "Owner's task"
 
 
 def test_doctor_fix_does_not_touch_duplicate_ids(tmp_path: Path) -> None:

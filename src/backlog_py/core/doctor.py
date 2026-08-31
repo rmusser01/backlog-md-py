@@ -16,7 +16,7 @@ import yaml
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import _atomic_write_text
-from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.markdown.task_parser import TaskMarkdownParseError, parse_task_markdown
 
 _TITLE_LINE_RE = re.compile(r"^title:(?P<value>.*)$")
 _SECTION_BEGIN_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):BEGIN -->\s*$")
@@ -116,20 +116,22 @@ def repair_task_source(source: str) -> str | None:
     breaks YAML, and close an owned section whose END marker is missing. Anything
     else needs a human.
     """
-    try:
-        parse_task_markdown(source)
-        return None
-    except (ValueError, OSError):
-        pass
-
-    candidate = _close_unterminated_sections(_requote_title(source))
-    if candidate == source:
-        return None
-    try:
-        parse_task_markdown(candidate)
-    except (ValueError, OSError):
-        return None
-    return candidate
+    candidate = source
+    while True:
+        try:
+            parse_task_markdown(candidate)
+        except TaskMarkdownParseError as exc:
+            if exc.code == "invalid_frontmatter":
+                repaired = _requote_title(candidate)
+            elif exc.code == "unterminated_section":
+                repaired = _close_unterminated_sections(candidate)
+            else:
+                return None
+            if repaired == candidate:
+                return None
+            candidate = repaired
+        else:
+            return candidate if candidate != source else None
 
 
 def _requote_title(source: str) -> str:
