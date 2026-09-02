@@ -32,6 +32,14 @@ class MilestoneRecord:
     content: str
     frontmatter: dict[str, Any]
     archived: bool = False
+    id: str | None = None
+    title: str = ""
+    due_date: str | None = None
+    format: str = "legacy"
+
+    @property
+    def description(self) -> str:
+        return _description_from_body(self.content) if self.format == "current" else self.content
 
 
 @dataclass(frozen=True)
@@ -60,21 +68,27 @@ class MilestoneService:
         _atomic_write_text(target, source)
         return _load_milestone(self.project, target, archived=False)
 
-    def list_milestones(self) -> list[MilestoneRecord]:
-        if not self.active_dir.is_dir():
-            return []
+    def list_milestones(self, *, include_archived: bool = False) -> list[MilestoneRecord]:
         milestones: list[MilestoneRecord] = []
-        for path in sorted(self.active_dir.glob("*.md")):
-            try:
-                milestones.append(self._load_milestone(path, archived=False))
-            except MilestoneMutationError:
-                # Containment failures are security signals, not bad content.
-                raise
-            except (ValueError, OSError) as exc:
-                # A single unparsable file must not disable every milestone
-                # operation; skip it and warn, as the task repository does.
-                logger.warning("Skipping unreadable milestone file {}: {}", path, exc)
-        return milestones
+        directories = [(self.active_dir, False)]
+        if include_archived:
+            directories.append((self.archive_dir, True))
+        for directory, archived in directories:
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.glob("*.md")):
+                if path.name.casefold() == "readme.md":
+                    continue
+                try:
+                    milestones.append(self._load_milestone(path, archived=archived))
+                except MilestoneMutationError:
+                    # Containment failures are security signals, not bad content.
+                    raise
+                except (ValueError, OSError) as exc:
+                    # A single unparsable file must not disable every milestone
+                    # operation; skip it and warn, as the task repository does.
+                    logger.warning("Skipping unreadable milestone file {}: {}", path, exc)
+        return sorted(milestones, key=_milestone_sort_key)
 
     def rename_milestone(self, old_name: str, new_name: str, *, update_tasks: bool = False) -> MilestoneRecord:
         existing = self._find_active(old_name)
@@ -202,14 +216,80 @@ def _load_milestone(project: BacklogProject, path: Path, *, archived: bool) -> M
     raw_source = path.read_text(encoding="utf-8-sig")
     parsed = parse_task_markdown(raw_source)
     frontmatter = dict(parsed.frontmatter)
-    name = str(frontmatter.get("name") or _name_from_filename(path))
+    content = parsed.body.strip()
+    if "name" in frontmatter:
+        name = str(frontmatter.get("name") or _name_from_filename(path))
+        return MilestoneRecord(
+            name=name,
+            path=path,
+            path_relative=path.relative_to(project.backlog_dir).as_posix(),
+            content=content,
+            frontmatter=frontmatter,
+            archived=archived,
+            title=name,
+        )
+
+    current_intent = _CURRENT_FILENAME_RE.match(path.stem) or {"id", "title"} & frontmatter.keys()
+    if current_intent:
+        raw_id = frontmatter.get("id")
+        raw_title = frontmatter.get("title")
+        if not isinstance(raw_id, str) or not _CURRENT_ID_RE.fullmatch(raw_id):
+            raise ValueError("Current milestone id must match m-N")
+        if not isinstance(raw_title, str) or not (title := raw_title.strip()):
+            raise ValueError("Current milestone title is required")
+        due_date = frontmatter.get("due_date")
+        return MilestoneRecord(
+            name=title,
+            path=path,
+            path_relative=path.relative_to(project.backlog_dir).as_posix(),
+            content=content,
+            frontmatter=frontmatter,
+            archived=archived,
+            id=f"m-{int(raw_id[2:])}",
+            title=title,
+            due_date=due_date.strip() or None if isinstance(due_date, str) else None,
+            format="current",
+        )
+
+    name = _name_from_filename(path)
     return MilestoneRecord(
         name=name,
         path=path,
         path_relative=path.relative_to(project.backlog_dir).as_posix(),
-        content=parsed.body.strip(),
+        content=content,
         frontmatter=frontmatter,
         archived=archived,
+        title=name,
+    )
+
+
+_CURRENT_FILENAME_RE = re.compile(r"^m-\d+(?:$| - )", re.IGNORECASE)
+_CURRENT_ID_RE = re.compile(r"^m-\d+$", re.IGNORECASE)
+
+
+def _description_from_body(content: str) -> str:
+    match = re.search(r"^## Description$(.*?)(?=^## |\Z)", content, re.MULTILINE | re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+
+def _milestone_sort_key(milestone: MilestoneRecord) -> tuple[int, int, int, str, str, str]:
+    title_or_name = (milestone.title or milestone.name).casefold()
+    if milestone.format == "current" and milestone.id is not None:
+        return (
+            int(milestone.archived),
+            0,
+            int(milestone.id[2:]),
+            title_or_name,
+            milestone.name.casefold(),
+            milestone.path_relative.casefold(),
+        )
+    return (
+        int(milestone.archived),
+        1,
+        0,
+        title_or_name,
+        milestone.name.casefold(),
+        milestone.path_relative.casefold(),
     )
 
 

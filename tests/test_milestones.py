@@ -203,19 +203,200 @@ def test_malformed_milestone_file_does_not_disable_milestone_operations(tmp_path
     assert _service(repo).remove_milestone("Beta").name == "Beta"
 
 
-def test_milestone_reader_tolerates_utf8_bom(tmp_path):
+@pytest.mark.parametrize(
+    ("filename", "source", "expected_name", "expected_format"),
+    [
+        (
+            "m-9 - release.md",
+            "---\nid: m-9\ntitle: Release\n---\n\nBOM milestone.\n",
+            "Release",
+            "current",
+        ),
+        (
+            "Beta.md",
+            "---\nname: Alpha\n---\n\nBOM milestone.\n",
+            "Alpha",
+            "legacy",
+        ),
+    ],
+)
+def test_current_and_legacy_milestone_reader_tolerates_utf8_bom(
+    tmp_path, filename, source, expected_name, expected_format
+):
     repo = _copy_fixture(tmp_path)
     milestones_dir = repo / "backlog" / "milestones"
     milestones_dir.mkdir(parents=True)
-    (milestones_dir / "Beta.md").write_text(
-        "﻿---\nname: Alpha\n---\n\nBOM milestone.\n",
-        encoding="utf-8",
-    )
+    (milestones_dir / filename).write_text(f"\ufeff{source}", encoding="utf-8")
 
     listed = _service(repo).list_milestones()
 
-    assert [milestone.name for milestone in listed] == ["Alpha"]
+    assert [milestone.name for milestone in listed] == [expected_name]
+    assert listed[0].format == expected_format
     assert listed[0].content == "BOM milestone."
+
+
+def test_current_milestone_loads_id_title_due_date_and_description(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = repo / "backlog" / "milestones" / "m-9 - release-2.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "---\n"
+        "id: m-9\n"
+        "title: Release 2\n"
+        "due_date: 2026-09-30 17:00\n"
+        "custom: preserved\n"
+        "---\n\n"
+        "## Description\n\nRelease scope.\n\n## Notes\n\nAnother section.\n",
+        encoding="utf-8",
+    )
+
+    record = _service(repo).list_milestones()[0]
+
+    assert record.id == "m-9"
+    assert record.title == record.name == "Release 2"
+    assert record.due_date == "2026-09-30 17:00"
+    assert record.format == "current"
+    assert record.description == "Release scope."
+    assert record.archived is False
+    assert record.path == path
+    assert record.path_relative == "milestones/m-9 - release-2.md"
+    assert record.content == "## Description\n\nRelease scope.\n\n## Notes\n\nAnother section."
+    assert record.frontmatter == {
+        "id": "m-9",
+        "title": "Release 2",
+        "due_date": "2026-09-30 17:00",
+        "custom": "preserved",
+    }
+
+
+def test_legacy_milestone_retains_name_path_content_and_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = repo / "backlog" / "milestones" / "Alpha.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "---\nname: Alpha\nid: m-99\ntitle: Not current\ncustom: [one, two]\nowner: Sam\n---\n\nLegacy body.\n",
+        encoding="utf-8",
+    )
+
+    record = _service(repo).list_milestones()[0]
+
+    assert record.name == "Alpha"
+    assert record.path == path
+    assert record.path_relative == "milestones/Alpha.md"
+    assert record.content == "Legacy body."
+    assert record.frontmatter == {
+        "name": "Alpha",
+        "id": "m-99",
+        "title": "Not current",
+        "custom": ["one", "two"],
+        "owner": "Sam",
+    }
+    assert record.title == record.name
+    assert record.id is None
+    assert record.due_date is None
+    assert record.format == "legacy"
+    assert record.description == record.content
+
+
+def test_list_milestones_can_include_archived_records(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_dir = repo / "backlog" / "milestones"
+    archive_dir = repo / "backlog" / "archive" / "milestones"
+    active_dir.mkdir(parents=True)
+    archive_dir.mkdir(parents=True)
+    (active_dir / "m-2 - active.md").write_text(
+        "---\nid: m-2\ntitle: Active\n---\n\n## Description\n\nActive scope.\n",
+        encoding="utf-8",
+    )
+    (archive_dir / "Archived.md").write_text(
+        "---\nname: Archived\n---\n\nArchived scope.\n", encoding="utf-8"
+    )
+    service = _service(repo)
+
+    assert [(record.name, record.archived) for record in service.list_milestones()] == [("Active", False)]
+    assert [(record.name, record.archived, record.path_relative) for record in service.list_milestones(include_archived=True)] == [
+        ("Active", False, "milestones/m-2 - active.md"),
+        ("Archived", True, "archive/milestones/Archived.md"),
+    ]
+
+    shutil.rmtree(active_dir)
+    archive_only = _service(repo).list_milestones(include_archived=True)
+    assert [(record.name, record.archived) for record in archive_only] == [("Archived", True)]
+
+
+def test_readme_is_ignored_case_insensitively_in_active_and_archive(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_dir = repo / "backlog" / "milestones"
+    archive_dir = repo / "backlog" / "archive" / "milestones"
+    active_dir.mkdir(parents=True)
+    archive_dir.mkdir(parents=True)
+    for directory, filename in ((active_dir, "readme.md"), (active_dir, "README.md"), (archive_dir, "readme.md"), (archive_dir, "README.md")):
+        (directory / filename).write_text("---\nnot valid frontmatter", encoding="utf-8")
+    (active_dir / "Alpha.md").write_text("---\nname: Alpha\n---\n\nActive\n", encoding="utf-8")
+    (archive_dir / "Beta.md").write_text("---\nname: Beta\n---\n\nArchived\n", encoding="utf-8")
+
+    listed = _service(repo).list_milestones(include_archived=True)
+
+    assert [(record.name, record.archived) for record in listed] == [("Alpha", False), ("Beta", True)]
+
+
+def test_malformed_current_looking_file_is_warned_and_skipped(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    milestones_dir.mkdir(parents=True)
+    bad_sources = {
+        "m-9 - missing-id.md": "---\ntitle: Missing id\n---\n\nBody\n",
+        "m-10 - blank-title.md": "---\nid: m-10\ntitle: '   '\n---\n\nBody\n",
+        "release.md": "---\nid: m-11\n---\n\nBody\n",
+    }
+    for filename, source in bad_sources.items():
+        (milestones_dir / filename).write_text(source, encoding="utf-8")
+
+    with _captured_warnings() as warnings:
+        listed = _service(repo).list_milestones()
+
+    assert listed == []
+    assert all(any(filename in message for message in warnings) for filename in bad_sources)
+
+
+def test_noncurrent_file_without_name_keeps_filename_fallback(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = repo / "backlog" / "milestones" / "No-name--here.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("---\ncustom: preserved\n---\n\nLegacy body.\n", encoding="utf-8")
+
+    record = _service(repo).list_milestones()[0]
+
+    assert record.name == "No name  here"
+    assert record.title == "No name  here"
+    assert record.format == "legacy"
+
+
+def test_current_and_legacy_milestones_sort_deterministically(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_dir = repo / "backlog" / "milestones"
+    archive_dir = repo / "backlog" / "archive" / "milestones"
+    active_dir.mkdir(parents=True)
+    archive_dir.mkdir(parents=True)
+    files = {
+        active_dir / "m-10 - ten.md": "---\nid: m-10\ntitle: Ten\n---\n\n## Description\n\nTen\n",
+        active_dir / "m-2 - two.md": "---\nid: m-2\ntitle: Two\n---\n\n## Description\n\nTwo\n",
+        active_dir / "Alpha.md": "---\nname: Alpha\n---\n\nAlpha\n",
+        archive_dir / "m-1 - one.md": "---\nid: m-1\ntitle: One\n---\n\n## Description\n\nOne\n",
+        archive_dir / "beta.md": "---\nname: beta\n---\n\nBeta\n",
+    }
+    for path, source in files.items():
+        path.write_text(source, encoding="utf-8")
+
+    listed = _service(repo).list_milestones(include_archived=True)
+
+    assert [(record.archived, record.format, record.id, record.name) for record in listed] == [
+        (False, "current", "m-2", "Two"),
+        (False, "current", "m-10", "Ten"),
+        (False, "legacy", None, "Alpha"),
+        (True, "current", "m-1", "One"),
+        (True, "legacy", None, "beta"),
+    ]
 
 
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):
