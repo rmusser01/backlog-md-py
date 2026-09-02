@@ -267,10 +267,10 @@ gates.
 
 The current browser release gates are:
 
-- Required: browser E2E coverage for rich edit flows before advertising full
-  browser parity.
-- Required: desktop and mobile browser screenshots before advertising full
-  browser parity.
+- Required: browser E2E coverage for rich edit flows before declaring the
+  inventoried browser release scope ready.
+- Required: desktop and mobile browser screenshots before declaring the
+  inventoried browser release scope ready.
 - Not applicable unless explicitly scoped later: complex Markdown full-WYSIWYG
   round-trip guarantees.
 - Passed by policy: browser API does not expose shell-hook execution or

@@ -75,5 +75,5 @@ baseline.
    endpoint payloads and client state make that complexity worthwhile.
 10. **Richer editing and fresh release evidence.** Expand Markdown behavior
     only with round-trip preservation tests, then capture current desktop and
-    mobile screenshots plus end-to-end browser evidence before making a full
-    browser-release claim.
+    mobile screenshots plus end-to-end browser evidence before declaring the
+    inventoried browser release scope ready.
