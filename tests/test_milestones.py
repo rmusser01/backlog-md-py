@@ -1703,13 +1703,25 @@ def test_cli_milestone_commands_use_safe_service(tmp_path):
     assert archive.exit_code == 0
     assert "archived" in archive.output
 
+    removable = runner.invoke(main, ["--cwd", str(repo), "milestone", "add", "Delete Me"])
+    assert removable.exit_code == 0
+
+    remove = runner.invoke(main, ["--cwd", str(repo), "milestone", "remove", "Delete Me"])
+    assert remove.exit_code == 0
+    assert "Delete Me" in remove.output
+
 
 def test_mcp_milestone_tools_use_safe_service(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)
 
-    added = milestone_add(project, "Alpha")
-    assert added["name"] == "Alpha"
+    added = milestone_add(project, "Alpha", description="First")
+    assert added["name"] == added["title"] == "Alpha"
+    assert added["id"] == "m-1"
+    assert added["due_date"] is None
+    assert added["format"] == "current"
+    for legacy_key in ("path", "content", "frontmatter", "archived", "project_path"):
+        assert legacy_key in added
     assert [milestone["name"] for milestone in milestone_list(project)] == ["Alpha"]
 
     renamed = milestone_rename(project, "Alpha", "Beta")

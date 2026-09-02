@@ -324,9 +324,12 @@ def test_tools_list_advertises_document_and_milestone_optional_fields():
     assert {"query", "limit"}.issubset(_tool_properties("document_list"))
     assert "metadata" in _tool_properties("document_create")
     assert {"title", "content"}.issubset(_tool_properties("document_update"))
-    assert "description" in _tool_properties("milestone_add")
-    assert "update_tasks" in _tool_properties("milestone_rename")
-    assert "clear_tasks" in _tool_properties("milestone_remove")
+    assert set(_tool_properties("milestone_add")) == {"project", "name", "description"}
+    assert _tool_schema("milestone_add")["required"] == ["name"]
+    assert set(_tool_properties("milestone_rename")) == {"project", "old_name", "new_name", "update_tasks"}
+    assert _tool_schema("milestone_rename")["required"] == ["old_name", "new_name"]
+    assert set(_tool_properties("milestone_remove")) == {"project", "name", "clear_tasks"}
+    assert _tool_schema("milestone_remove")["required"] == ["name"]
 
 
 def test_tools_list_advertises_orchestration_record_run_fields():
