@@ -76,7 +76,10 @@ class MilestoneService:
         if target.exists():
             raise MilestoneMutationError(f"Milestone already exists: {title}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_text(target, source)
+        try:
+            _atomic_write_text(target, source, base=self.project.backlog_dir)
+        except TaskMutationError as exc:
+            raise MilestoneMutationError(str(exc)) from exc
         return _load_milestone(self.project, target, archived=False)
 
     def list_milestones(self, *, include_archived: bool = False) -> list[MilestoneRecord]:
@@ -183,6 +186,8 @@ class MilestoneService:
             if not directory.is_dir():
                 continue
             for path in directory.glob("*.md"):
+                if path.name.casefold() == "readme.md":
+                    continue
                 filename_match = _CURRENT_FILENAME_RE.match(path.stem)
                 if filename_match:
                     reserved.add(int(filename_match.group(1)))
@@ -191,10 +196,14 @@ class MilestoneService:
                 except PathContainmentError as exc:
                     raise MilestoneMutationError(str(exc)) from exc
                 try:
-                    frontmatter = parse_task_markdown(
-                        trusted_path.read_text(encoding="utf-8-sig")
-                    ).frontmatter
-                except (OSError, ValueError):
+                    source = trusted_path.read_text(encoding="utf-8-sig")
+                except (OSError, UnicodeDecodeError) as exc:
+                    raise MilestoneMutationError(
+                        f"Unable to read milestone file {trusted_path}: {exc}"
+                    ) from exc
+                try:
+                    frontmatter = parse_task_markdown(source).frontmatter
+                except ValueError:
                     continue
                 raw_id = frontmatter.get("id")
                 if (

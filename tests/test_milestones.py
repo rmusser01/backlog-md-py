@@ -128,6 +128,77 @@ def test_id_allocator_reserves_current_intent_id_without_a_valid_title(tmp_path)
     assert added.id == "m-38"
 
 
+def test_id_allocator_aborts_when_current_record_cannot_be_read(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    milestones_dir.mkdir(parents=True)
+    unreadable = milestones_dir / "noncanonical.md"
+    unreadable.write_text("---\nid: m-37\ntitle: Reserved\n---\n", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def fail_for_current_record(path: Path, *args, **kwargs):
+        if path == unreadable:
+            raise OSError("simulated unreadable milestone")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_for_current_record)
+
+    with pytest.raises(MilestoneMutationError, match="simulated unreadable milestone"):
+        _service(repo).add_milestone("Next")
+
+    assert [path.name for path in milestones_dir.iterdir()] == ["noncanonical.md"]
+
+
+def test_id_allocator_aborts_on_invalid_utf8_current_record(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    milestones_dir.mkdir(parents=True)
+    unreadable = milestones_dir / "noncanonical.md"
+    unreadable.write_bytes(b"---\nid: m-37\ntitle: Reserved\n---\n\xff")
+
+    with pytest.raises(MilestoneMutationError):
+        _service(repo).add_milestone("Next")
+
+    assert [path.name for path in milestones_dir.iterdir()] == ["noncanonical.md"]
+
+
+def test_id_allocator_ignores_readme_before_frontmatter_reservation(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    milestones_dir.mkdir(parents=True)
+    (milestones_dir / "README.md").write_text(
+        "---\nid: m-99\ntitle: Ignored\n---\n\n## Description\n\nIgnored.\n",
+        encoding="utf-8",
+    )
+
+    added = _service(repo).add_milestone("First")
+
+    assert added.id == "m-1"
+
+
+def test_add_milestone_anchors_atomic_writer_to_backlog(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original_writer = milestones_module._atomic_write_text
+
+    def swap_directory_before_write(path: Path, source: str, *, base: Path | None = None) -> None:
+        milestones_dir.rename(repo / "backlog" / "milestones-original")
+        try:
+            milestones_dir.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+        original_writer(path, source, base=base)
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", swap_directory_before_write)
+
+    with pytest.raises(MilestoneMutationError, match="outside allowed base"):
+        _service(repo).add_milestone("Release")
+
+    assert list(outside.iterdir()) == []
+
+
 def test_id_allocator_never_reuses_archived_id(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
