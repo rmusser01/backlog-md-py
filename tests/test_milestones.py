@@ -1097,6 +1097,53 @@ def test_current_edit_rolls_back_a_milestone_write_that_raises_after_writing(tmp
     assert not (added.path.parent / "m-1 - beta.md").exists()
 
 
+def test_same_path_edit_does_not_overwrite_a_concurrent_source_replacement(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    concurrent_source = b"\xffconcurrent same-path replacement\n"
+    original_writer = milestones_module._atomic_write_text
+    replaced = False
+
+    def replace_after_milestone_write(path: Path, source: str, base: Path | None = None) -> None:
+        nonlocal replaced
+        original_writer(path, source, base=base)
+        if path == added.path and not replaced:
+            replaced = True
+            path.write_bytes(concurrent_source)
+            raise OSError("simulated concurrent same-path replacement")
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", replace_after_milestone_write)
+
+    with pytest.raises(OSError, match="simulated concurrent same-path replacement"):
+        service.edit_milestone("m-1", description="Edited")
+
+    assert added.path.read_bytes() == concurrent_source
+
+
+def test_same_path_edit_does_not_recreate_a_source_deleted_after_write(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_writer = milestones_module._atomic_write_text
+    deleted = False
+
+    def delete_after_milestone_write(path: Path, source: str, base: Path | None = None) -> None:
+        nonlocal deleted
+        original_writer(path, source, base=base)
+        if path == added.path and not deleted:
+            deleted = True
+            path.unlink()
+            raise OSError("simulated concurrent same-path deletion")
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", delete_after_milestone_write)
+
+    with pytest.raises(OSError, match="simulated concurrent same-path deletion"):
+        service.edit_milestone("m-1", description="Edited")
+
+    assert not added.path.exists()
+
+
 def test_current_edit_rolls_back_milestone_and_all_task_writes(tmp_path, monkeypatch):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -1235,6 +1282,33 @@ def test_current_edit_preserves_source_if_created_link_is_replaced_before_unlink
     assert type(exc_info.value).__name__ == "MilestoneConflictError"
     assert added.path.read_bytes() == original_source
     assert target.read_bytes() == b"concurrent replacement\n"
+
+
+def test_current_edit_removes_owned_target_when_source_is_replaced_after_link(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    concurrent_source = b"concurrent edit source\n"
+    target = added.path.parent / "m-1 - beta.md"
+    original_link = milestones_module.os.link
+    replaced = False
+
+    def replace_source_after_link(source, destination, *args, **kwargs):
+        nonlocal replaced
+        result = original_link(source, destination, *args, **kwargs)
+        if Path(source) == added.path and Path(destination) == target and not replaced:
+            replaced = True
+            added.path.unlink()
+            added.path.write_bytes(concurrent_source)
+        return result
+
+    monkeypatch.setattr(milestones_module.os, "link", replace_source_after_link)
+
+    with pytest.raises(MilestoneMutationError, match="conflict"):
+        service.edit_milestone("m-1", title="Beta")
+
+    assert added.path.read_bytes() == concurrent_source
+    assert not target.exists()
 
 
 def test_current_edit_restores_original_before_inspecting_redirected_target(tmp_path, monkeypatch):
@@ -1391,6 +1465,33 @@ def test_archive_no_clobber_move_preserves_target_created_inside_link(tmp_path, 
     assert type(exc_info.value).__name__ == "MilestoneConflictError"
     assert added.path.read_bytes() == original_source
     assert target.read_bytes() == b"concurrent archive target\n"
+
+
+def test_archive_removes_owned_target_when_source_is_replaced_after_link(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    concurrent_source = b"concurrent archive source\n"
+    target = repo / "backlog" / "archive" / "milestones" / added.path.name
+    original_link = milestones_module.os.link
+    replaced = False
+
+    def replace_source_after_link(source, destination, *args, **kwargs):
+        nonlocal replaced
+        result = original_link(source, destination, *args, **kwargs)
+        if Path(source) == added.path and Path(destination) == target and not replaced:
+            replaced = True
+            added.path.unlink()
+            added.path.write_bytes(concurrent_source)
+        return result
+
+    monkeypatch.setattr(milestones_module.os, "link", replace_source_after_link)
+
+    with pytest.raises(MilestoneMutationError, match="conflict"):
+        service.archive_milestone("m-1")
+
+    assert added.path.read_bytes() == concurrent_source
+    assert not target.exists()
 
 
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):

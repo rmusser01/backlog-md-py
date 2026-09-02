@@ -186,6 +186,7 @@ class MilestoneService:
                 safe_existing,
                 safe_target,
                 original_source,
+                source.encode("utf-8"),
                 same_path=same_path,
                 base=self.project.backlog_dir,
             )
@@ -593,7 +594,13 @@ def _move_no_clobber(source: Path, target: Path, *, base: Path) -> None:
     except FileExistsError as exc:
         raise MilestoneConflictError(f"Milestone path conflicts with an existing file: {safe_target.name}") from exc
     except Exception:
-        _remove_created_link(safe_source, safe_target, source_identity, base=base)
+        _remove_created_link(
+            safe_source,
+            safe_target,
+            source_identity,
+            publication_succeeded=False,
+            base=base,
+        )
         raise
     try:
         safe_source = _mutation_path(base, safe_source)
@@ -602,7 +609,13 @@ def _move_no_clobber(source: Path, target: Path, *, base: Path) -> None:
             raise MilestoneConflictError(f"Milestone path conflict during move: {safe_target.name}")
         safe_source.unlink()
     except Exception:
-        _remove_created_link(safe_source, safe_target, source_identity, base=base)
+        _remove_created_link(
+            safe_source,
+            safe_target,
+            source_identity,
+            publication_succeeded=True,
+            base=base,
+        )
         raise
 
 
@@ -616,6 +629,7 @@ def _remove_created_link(
     target: Path,
     identity: tuple[int, int],
     *,
+    publication_succeeded: bool,
     base: Path,
 ) -> None:
     try:
@@ -630,7 +644,7 @@ def _remove_created_link(
             safe_target = _mutation_path(base, safe_target)
             os.link(safe_target, safe_source, follow_symlinks=False)
             source_identity = _path_identity(safe_source)
-        if source_identity != identity or _path_identity(safe_target) != identity:
+        if (source_identity != identity and not publication_succeeded) or _path_identity(safe_target) != identity:
             return
         _mutation_path(base, safe_target).unlink()
     except FileNotFoundError:
@@ -643,6 +657,7 @@ def _rollback_milestone_edit(
     original: Path,
     target: Path,
     original_source: str,
+    attempted_source: bytes,
     *,
     same_path: bool,
     base: Path,
@@ -652,8 +667,13 @@ def _rollback_milestone_edit(
     except Exception as exc:
         logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
         return
-    if same_path or safe_original.exists():
+    original_exists = safe_original.exists()
+    if same_path and not original_exists:
+        return
+    if same_path or original_exists:
         try:
+            if _mutation_path(base, safe_original).read_bytes() != attempted_source:
+                return
             _atomic_write_text(safe_original, original_source, base=base)
         except Exception as exc:
             logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
