@@ -3050,7 +3050,7 @@ return {
             {"name": "Review", "taskCount": 0},
             {"name": "Café", "taskCount": 2},
         ],
-        "message": "",
+        "message": "Removed Done. 3 statuses remain.",
     }
 
 
@@ -3322,7 +3322,7 @@ statusKeyByName.set("Ready", "ready");
 
 let enterPrevented = false;
 fakeConfigStatusAddInput.value = "READY";
-fakeConfigStatusAddInput.focused = true;
+fakeConfigStatusAddInput.focus();
 globalThis.fetch = async () => ({ok: true, json: async () => ({key: "ready"})});
 await fakeConfigStatusAddInput.listeners.keydown({
   key: "Enter",
@@ -3420,7 +3420,7 @@ globalThis.fetch = async () => {
   return new Promise((resolve) => { releaseClosedLookup = resolve; });
 };
 fakeConfigStatusAddInput.value = "Closed";
-fakeConfigStatusAddInput.focused = true;
+fakeConfigStatusAddInput.focus();
 const closedAdd = fakeConfigStatusAddButton.listeners.click();
 await closedLookupStarted;
 fakeConfigSettingsDialog.close();
@@ -3449,6 +3449,70 @@ return {
         "staleFocused": False,
         "names": ["Fresh", "Closed"],
         "message": "",
+    }
+
+
+def test_browser_status_actions_preserve_focus_and_announce_changes():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [
+  {name: "Ready", taskCount: 0},
+  {name: "Doing", taskCount: 0},
+  {name: "Done", taskCount: 1},
+];
+configDefaultStatus = "Done";
+configDefaultStatusKey = "done";
+renderStatusRows();
+
+function rowAction(index, label) {
+  return fakeConfigStatusRows.children[index].children[1].children.find(
+    (button) => button.textContent === label,
+  );
+}
+
+const firstDown = rowAction(0, "Down");
+firstDown.focus();
+firstDown.listeners.click();
+const afterFirstMove = {
+  active: document.activeElement?.getAttribute("aria-label") || "",
+  message: configStatus.textContent,
+};
+rowAction(1, "Down").listeners.click();
+const afterBoundaryMove = {
+  active: document.activeElement?.getAttribute("aria-label") || "",
+  message: configStatus.textContent,
+};
+
+const remove = rowAction(2, "Remove");
+remove.focus();
+remove.listeners.click();
+return {
+  afterFirstMove,
+  afterBoundaryMove,
+  afterRemove: {
+    active: document.activeElement?.getAttribute("aria-label") || "",
+    message: configStatus.textContent,
+  },
+  names: statusRows.map((row) => row.name),
+};
+""",
+        status_dom=True,
+    )
+
+    assert result == {
+        "afterFirstMove": {
+            "active": "Move Ready down",
+            "message": "Moved Ready to position 2 of 3.",
+        },
+        "afterBoundaryMove": {
+            "active": "Move Ready up",
+            "message": "Moved Ready to position 3 of 3.",
+        },
+        "afterRemove": {
+            "active": "Move Done up",
+            "message": "Removed Ready. 2 statuses remain.",
+        },
+        "names": ["Doing", "Done"],
     }
 
 
@@ -5633,13 +5697,14 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _run_board_javascript_harness(test_source: str) -> object:
+def _run_board_javascript_harness(test_source: str, *, status_dom: bool = False) -> object:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for executable browser JavaScript contracts")
     payload = json.dumps(
         {
             "boardSource": Path("src/backlog_py/browser/assets/board.js").read_text(encoding="utf-8"),
+            "statusDom": status_dom,
             "testSource": test_source,
         }
     )
@@ -5649,21 +5714,69 @@ const vm = require("node:vm");
 const payload = JSON.parse(fs.readFileSync(0, "utf8"));
 const milestoneStatus = {textContent: ""};
 const configStatus = {textContent: ""};
-const fakeConfigStatusAddInput = {
-  _disabled: false,
-  value: "",
-  listeners: {},
-  get disabled() { return this._disabled; },
-  set disabled(value) {
-    this._disabled = Boolean(value);
-    if (this._disabled) this.focused = false;
-  },
-  addEventListener(type, listener) { this.listeners[type] = listener; },
-  focus() { if (!this.disabled) this.focused = true; },
-};
-const fakeConfigStatusAddButton = {
-  listeners: {},
-  addEventListener(type, listener) { this.listeners[type] = listener; },
+let activeElement = null;
+function setActiveElement(element) {
+  if (activeElement) activeElement.focused = false;
+  activeElement = element;
+  if (activeElement) activeElement.focused = true;
+}
+function containsElement(parent, element) {
+  for (let current = element; current; current = current.parentNode) {
+    if (current === parent) return true;
+  }
+  return false;
+}
+function fakeElement(tagName) {
+  return {
+    tagName: String(tagName).toUpperCase(),
+    children: [],
+    listeners: {},
+    attributes: {},
+    _disabled: false,
+    value: "",
+    textContent: "",
+    get disabled() { return this._disabled; },
+    set disabled(value) {
+      this._disabled = Boolean(value);
+      if (this._disabled && activeElement === this) setActiveElement(null);
+    },
+    get options() { return this.children; },
+    addEventListener(type, listener) { this.listeners[type] = listener; },
+    append(...nodes) { nodes.forEach((node) => this.appendChild(node)); },
+    appendChild(node) {
+      node.parentNode = this;
+      this.children.push(node);
+      return node;
+    },
+    replaceChildren(...nodes) {
+      if (activeElement && containsElement(this, activeElement)) setActiveElement(null);
+      this.children.forEach((node) => { node.parentNode = null; });
+      this.children = [];
+      this.append(...nodes);
+    },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    focus() { if (!this.disabled) setActiveElement(this); },
+  };
+}
+const fakeConfigStatusAddInput = fakeElement("input");
+const fakeConfigStatusAddButton = fakeElement("button");
+const fakeConfigStatusRows = fakeElement("div");
+const fakeDefaultStatus = fakeElement("select");
+const fakeConfigSettingsForm = fakeElement("form");
+fakeConfigSettingsForm.elements = {
+  projectName: fakeElement("input"),
+  defaultAssignee: fakeElement("input"),
+  defaultStatus: fakeDefaultStatus,
+  dateFormat: fakeElement("input"),
+  defaultPort: fakeElement("input"),
+  activeBranchDays: fakeElement("input"),
+  zeroPaddedIds: fakeElement("input"),
+  includeDatetimeInDates: fakeElement("input"),
+  autoOpenBrowser: fakeElement("input"),
+  remoteOperations: fakeElement("input"),
+  checkActiveBranches: fakeElement("input"),
+  autoCommit: fakeElement("input"),
 };
 const fakeConfigSettingsDialog = {
   open: true,
@@ -5672,12 +5785,16 @@ const fakeConfigSettingsDialog = {
   setAttribute(name) { if (name === "open") this.open = true; },
 };
 const document = {
+  get activeElement() { return activeElement; },
+  createElement: (tagName) => fakeElement(tagName),
   getElementById: (id) => ({
     "milestone-message": milestoneStatus,
     "config-status-message": configStatus,
     "config-status-add": fakeConfigStatusAddInput,
     "config-status-add-button": fakeConfigStatusAddButton,
     "config-settings-dialog": fakeConfigSettingsDialog,
+    "config-settings-form": payload.statusDom ? fakeConfigSettingsForm : null,
+    "config-status-rows": payload.statusDom ? fakeConfigStatusRows : null,
   })[id] || null,
   querySelector: (selector) => selector === "[data-board-revision]"
     ? {dataset: {boardRevision: "", mermaidUrl: "", mermaidSri: ""}}
@@ -5700,6 +5817,7 @@ const context = vm.createContext({
   fakeConfigStatusAddInput,
   fakeConfigStatusAddButton,
   fakeConfigSettingsDialog,
+  fakeConfigStatusRows,
   HTMLSelectElement: class {},
   HTMLTextAreaElement: class {},
   FormData: class {

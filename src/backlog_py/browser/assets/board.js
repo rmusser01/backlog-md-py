@@ -143,7 +143,8 @@
     function renderStatusRows() {
       const container = document.getElementById("config-status-rows");
       const select = configSettingsForm?.elements.defaultStatus;
-      if (!container || !select) return;
+      if (!container || !select) return [];
+      const renderedRows = [];
       configDefaultStatus = canonicalStatusName(configDefaultStatus, configDefaultStatusKey);
       const defaultRow = statusRows.find((row) => row.name === configDefaultStatus);
       if (defaultRow) configDefaultStatusKey = statusRowKey(defaultRow);
@@ -194,6 +195,7 @@
         remove.disabled = isDefault || row.taskCount > 0;
         remove.addEventListener("click", () => removeStatus(index));
         actions.append(up, down, remove);
+        renderedRows.push({up, down, remove});
         item.append(summary, actions);
         container.appendChild(item);
       });
@@ -204,6 +206,20 @@
         select.appendChild(option);
       }
       select.value = configDefaultStatus;
+      return renderedRows;
+    }
+
+    function focusStatusRowControl(renderedRows, index, preferred) {
+      const controls = renderedRows[index];
+      const order = preferred === "up"
+        ? ["up", "down", "remove"]
+        : preferred === "down"
+          ? ["down", "up", "remove"]
+          : ["remove", "up", "down"];
+      const target = order.map((action) => controls?.[action]).find((control) => control && !control.disabled)
+        || [configSettingsForm?.elements.defaultStatus, configStatusAddInput]
+          .find((control) => control && !control.disabled);
+      target?.focus();
     }
 
     async function addStatus(value) {
@@ -249,8 +265,9 @@
       if (index < 0 || index >= statusRows.length || target < 0 || target >= statusRows.length) return false;
       const [row] = statusRows.splice(index, 1);
       statusRows.splice(target, 0, row);
-      showConfigStatusMessage("");
-      renderStatusRows();
+      const renderedRows = renderStatusRows();
+      focusStatusRowControl(renderedRows, target, offset < 0 ? "up" : "down");
+      showConfigStatusMessage(`Moved ${row.name} to position ${target + 1} of ${statusRows.length}.`);
       return true;
     }
 
@@ -267,8 +284,10 @@
       }
       statusRows.splice(index, 1);
       statusKeyByName.delete(row.name);
-      showConfigStatusMessage("");
-      renderStatusRows();
+      const renderedRows = renderStatusRows();
+      focusStatusRowControl(renderedRows, Math.min(index, statusRows.length - 1), "remove");
+      const remaining = statusRows.length === 1 ? "1 status remains." : `${statusRows.length} statuses remain.`;
+      showConfigStatusMessage(`Removed ${row.name}. ${remaining}`);
       return true;
     }
 
