@@ -278,7 +278,7 @@
       return true;
     }
 
-    function renderChecklist(id, items, section) {
+    function renderChecklist(id, items, section, mutable) {
       const list = document.getElementById(id);
       if (!list) return;
       list.replaceChildren();
@@ -295,9 +295,10 @@
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.checked = Boolean(item.checked);
+        checkbox.disabled = !mutable;
         checkbox.setAttribute("data-checklist-section", section);
         checkbox.setAttribute("data-checklist-index", String(index + 1));
-        checkbox.addEventListener("change", submitTaskChecklistState);
+        if (mutable) checkbox.addEventListener("change", submitTaskChecklistState);
         const text = document.createElement("span");
         const itemId = item.itemId ? `#${item.itemId} ` : "";
         text.textContent = `${itemId}${item.text}`;
@@ -814,8 +815,18 @@
       setHtml("task-dialog-implementation-notes", task.implementationNotesHtml);
       setHtml("task-dialog-final-summary", task.finalSummaryHtml);
       renderMermaidDiagrams(taskDialog || document);
-      renderChecklist("task-dialog-acceptance", task.acceptanceCriteria, "acceptanceCriteria");
-      renderChecklist("task-dialog-dod", task.definitionOfDone, "definitionOfDone");
+      renderChecklist(
+        "task-dialog-acceptance",
+        task.acceptanceCriteria,
+        "acceptanceCriteria",
+        task.mutable === true,
+      );
+      renderChecklist(
+        "task-dialog-dod",
+        task.definitionOfDone,
+        "definitionOfDone",
+        task.mutable === true,
+      );
       renderRunHistoryEvents(task.runHistoryEvents, task.runHistoryIssues);
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
       else if (taskDialog) taskDialog.setAttribute("open", "open");
@@ -1077,8 +1088,18 @@
       }
       const payload = await response.json();
       setText("task-dialog-updated", payload.task.updatedDate);
-      renderChecklist("task-dialog-acceptance", payload.task.acceptanceCriteria, "acceptanceCriteria");
-      renderChecklist("task-dialog-dod", payload.task.definitionOfDone, "definitionOfDone");
+      renderChecklist(
+        "task-dialog-acceptance",
+        payload.task.acceptanceCriteria,
+        "acceptanceCriteria",
+        payload.task.mutable === true,
+      );
+      renderChecklist(
+        "task-dialog-dod",
+        payload.task.definitionOfDone,
+        "definitionOfDone",
+        payload.task.mutable === true,
+      );
     }
 
     async function submitTaskArchive(event) {

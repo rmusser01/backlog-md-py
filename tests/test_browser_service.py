@@ -1855,9 +1855,140 @@ def test_browser_task_checklist_endpoint_updates_acceptance_criteria_under_proje
 
     assert response["status"] == 200
     assert lock_operations == [(repo, "browser_task_checklist")]
+    assert response["body"]["task"]["mutable"] is True
     assert response["body"]["task"]["acceptanceCriteria"][1]["checked"] is True
+    assert task["mutable"] is True
     assert task["acceptanceCriteria"][1]["checked"] is True
     assert "- [x] #2 Preserve incomplete acceptance criteria raw line" in _task_file(repo).read_text(encoding="utf-8")
+
+
+def test_browser_task_checklist_rejects_newer_branch_winner_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    _install_newer_branch_task(monkeypatch, repo)
+    before = _backlog_snapshot(repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/TASK-1/checklist",
+                {"section": "acceptanceCriteria", "index": 2, "checked": True},
+            )
+        error = json.loads(exc.value.read().decode("utf-8"))
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert "read only" in error["error"].casefold()
+    assert lock_operations == [(repo, "browser_task_checklist")]
+    assert _backlog_snapshot(repo) == before
+
+
+@pytest.mark.parametrize(
+    ("suffix", "payload", "operation"),
+    [
+        ("edit", {"title": "Rejected edit"}, "browser_task_edit"),
+        ("archive", {}, "browser_task_archive"),
+        ("status", {"status": "Done"}, "browser_task_status"),
+    ],
+)
+def test_browser_rejects_other_newer_branch_winner_mutations_under_project_lock(
+    tmp_path,
+    monkeypatch,
+    suffix,
+    payload,
+    operation,
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    _install_newer_branch_task(monkeypatch, repo)
+    before = _backlog_snapshot(repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/tasks/TASK-1/{suffix}", payload)
+        error = json.loads(exc.value.read().decode("utf-8"))
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert "read only" in error["error"].casefold()
+    assert lock_operations == [(repo, operation)]
+    assert _backlog_snapshot(repo) == before
+
+
+@pytest.mark.parametrize(
+    ("suffix", "payload", "operation"),
+    [
+        (
+            "checklist",
+            {"section": "acceptanceCriteria", "index": 1, "checked": True},
+            "browser_task_checklist",
+        ),
+        ("edit", {"title": "Rejected edit"}, "browser_task_edit"),
+        ("archive", {}, "browser_task_archive"),
+        ("status", {"status": "Done"}, "browser_task_status"),
+    ],
+)
+def test_browser_rejects_branch_only_task_mutations_under_project_lock(
+    tmp_path,
+    monkeypatch,
+    suffix,
+    payload,
+    operation,
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    _install_branch_only_task(monkeypatch)
+    before = _backlog_snapshot(repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/tasks/TASK-99/{suffix}", payload)
+        error = json.loads(exc.value.read().decode("utf-8"))
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert "read only" in error["error"].casefold()
+    assert lock_operations == [(repo, operation)]
+    assert _backlog_snapshot(repo) == before
 
 
 def test_browser_task_checklist_endpoint_unchecks_acceptance_criteria(tmp_path):
@@ -2232,6 +2363,20 @@ def test_browser_board_html_exposes_task_checklist_state_controls(tmp_path):
     assert 'data-checklist-section="definitionOfDone"' in html
     assert "submitTaskChecklistState" in html
     assert "/checklist" in html
+    render_checklist = html.split("function renderChecklist", maxsplit=1)[1].split(
+        "function renderRunHistoryEvents", maxsplit=1
+    )[0]
+    assert "(id, items, section, mutable)" in render_checklist
+    assert "checkbox.disabled = !mutable;" in render_checklist
+    assert 'if (mutable) checkbox.addEventListener("change", submitTaskChecklistState);' in render_checklist
+    detail = html.split("async function openTaskDetails", maxsplit=1)[1].split(
+        "async function openTaskEdit", maxsplit=1
+    )[0]
+    assert detail.count("task.mutable === true") == 2
+    checklist_submit = html.split("async function submitTaskChecklistState", maxsplit=1)[1].split(
+        "async function submitTaskArchive", maxsplit=1
+    )[0]
+    assert checklist_submit.count("payload.task.mutable === true") == 2
 
 
 def test_browser_board_html_exposes_dod_defaults_settings_dialog(tmp_path):
@@ -2531,12 +2676,15 @@ def test_configured_active_branch_only_column_omits_sort_controls(tmp_path, monk
     service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
     try:
         payload = _get_json(f"{service.root_url}/api/board")
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-20")
         html = _get_text(service.root_url)
     finally:
         service.shutdown()
 
     branch_tasks = payload["columns"]["Done"]
     assert [task["mutable"] for task in branch_tasks] == [False, False]
+    assert detail["id"] == "TASK-20"
+    assert detail["mutable"] is False
     branch_column = html.split('data-status="Done"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
     assert "TASK-20" in branch_column
     assert "TASK-21" in branch_column
@@ -2553,39 +2701,26 @@ def test_newer_branch_winner_is_readonly_while_local_winner_remains_mutable(tmp_
     repository.create_task(title="Local companion", task_id="TASK-2", status="In Progress")
 
     from backlog_py.browser import service as browser_service
-    from backlog_py.core import repository as repository_module
-    from backlog_py.runtime.git import GitTaskSnapshot
 
-    local_path = _task_file(repo)
-    branch_source = local_path.read_text(encoding="utf-8").replace(
-        "title: Example task", "title: Newer branch winner"
-    )
-    relative_path = local_path.relative_to(repo).as_posix()
-    monkeypatch.setattr(
-        repository_module,
-        "current_task_snapshot_timestamps",
-        lambda project, paths: {path: 1.0 for path in paths},
-    )
-    monkeypatch.setattr(
-        repository_module,
-        "list_active_branch_task_snapshots",
-        lambda project: [
-            GitTaskSnapshot(
-                ref="refs/heads/feature",
-                relative_path=relative_path,
-                source=branch_source,
-                committed_at=2.0,
-            )
-        ],
-    )
+    _install_newer_branch_task(monkeypatch, repo)
 
-    payload = browser_service.build_board_payload(project)
-    html = browser_service.render_board_html(project)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        payload = _get_json(f"{service.root_url}/api/board")
+        branch_detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+        local_detail = _get_json(f"{service.root_url}/api/tasks/TASK-2")
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
 
     tasks = {task["id"]: task for task in payload["columns"]["In Progress"]}
     assert tasks["TASK-1"]["title"] == "Newer branch winner"
     assert tasks["TASK-1"]["mutable"] is False
     assert tasks["TASK-2"]["mutable"] is True
+    assert branch_detail["title"] == "Newer branch winner"
+    assert branch_detail["mutable"] is False
+    assert local_detail["title"] == "Local companion"
+    assert local_detail["mutable"] is True
     column = html.split('data-status="In Progress"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
     branch_card = column.split('data-task-id="TASK-1"', maxsplit=1)[1].split("</article>", maxsplit=1)[0]
     local_card = column.split('data-task-id="TASK-2"', maxsplit=1)[1].split("</article>", maxsplit=1)[0]
@@ -4141,6 +4276,56 @@ def _replace_browser_fixture_task_status(repo: Path, status: str) -> None:
     replaced = source.replace("status: In Progress", f"status: {yaml.safe_dump(status).strip()}")
     assert replaced != source
     path.write_text(replaced, encoding="utf-8")
+
+
+def _install_newer_branch_task(monkeypatch, repo: Path) -> None:
+    from backlog_py.core import repository as repository_module
+    from backlog_py.runtime.git import GitTaskSnapshot
+
+    local_path = _task_file(repo)
+    branch_source = local_path.read_text(encoding="utf-8").replace(
+        "title: Example task", "title: Newer branch winner"
+    )
+    relative_path = local_path.relative_to(repo).as_posix()
+    monkeypatch.setattr(
+        repository_module,
+        "current_task_snapshot_timestamps",
+        lambda project, paths: {path: 1.0 for path in paths},
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "list_active_branch_task_snapshots",
+        lambda project: [
+            GitTaskSnapshot(
+                ref="refs/heads/feature",
+                relative_path=relative_path,
+                source=branch_source,
+                committed_at=2.0,
+            )
+        ],
+    )
+
+
+def _install_branch_only_task(monkeypatch) -> None:
+    from backlog_py.core import repository as repository_module
+    from backlog_py.runtime.git import GitTaskSnapshot
+
+    monkeypatch.setattr(
+        repository_module,
+        "list_active_branch_task_snapshots",
+        lambda project: [
+            GitTaskSnapshot(
+                ref="refs/heads/feature",
+                relative_path="backlog/tasks/task-99 - branch-only.md",
+                source=(
+                    "---\nid: TASK-99\ntitle: Branch only\nstatus: In Progress\n---\n"
+                    "\n## Acceptance Criteria\n<!-- AC:BEGIN -->\n"
+                    "- [ ] #1 Branch criterion\n<!-- AC:END -->\n"
+                ),
+                committed_at=2.0,
+            )
+        ],
+    )
 
 
 def _write_browser_legacy_milestone(repo: Path, name: str, *, filename: str) -> Path:

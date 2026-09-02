@@ -212,12 +212,7 @@ def build_board_payload(
     label_filters: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service."""
-    project = BacklogProject(
-        root=project.root,
-        backlog_dir=project.backlog_dir,
-        config_path=project.config_path,
-        config=load_config(project.config_path),
-    )
+    project = _refreshed_project(project)
     repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     local_repository = MutableRepository(project, refresh_remote_refs=False)
     local_tasks = local_repository.list_tasks()
@@ -237,7 +232,7 @@ def build_board_payload(
                 project=project,
                 queue_item=queue_items.get(task.id.casefold()),
                 milestones=milestones,
-                mutable=_task_record_signature(task) in local_task_signatures,
+                mutable=_task_record_is_mutable(task, local_task_signatures),
             )
             for task in tasks
         ]
@@ -558,11 +553,17 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
             try:
-                task = ReadOnlyRepository(self.server.project).get_task(task_id)
+                project, task, _, mutable = _browser_task_provenance(
+                    self.server.project,
+                    task_id,
+                )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
                 return
-            self._send_json(HTTPStatus.OK, _task_detail_payload(task, project=self.server.project))
+            self._send_json(
+                HTTPStatus.OK,
+                _task_detail_payload(task, project=project, mutable=mutable),
+            )
             return
         if path in {"", "/", "/index.html"}:
             self._send_html(
@@ -809,7 +810,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.CREATED, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.CREATED,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         edit_task_id = _task_edit_endpoint_task_id(path)
@@ -819,10 +823,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             try:
                 edit_kwargs = _task_edit_kwargs_from_payload(self._read_json_body())
+
+                def edit_task() -> TaskRecord:
+                    repository = _mutable_browser_task_repository(self.server.project, edit_task_id)
+                    return repository.edit_task(edit_task_id, **edit_kwargs)
+
                 task = with_project_write_lock(
                     self.server.project,
                     "browser_task_edit",
-                    lambda: MutableRepository(self.server.project).edit_task(edit_task_id, **edit_kwargs),
+                    edit_task,
                 )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {edit_task_id}"})
@@ -830,7 +839,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         checklist_task_id = _task_checklist_endpoint_task_id(path)
@@ -840,10 +852,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             try:
                 checklist_kwargs = _task_checklist_kwargs_from_payload(self._read_json_body())
+
+                def edit_task_checklist() -> TaskRecord:
+                    repository = _mutable_browser_task_repository(self.server.project, checklist_task_id)
+                    return repository.edit_task(checklist_task_id, **checklist_kwargs)
+
                 task = with_project_write_lock(
                     self.server.project,
                     "browser_task_checklist",
-                    lambda: MutableRepository(self.server.project).edit_task(checklist_task_id, **checklist_kwargs),
+                    edit_task_checklist,
                 )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {checklist_task_id}"})
@@ -851,7 +868,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         archive_task_id = _task_archive_endpoint_task_id(path)
@@ -860,10 +880,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
                 return
             try:
+                def archive_task() -> TaskRecord:
+                    repository = _mutable_browser_task_repository(self.server.project, archive_task_id)
+                    return repository.archive_task(archive_task_id)
+
                 task = with_project_write_lock(
                     self.server.project,
                     "browser_task_archive",
-                    lambda: MutableRepository(self.server.project).archive_task(archive_task_id),
+                    archive_task,
                 )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {archive_task_id}"})
@@ -871,7 +895,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         task_id = _status_endpoint_task_id(path)
@@ -884,10 +911,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
         try:
             status = _task_status_from_payload(self._read_json_body())
+
+            def move_task() -> TaskRecord:
+                repository = _mutable_browser_task_repository(self.server.project, task_id)
+                return repository.move_task_to_status(task_id, status)
+
             task = with_project_write_lock(
                 self.server.project,
                 "browser_task_status",
-                lambda: MutableRepository(self.server.project).move_task_to_status(task_id, status),
+                move_task,
             )
         except KeyError:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
@@ -896,7 +928,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        self._send_json(HTTPStatus.OK, {"task": _task_payload(task, project=self.server.project)})
+        self._send_json(
+            HTTPStatus.OK,
+            {"task": _task_payload(task, project=self.server.project, mutable=True)},
+        )
 
     def log_message(self, format: str, *args: object) -> None:
         _ = format, args
@@ -1673,9 +1708,54 @@ def _decision_detail_payload(decision: DecisionRecord) -> dict[str, object]:
     return payload
 
 
+def _refreshed_project(project: BacklogProject) -> BacklogProject:
+    return BacklogProject(
+        root=project.root,
+        backlog_dir=project.backlog_dir,
+        config_path=project.config_path,
+        config=load_config(project.config_path),
+    )
+
+
 def _task_record_signature(task: TaskRecord) -> tuple[str, Path, str]:
     """Identify the exact local record backing a visible task."""
     return task.id, task.path, task.raw_source
+
+
+def _task_record_is_mutable(
+    task: TaskRecord,
+    local_task_signatures: set[tuple[str, Path, str]],
+) -> bool:
+    return _task_record_signature(task) in local_task_signatures
+
+
+def _browser_task_provenance(
+    project: BacklogProject,
+    task_id: str,
+) -> tuple[BacklogProject, TaskRecord, MutableRepository, bool]:
+    current_project = _refreshed_project(project)
+    visible_task = ReadOnlyRepository(
+        current_project,
+        refresh_remote_refs=False,
+    ).get_task(task_id)
+    local_repository = MutableRepository(current_project, refresh_remote_refs=False)
+    try:
+        local_task = local_repository.get_task(task_id)
+    except NotFoundError:
+        mutable = False
+    else:
+        mutable = _task_record_is_mutable(visible_task, {_task_record_signature(local_task)})
+    return current_project, visible_task, local_repository, mutable
+
+
+def _mutable_browser_task_repository(
+    project: BacklogProject,
+    task_id: str,
+) -> MutableRepository:
+    _, _, local_repository, mutable = _browser_task_provenance(project, task_id)
+    if not mutable:
+        raise TaskMutationError(f"Task is read only in the browser: {task_id}")
+    return local_repository
 
 
 def _task_payload(
@@ -1723,8 +1803,13 @@ def _task_payload(
     return payload
 
 
-def _task_detail_payload(task: TaskRecord, *, project: BacklogProject) -> dict[str, object]:
-    payload = _task_payload(task, project=project)
+def _task_detail_payload(
+    task: TaskRecord,
+    *,
+    project: BacklogProject,
+    mutable: bool | None = None,
+) -> dict[str, object]:
+    payload = _task_payload(task, project=project, mutable=mutable)
     description = task.description_or_legacy_body
     implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
     final_summary = _section_content(task, "FINAL_SUMMARY")
