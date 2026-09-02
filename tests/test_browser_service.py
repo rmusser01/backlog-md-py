@@ -2211,10 +2211,95 @@ def test_browser_config_settings_endpoint_returns_safe_values(tmp_path):
             "includeDatetimeInDates": True,
             "projectName": "basic-fixture",
             "remoteOperations": True,
+            "statusRows": [
+                {"name": "To Do", "taskCount": 0},
+                {"name": "In Progress", "taskCount": 1},
+                {"name": "Done", "taskCount": 0},
+            ],
             "statuses": ["To Do", "In Progress", "Done"],
             "zeroPaddedIds": None,
         }
     }
+
+
+def test_browser_config_status_rows_count_only_active_local_tasks(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, ["Ready", "In Progress", "Done"], default="Ready")
+    set_config_value(project, "checkActiveBranches", "true")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    archived = MutableRepository(project).create_task(title="Archived task", status="Ready")
+    MutableRepository(project).archive_task(archived.id)
+    completed = MutableRepository(project).create_task(title="Completed task", status="Done")
+    MutableRepository(project).complete_task(completed.id)
+    _install_branch_only_task(monkeypatch)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        settings = _get_json(f"{service.root_url}/api/settings/config")["settings"]
+    finally:
+        service.shutdown()
+
+    assert settings["statuses"] == ["Ready", "In Progress", "Done"]
+    assert settings["statusRows"] == [
+        {"name": "Ready", "taskCount": 0},
+        {"name": "In Progress", "taskCount": 1},
+        {"name": "Done", "taskCount": 0},
+    ]
+
+
+@pytest.mark.parametrize("configured_statuses", [None, []])
+def test_browser_config_status_rows_derive_task_order_and_append_default(tmp_path, configured_statuses):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, configured_statuses, default="Ready")
+    MutableRepository(project).create_task(title="Review task", status="Review")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        settings = _get_json(f"{service.root_url}/api/settings/config")["settings"]
+    finally:
+        service.shutdown()
+
+    assert settings["statuses"] == []
+    assert settings["statusRows"] == [
+        {"name": "In Progress", "taskCount": 1},
+        {"name": "Review", "taskCount": 1},
+        {"name": "Ready", "taskCount": 0},
+    ]
+
+
+def test_browser_config_status_rows_append_default_case_insensitively(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, None, default="in progress")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        rows = _get_json(f"{service.root_url}/api/settings/config")["settings"]["statusRows"]
+    finally:
+        service.shutdown()
+
+    assert rows == [{"name": "In Progress", "taskCount": 1}]
+
+
+def test_browser_config_status_rows_contain_default_when_project_has_no_active_tasks(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, None, default="Ready")
+    _task_file(repo).unlink()
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        rows = _get_json(f"{service.root_url}/api/settings/config")["settings"]["statusRows"]
+    finally:
+        service.shutdown()
+
+    assert rows == [{"name": "Ready", "taskCount": 0}]
 
 
 def test_browser_config_settings_update_endpoint_writes_safe_values_under_project_lock(tmp_path, monkeypatch):
@@ -2294,6 +2379,241 @@ def test_browser_config_settings_update_refreshes_server_project(tmp_path):
 
     assert board["statuses"][:3] == ["Ready", "In Progress", "Done"]
     assert '<option value="Ready" selected>Ready</option>' in html
+
+
+def test_browser_config_status_pair_trims_and_canonicalizes_submitted_values(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"statuses": [" Ready ", " In Progress "], "defaultStatus": "ready"}},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["settings"]["statuses"] == ["Ready", "In Progress"]
+    assert response["settings"]["defaultStatus"] == "Ready"
+
+
+@pytest.mark.parametrize(
+    "statuses",
+    [
+        [],
+        ["", " "],
+        ["To Do", "to do", "In Progress"],
+    ],
+)
+def test_browser_config_status_pair_rejects_empty_or_duplicate_statuses_without_writing(
+    tmp_path, monkeypatch, statuses
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    config_path = repo / "backlog" / "config.yml"
+    before = config_path.read_bytes()
+
+    from backlog_py.browser import service as browser_service
+
+    writes = []
+    original_set_config_values = browser_service.set_config_values
+
+    def tracking_set_config_values(project, updates):
+        writes.append(dict(updates))
+        return original_set_config_values(project, updates)
+
+    monkeypatch.setattr(browser_service, "set_config_values", tracking_set_config_values)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"statuses": statuses, "defaultStatus": "To Do"}},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert config_path.read_bytes() == before
+    assert writes == []
+
+
+@pytest.mark.parametrize(
+    "statuses",
+    [
+        ["To Do", "Done"],
+        ["In Progress", "Done"],
+    ],
+)
+def test_browser_config_status_pair_rejects_removing_in_use_or_default_status_without_writing(
+    tmp_path, monkeypatch, statuses
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    config_path = repo / "backlog" / "config.yml"
+    before = config_path.read_bytes()
+
+    from backlog_py.browser import service as browser_service
+
+    writes = []
+    original_set_config_values = browser_service.set_config_values
+
+    def tracking_set_config_values(project, updates):
+        writes.append(dict(updates))
+        return original_set_config_values(project, updates)
+
+    monkeypatch.setattr(browser_service, "set_config_values", tracking_set_config_values)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"statuses": statuses}},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 409
+    assert config_path.read_bytes() == before
+    assert writes == []
+
+
+def test_browser_config_status_pair_canonicalizes_only_default_update(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"defaultStatus": "done"}},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["settings"]["defaultStatus"] == "Done"
+
+
+def test_browser_config_status_pair_rejects_only_default_outside_configured_statuses(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    config_path = repo / "backlog" / "config.yml"
+    before = config_path.read_bytes()
+
+    from backlog_py.browser import service as browser_service
+
+    writes = []
+    original_set_config_values = browser_service.set_config_values
+
+    def tracking_set_config_values(project, updates):
+        writes.append(dict(updates))
+        return original_set_config_values(project, updates)
+
+    monkeypatch.setattr(browser_service, "set_config_values", tracking_set_config_values)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"defaultStatus": "Ready"}},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 409
+    assert config_path.read_bytes() == before
+    assert writes == []
+
+
+@pytest.mark.parametrize("configured_statuses", [None, []])
+def test_browser_config_status_pair_accepts_only_default_without_configured_statuses(
+    tmp_path, configured_statuses
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, configured_statuses, default="To Do")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"defaultStatus": "Ready"}},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["settings"]["defaultStatus"] == "Ready"
+    assert response["settings"]["statuses"] == []
+
+
+def test_browser_config_status_pair_validation_skips_unrelated_updates(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, ["To Do"], default="Missing")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"projectName": "Status-independent update"}},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["settings"]["projectName"] == "Status-independent update"
+    assert response["settings"]["defaultStatus"] == "Missing"
+
+
+def test_browser_config_settings_update_calls_atomic_writer_once_and_refreshes_project(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+
+    writes = []
+    original_set_config_values = browser_service.set_config_values
+
+    def tracking_set_config_values(project, updates):
+        writes.append(dict(updates))
+        return original_set_config_values(project, updates)
+
+    monkeypatch.setattr(browser_service, "set_config_values", tracking_set_config_values)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    original_server_project = service.server.project
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {
+                "settings": {
+                    "projectName": "Atomic browser update",
+                    "statuses": ["Ready", "In Progress", "Done"],
+                    "defaultStatus": "ready",
+                }
+            },
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert writes == [
+        {
+            "projectName": "Atomic browser update",
+            "statuses": json.dumps(["Ready", "In Progress", "Done"]),
+            "defaultStatus": "Ready",
+        }
+    ]
+    assert service.server.project is not original_server_project
+    assert response["settings"]["projectName"] == "Atomic browser update"
+    assert response["settings"]["defaultStatus"] == "Ready"
+    assert board["project"]["name"] == "Atomic browser update"
+    assert board["statuses"][:3] == ["Ready", "In Progress", "Done"]
 
 
 @pytest.mark.parametrize(

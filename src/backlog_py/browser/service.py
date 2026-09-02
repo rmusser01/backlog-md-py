@@ -54,7 +54,7 @@ from backlog_py.storage.config import (
     load_config,
     normalize_definition_of_done_defaults,
     replace_definition_of_done_defaults,
-    set_config_value,
+    set_config_values,
 )
 
 # Sourced from the shared helper so the browser and MCP servers cannot drift
@@ -107,6 +107,10 @@ _BROWSER_CONFIG_SETTING_KEYS = frozenset(
         "zeroPaddedIds",
     )
 )
+
+
+class _BrowserConflictError(ValueError):
+    pass
 
 
 class _MilestoneCreateKwargs(TypedDict):
@@ -488,9 +492,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/settings/config":
+            config = load_config(self.server.project.config_path)
             self._send_json(
                 HTTPStatus.OK,
-                {"settings": _config_settings_payload(load_config(self.server.project.config_path))},
+                {"settings": _config_settings_payload(config, project=self.server.project)},
             )
             return
         if path == "/api/settings/dod-defaults":
@@ -629,13 +634,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
                 def update_project() -> BacklogProject:
                     project = self.server.project
-                    for key, value in settings.items():
-                        set_config_value(project, key, value)
+                    current = load_config(project.config_path)
+                    validated_settings = _validate_status_settings(project, current, settings)
+                    config = set_config_values(project, validated_settings)
                     return BacklogProject(
                         root=project.root,
                         backlog_dir=project.backlog_dir,
                         config_path=project.config_path,
-                        config=load_config(project.config_path),
+                        config=config,
                     )
 
                 self.server.project = with_project_write_lock(
@@ -643,10 +649,16 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                     "browser_config_settings_update",
                     update_project,
                 )
+            except _BrowserConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
             except (json.JSONDecodeError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"settings": _config_settings_payload(self.server.project.config)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"settings": _config_settings_payload(self.server.project.config, project=self.server.project)},
+            )
             return
 
         if path == "/api/settings/dod-defaults":
@@ -2492,7 +2504,7 @@ def _dod_defaults_items_from_payload(payload: object) -> list[str]:
     return normalize_definition_of_done_defaults(payload["items"])
 
 
-def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:
+def _config_settings_payload(config: BacklogConfig, *, project: BacklogProject) -> dict[str, object]:
     return {
         "activeBranchDays": config.active_branch_days,
         "autoCommit": config.auto_commit,
@@ -2505,9 +2517,76 @@ def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:
         "includeDatetimeInDates": config.include_datetime_in_dates,
         "projectName": config.project_name,
         "remoteOperations": config.remote_operations,
+        "statusRows": _status_rows(project, config),
         "statuses": list(config.statuses or []),
         "zeroPaddedIds": config.zero_padded_ids,
     }
+
+
+def _status_rows(project: BacklogProject, config: BacklogConfig) -> list[dict[str, object]]:
+    tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
+    statuses = list(config.statuses or [])
+    if not statuses:
+        statuses = []
+        seen_statuses: set[str] = set()
+        for task in tasks:
+            key = task.status.casefold()
+            if key not in seen_statuses:
+                seen_statuses.add(key)
+                statuses.append(task.status)
+
+    default_key = config.default_status.casefold()
+    if default_key not in {status.casefold() for status in statuses}:
+        statuses.append(config.default_status)
+
+    counts: dict[str, int] = {}
+    for task in tasks:
+        key = task.status.casefold()
+        counts[key] = counts.get(key, 0) + 1
+    return [{"name": status, "taskCount": counts.get(status.casefold(), 0)} for status in statuses]
+
+
+def _validate_status_settings(
+    project: BacklogProject,
+    current: BacklogConfig,
+    updates: Mapping[str, str],
+) -> dict[str, str]:
+    if "statuses" not in updates and "defaultStatus" not in updates:
+        return dict(updates)
+
+    validated = dict(updates)
+    default = updates.get("defaultStatus", current.default_status)
+    if "statuses" in updates:
+        statuses = json.loads(updates["statuses"])
+        if not isinstance(statuses, list) or not all(isinstance(status, str) for status in statuses):
+            raise ValueError("Request body setting statuses must be a list of strings")
+        status_by_key: dict[str, str] = {}
+        for status in statuses:
+            key = status.casefold()
+            if key in status_by_key:
+                raise ValueError("Request body setting statuses must be case-insensitively unique")
+            status_by_key[key] = status
+
+        canonical_default = status_by_key.get(default.casefold())
+        if canonical_default is None:
+            raise _BrowserConflictError(f'Default status "{default}" must be included in statuses')
+        if "defaultStatus" in updates or canonical_default != current.default_status:
+            validated["defaultStatus"] = canonical_default
+
+        for task in MutableRepository(project, refresh_remote_refs=False).list_tasks():
+            if task.status.casefold() not in status_by_key:
+                raise _BrowserConflictError(f'Status "{task.status}" is still used by active task {task.id}')
+        return validated
+
+    configured_by_key: dict[str, str] = {}
+    for status in current.statuses or []:
+        configured_by_key.setdefault(status.casefold(), status)
+    if configured_by_key:
+        canonical_default = configured_by_key.get(default.casefold())
+        if canonical_default is None:
+            raise _BrowserConflictError(f'Default status "{default}" must be included in statuses')
+        validated["defaultStatus"] = canonical_default
+    return validated
 
 
 def _config_settings_from_payload(payload: object) -> dict[str, str]:
