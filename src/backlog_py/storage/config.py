@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +149,23 @@ def get_config_value(project: BacklogProject, key: str) -> Any:
 def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str, Any]:
     """Persist one config value from CLI text and return the written key/value."""
     raw = _load_raw_config(project.config_path)
+    raw_key, display_value = _apply_config_value(raw, key, value)
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
+    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
+    return raw_key, display_value
+
+
+def set_config_values(project: BacklogProject, updates: Mapping[str, str]) -> BacklogConfig:
+    """Persist multiple config values with one atomic replacement."""
+    raw = _load_raw_config(project.config_path)
+    for key, value in updates.items():
+        _apply_config_value(raw, key, value)
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
+    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
+    return load_config(project.config_path)
+
+
+def _apply_config_value(raw: dict[Any, Any], key: str, value: str) -> tuple[str, Any]:
     normalized_key = _normalized_config_key(key)
     if normalized_key in _READ_ONLY_CONFIG_KEYS or key.casefold() in _READ_ONLY_CONFIG_ALIASES:
         raise ValueError(
@@ -168,8 +186,6 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
     else:
         raw[raw_key] = parsed_value
         display_value = parsed_value
-    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
-    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
     return raw_key, display_value
 
 
