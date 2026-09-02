@@ -2984,6 +2984,8 @@ return {
   added,
   duplicate,
   germanEquivalent: statusKey("Straße") === statusKey("STRASSE"),
+  sigmaEquivalent: statusKey("ΟΣ") === statusKey("οσ"),
+  longSEquivalent: statusKey("ſ") === statusKey("s"),
   enterPrevented,
   moved,
   removedDefault,
@@ -2999,6 +3001,8 @@ return {
         "added": True,
         "duplicate": False,
         "germanEquivalent": True,
+        "sigmaEquivalent": True,
+        "longSEquivalent": True,
         "enterPrevented": True,
         "moved": True,
         "removedDefault": False,
@@ -3062,6 +3066,68 @@ return {
         {"name": "Done", "taskCount": 0},
         {"name": "Ready", "taskCount": 0},
     ]
+
+
+def test_browser_structured_status_submit_preserves_nonfirst_casefold_default():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [{name: "Unrelated", taskCount: 0}, {name: "ΟΣ", taskCount: 0}];
+configDefaultStatus = canonicalStatusName("οσ");
+const unmatchedDefault = canonicalStatusName("Missing");
+const form = {
+  _data: {
+    projectName: "Project",
+    defaultAssignee: "",
+    dateFormat: "yyyy-mm-dd",
+    defaultPort: "6420",
+    activeBranchDays: "30",
+    zeroPaddedIds: "",
+  },
+  elements: {
+    defaultStatus: {value: configDefaultStatus},
+    includeDatetimeInDates: {checked: false},
+    autoOpenBrowser: {checked: false},
+    remoteOperations: {checked: false},
+    checkActiveBranches: {checked: true},
+    autoCommit: {checked: false},
+  },
+};
+let request = null;
+globalThis.fetch = async (url, options) => {
+  request = {url, options};
+  return {ok: false, json: async () => ({error: "Keep open"})};
+};
+await submitConfigSettings({preventDefault() {}, currentTarget: form, submitter: {disabled: false}});
+return {
+  canonicalDefault: configDefaultStatus,
+  unmatchedDefault,
+  submitted: JSON.parse(request.options.body).settings.defaultStatus,
+};
+"""
+    )
+
+    assert result == {
+        "canonicalDefault": "ΟΣ",
+        "unmatchedDefault": "Missing",
+        "submitted": "ΟΣ",
+    }
+
+
+def test_browser_structured_status_rejects_sigma_and_long_s_duplicates():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [{name: "ΟΣ", taskCount: 0}, {name: "ſ", taskCount: 0}];
+const sigmaRejected = !addStatus("οσ");
+const longSRejected = !addStatus("s");
+return {sigmaRejected, longSRejected, rows: statusRows};
+"""
+    )
+
+    assert result == {
+        "sigmaRejected": True,
+        "longSRejected": True,
+        "rows": [{"name": "ΟΣ", "taskCount": 0}, {"name": "ſ", "taskCount": 0}],
+    }
 
 
 def test_browser_settings_open_ignores_stale_delayed_success_and_error_bodies():

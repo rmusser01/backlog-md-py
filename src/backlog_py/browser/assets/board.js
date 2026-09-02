@@ -120,16 +120,19 @@
     }
 
     function statusKey(value) {
-      return String(value || "").trim().normalize("NFC").toLowerCase().replaceAll("ß", "ss");
+      return String(value || "").trim().normalize("NFC").toUpperCase().toLowerCase();
+    }
+
+    function canonicalStatusName(value) {
+      const match = statusRows.find((row) => statusKey(row.name) === statusKey(value));
+      return match?.name || String(value || "");
     }
 
     function renderStatusRows() {
       const container = document.getElementById("config-status-rows");
       const select = configSettingsForm?.elements.defaultStatus;
       if (!container || !select) return;
-      const selectedKey = statusKey(configDefaultStatus);
-      const selectedRow = statusRows.find((row) => statusKey(row.name) === selectedKey) || statusRows[0];
-      configDefaultStatus = selectedRow?.name || "";
+      configDefaultStatus = canonicalStatusName(configDefaultStatus);
       container.replaceChildren();
       select.replaceChildren();
       statusRows.forEach((row, index) => {
@@ -180,6 +183,12 @@
         item.append(summary, actions);
         container.appendChild(item);
       });
+      if (configDefaultStatus && !statusRows.some((row) => row.name === configDefaultStatus)) {
+        const option = document.createElement("option");
+        option.value = configDefaultStatus;
+        option.textContent = configDefaultStatus;
+        select.appendChild(option);
+      }
       select.value = configDefaultStatus;
     }
 
