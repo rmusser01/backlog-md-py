@@ -74,6 +74,14 @@ class TaskSortResult:
 
 
 @dataclass(frozen=True)
+class _TaskSourceUpdate:
+    task_id: str
+    path: Path
+    original_source: str
+    updated_source: str
+
+
+@dataclass(frozen=True)
 class _VisibleTaskRecord:
     bucket: str
     task: TaskRecord
@@ -873,18 +881,20 @@ class MutableRepository(ReadOnlyRepository):
         )
 
     def _assign_task_ordinals(self, tasks: Sequence[TaskRecord]) -> tuple[str, ...]:
-        changed_task_ids: list[str] = []
-        for index, task in enumerate(tasks, start=1):
-            ordinal = index * 1000
-            current = task.parsed.frontmatter.get("ordinal")
-            if type(current) is int and current == ordinal:
-                continue
-            source = _replace_frontmatter_values(task.raw_source, task.parsed, {"ordinal": ordinal})
-            _atomic_write_text(self._safe_task_path(task.path), source, base=self.project.backlog_dir)
-            changed_task_ids.append(task.id)
-        if changed_task_ids:
-            self._invalidate_task_cache()
-        return tuple(changed_task_ids)
+        updates = [
+            _TaskSourceUpdate(
+                task_id=task.id,
+                path=task.path,
+                original_source=task.raw_source,
+                updated_source=_replace_frontmatter_values(
+                    task.raw_source,
+                    task.parsed,
+                    {"ordinal": index * 1000},
+                ),
+            )
+            for index, task in enumerate(tasks, start=1)
+        ]
+        return tuple(_write_task_source_batch(self, updates))
 
     def archive_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
@@ -941,6 +951,41 @@ class MutableRepository(ReadOnlyRepository):
         task_dir.mkdir(parents=True, exist_ok=True)
         path = task_dir / f"{task_id.lower()} - {_slug_title(title)}.md"
         return self._safe_task_path(path)
+
+
+def _write_task_source_batch(
+    repository: MutableRepository,
+    updates: Sequence[_TaskSourceUpdate],
+) -> list[str]:
+    prepared: list[tuple[_TaskSourceUpdate, Path]] = []
+    for update in updates:
+        parse_task_markdown(update.updated_source)
+        safe_path = repository._safe_task_path(update.path)
+        if update.updated_source != update.original_source:
+            prepared.append((update, safe_path))
+
+    completed: list[tuple[_TaskSourceUpdate, Path]] = []
+    try:
+        for update, path in prepared:
+            _atomic_write_text(path, update.updated_source, base=repository.project.backlog_dir)
+            completed.append((update, path))
+    except Exception:
+        for update, path in reversed(completed):
+            try:
+                _atomic_write_text(path, update.original_source, base=repository.project.backlog_dir)
+            except Exception as rollback_error:
+                logger.warning(
+                    "Failed to roll back task {} at {}: {}",
+                    update.task_id,
+                    path,
+                    rollback_error,
+                )
+        repository._invalidate_task_cache()
+        raise
+
+    if prepared:
+        repository._invalidate_task_cache()
+    return [update.task_id for update, _ in prepared]
 
 
 def _load_task(path: Path) -> TaskRecord:

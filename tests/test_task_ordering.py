@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from backlog_py.core import repository as repository_module
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -31,6 +32,7 @@ def _write_task(
     status: str = "To Do",
     priority: str | None = None,
     created_date: object | None = None,
+    updated_date: object | None = None,
     ordinal: int | None = None,
 ) -> None:
     frontmatter: dict[str, object] = {
@@ -42,6 +44,8 @@ def _write_task(
         frontmatter["priority"] = priority
     if created_date is not None:
         frontmatter["created_date"] = created_date
+    if updated_date is not None:
+        frontmatter["updated_date"] = updated_date
     if ordinal is not None:
         frontmatter["ordinal"] = ordinal
     source = f"---\n{yaml.safe_dump(frontmatter, sort_keys=False).strip()}\n---\n"
@@ -58,6 +62,35 @@ def _ordinals(project: BacklogProject, status: str) -> dict[str, object]:
 def _task_sources(project: BacklogProject) -> dict[str, str]:
     task_dir = project.backlog_dir / "tasks"
     return {path.name: path.read_text(encoding="utf-8") for path in sorted(task_dir.glob("*.md"))}
+
+
+def _frontmatters(project: BacklogProject) -> dict[str, dict[str, object]]:
+    return {
+        task.id: dict(task.parsed.frontmatter)
+        for task in MutableRepository(project).list_tasks(status="To Do")
+    }
+
+
+def _ordered_ids(project: BacklogProject) -> list[str]:
+    return [task.id for task in MutableRepository(project).list_tasks(status="To Do")]
+
+
+def _without(values: dict[str, object], key: str) -> dict[str, object]:
+    return {name: value for name, value in values.items() if name != key}
+
+
+def _fail_the_second_forward_write_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    atomic_write = repository_module._atomic_write_text
+    calls = 0
+
+    def fail_once(path: Path, content: str, base: Path | None = None) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated write failure")
+        atomic_write(path, content, base=base)
+
+    monkeypatch.setattr(repository_module, "_atomic_write_text", fail_once)
 
 
 def _set_priorities(project: BacklogProject, priorities: list[str]) -> None:
@@ -104,6 +137,67 @@ def test_sort_tasks_reports_only_ordinals_that_changed(project: BacklogProject) 
 
     assert result.task_ids == ("TASK-1", "TASK-2")
     assert result.changed_task_ids == ("TASK-2",)
+
+
+def test_sort_rewrites_only_ordinals_and_preserves_updated_dates(project: BacklogProject) -> None:
+    _write_task(project, task_id="TASK-1", priority="low", updated_date="2026-08-29")
+    _write_task(project, task_id="TASK-2", priority="high", updated_date="2026-08-30")
+    _write_task(project, task_id="TASK-3", priority="medium", updated_date="2026-08-31")
+    before = _frontmatters(project)
+
+    MutableRepository(project).sort_tasks("To Do", sort="priority")
+
+    after = _frontmatters(project)
+    assert [after[task_id]["ordinal"] for task_id in _ordered_ids(project)] == [1000, 2000, 3000]
+    for task_id in before:
+        assert after[task_id].get("updated_date") == before[task_id].get("updated_date")
+        assert _without(after[task_id], "ordinal") == _without(before[task_id], "ordinal")
+
+
+def test_sort_noop_performs_no_file_writes(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_task(project, task_id="TASK-1", priority="low")
+    _write_task(project, task_id="TASK-2", priority="high")
+    repository = MutableRepository(project)
+    repository.sort_tasks("To Do", sort="priority")
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("no-op sort attempted a write or cache invalidation")
+
+    monkeypatch.setattr(repository_module, "_atomic_write_text", fail_if_called)
+    monkeypatch.setattr(repository, "_invalidate_task_cache", fail_if_called)
+
+    result = repository.sort_tasks("To Do", sort="priority")
+
+    assert result.changed_task_ids == ()
+
+
+def test_sort_rolls_back_completed_writes_after_runtime_failure(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_task(project, task_id="TASK-1", priority="low")
+    _write_task(project, task_id="TASK-2", priority="high")
+    _write_task(project, task_id="TASK-3", priority="medium")
+    before = _task_sources(project)
+    _fail_the_second_forward_write_once(monkeypatch)
+
+    with pytest.raises(OSError, match="simulated write failure"):
+        MutableRepository(project).sort_tasks("To Do", sort="priority")
+
+    assert _task_sources(project) == before
+
+
+def test_sort_invalidates_populated_caches_after_success(project: BacklogProject) -> None:
+    _write_task(project, task_id="TASK-1", priority="low")
+    _write_task(project, task_id="TASK-2", priority="high")
+    _write_task(project, task_id="TASK-3", priority="medium")
+    repository = MutableRepository(project)
+    assert [task.id for task in repository.list_tasks(status="To Do")] == ["TASK-1", "TASK-2", "TASK-3"]
+
+    repository.sort_tasks("To Do", sort="priority")
+
+    assert [task.id for task in repository.list_tasks(status="To Do")] == ["TASK-2", "TASK-3", "TASK-1"]
 
 
 @pytest.mark.parametrize(
