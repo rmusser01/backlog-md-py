@@ -30,6 +30,7 @@ from backlog_py.core.milestones import (
     MilestoneMutationError,
     MilestoneRecord,
     MilestoneService,
+    resolve_milestone_from_records,
 )
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import (
@@ -1328,6 +1329,7 @@ def _milestone_list_payload(project: BacklogProject) -> dict[str, object]:
 def _milestone_payload(record: MilestoneRecord, *, task_reference_count: int) -> dict[str, object]:
     return {
         "key": _milestone_api_key(record),
+        "selectionKey": record.path_relative,
         "id": record.id,
         "title": record.title,
         "name": record.name,
@@ -1350,7 +1352,6 @@ def _milestone_reference_counts(
     records: list[MilestoneRecord],
 ) -> dict[Path, int]:
     counts = {record.path: 0 for record in records}
-    service = MilestoneService(project)
     repository = ReadOnlyRepository(
         project,
         refresh_remote_refs=False,
@@ -1361,7 +1362,7 @@ def _milestone_reference_counts(
         if isinstance(raw_reference, bool) or not isinstance(raw_reference, (str, int)):
             continue
         try:
-            resolved = service.resolve_milestone(str(raw_reference), include_archived=True)
+            resolved = resolve_milestone_from_records(str(raw_reference), records)
         except (MilestoneConflictError, NotFoundError):
             continue
         if resolved.path in counts:
@@ -1930,6 +1931,8 @@ def _milestone_edit_kwargs_from_payload(payload: object) -> _MilestoneEditKwargs
         edit_kwargs["description"] = _required_text_field(payload, "description")
     if "dueDate" in payload:
         edit_kwargs["due_date"] = _required_text_field(payload, "dueDate")
+    if not edit_kwargs:
+        raise ValueError("Request body must include title, description, or dueDate")
     return edit_kwargs
 
 
@@ -1938,7 +1941,7 @@ def _milestone_task_handling_from_payload(payload: object) -> str | None:
     task_handling = payload.get("taskHandling")
     if task_handling is None:
         return None
-    if task_handling not in {"keep", "clear"}:
+    if not isinstance(task_handling, str) or task_handling not in {"keep", "clear"}:
         raise ValueError("Request body field taskHandling must be keep or clear")
     return task_handling
 

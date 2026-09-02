@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import yaml
 from loguru import logger
@@ -111,7 +111,10 @@ class MilestoneService:
         return sorted(milestones, key=_milestone_sort_key)
 
     def resolve_milestone(self, reference: str, *, include_archived: bool = True) -> MilestoneRecord:
-        return _resolve_milestone(reference, self.list_milestones(include_archived=include_archived))
+        return resolve_milestone_from_records(
+            reference,
+            self.list_milestones(include_archived=include_archived),
+        )
 
     def edit_milestone(
         self,
@@ -538,15 +541,22 @@ def _milestone_aliases(record: MilestoneRecord) -> set[str]:
     return {record.name.casefold(), record.path.stem.casefold()}
 
 
+def resolve_milestone_from_records(
+    reference: str,
+    records: Sequence[MilestoneRecord],
+) -> MilestoneRecord:
+    return _resolve_milestone(reference, records)
+
+
 def _matching_milestones(
     reference: str,
-    records: list[MilestoneRecord],
+    records: Sequence[MilestoneRecord],
 ) -> list[MilestoneRecord]:
     requested = reference.strip().casefold()
     return [record for record in records if requested in _milestone_aliases(record)]
 
 
-def _resolve_milestone(reference: str, records: list[MilestoneRecord]) -> MilestoneRecord:
+def _resolve_milestone(reference: str, records: Sequence[MilestoneRecord]) -> MilestoneRecord:
     if not isinstance(reference, str) or not reference.strip():
         raise NotFoundError(f"Milestone not found: {reference}")
     matches = _matching_milestones(reference, records)
