@@ -23,7 +23,7 @@
       <button class="primary-button" type="button" id="task-create-open">New task</button>
     </div>
   </header>
-  {queue_filter}
+  {board_filter}
   <div id="board-status" class="board-status" role="status" aria-live="polite"></div>
   <main class="board" data-board-revision="{board_revision}" data-mermaid-url="{mermaid_url}">
 {column_markup}
@@ -47,7 +47,7 @@
           <input name="priority" autocomplete="off">
         </label>
         <label>Milestone
-          <input name="milestone" autocomplete="off">
+          <select class="task-form-select" name="milestone">{milestone_options}</select>
         </label>
         <label>Assignees
           <textarea name="assignees"></textarea>
@@ -85,7 +85,7 @@
           <input name="priority" autocomplete="off">
         </label>
         <label>Milestone
-          <input name="milestone" autocomplete="off">
+          <select class="task-form-select" name="milestone">{milestone_options}</select>
         </label>
         <label>Assignees
           <textarea name="assignees"></textarea>

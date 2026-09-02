@@ -204,20 +204,63 @@ def run_browser_service_foreground(
         server.server_close()
 
 
-def build_board_payload(project: BacklogProject, *, queue_category_filter: str | None = None) -> dict[str, object]:
+def build_board_payload(
+    project: BacklogProject,
+    *,
+    queue_category_filter: str | None = None,
+    milestone_filter: str | None = None,
+    label_filters: Sequence[str] | None = None,
+) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service."""
     repository = ReadOnlyRepository(project, refresh_remote_refs=False)
     board = repository.board()
+    board.setdefault(project.config.default_status, [])
     queue_report = OrchestrationService(project).queue()
     queue_items = {item.task_id.casefold(): item for item in queue_report.items}
+    milestones = MilestoneService(project).list_milestones(include_archived=True)
     category_filter = _normalize_queue_category_filter(queue_category_filter)
+    normalized_milestone_filter = _normalize_milestone_filter(milestone_filter)
+    normalized_label_filters = _normalize_label_filters(label_filters)
     unfiltered_columns = {
         status: [
-            _task_payload(task, project=project, queue_item=queue_items.get(task.id.casefold()))
+            _task_payload(
+                task,
+                project=project,
+                queue_item=queue_items.get(task.id.casefold()),
+                milestones=milestones,
+            )
             for task in tasks
         ]
         for status, tasks in board.items()
     }
+    unfiltered_tasks = [task for tasks in unfiltered_columns.values() for task in tasks]
+    assignable_statuses = list(
+        MutableRepository(project, refresh_remote_refs=False).status_assignment_options()
+    )
+    milestone_choices = _milestone_filter_choices(milestones, unfiltered_tasks)
+    labels_by_key: dict[str, str] = {}
+    for task in unfiltered_tasks:
+        for label in _metadata_list(task.get("labels")):
+            normalized_label = label.strip()
+            if normalized_label:
+                labels_by_key.setdefault(normalized_label.casefold(), normalized_label)
+    available_labels = sorted(labels_by_key.values(), key=str.casefold)
+    filtered_columns = {
+        status: [
+            task
+            for task in tasks
+            if _matches_board_filters(
+                task,
+                queue_category=category_filter,
+                milestone=normalized_milestone_filter,
+                labels=normalized_label_filters,
+                milestones=milestones,
+            )
+        ]
+        for status, tasks in unfiltered_columns.items()
+    }
+    total_task_count = len(unfiltered_tasks)
+    visible_task_count = sum(len(tasks) for tasks in filtered_columns.values())
     payload: dict[str, object] = {
         "project": {
             "name": project.config.project_name,
@@ -225,14 +268,27 @@ def build_board_payload(project: BacklogProject, *, queue_category_filter: str |
             "backlogDir": str(project.backlog_dir),
         },
         "statuses": list(board.keys()),
+        "assignableStatuses": assignable_statuses,
         "queueCategories": sorted(queue_report.by_category),
         "queueCategoryFilter": category_filter,
-        "columns": {
-            status: [task for task in tasks if _matches_queue_category_payload(task, category_filter)]
-            for status, tasks in unfiltered_columns.items()
-        },
+        "milestoneFilter": normalized_milestone_filter,
+        "labelFilters": normalized_label_filters,
+        "availableLabels": available_labels,
+        "milestoneChoices": milestone_choices,
+        "visibleTaskCount": visible_task_count,
+        "totalTaskCount": total_task_count,
+        "columns": filtered_columns,
     }
-    payload["revision"] = _board_revision({**payload, "queueCategoryFilter": None, "columns": unfiltered_columns})
+    payload["revision"] = _board_revision(
+        {
+            **payload,
+            "queueCategoryFilter": None,
+            "milestoneFilter": None,
+            "labelFilters": [],
+            "visibleTaskCount": total_task_count,
+            "columns": unfiltered_columns,
+        }
+    )
     return payload
 
 
@@ -422,6 +478,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 build_board_payload(
                     self.server.project,
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                    milestone_filter=_query_value(parsed_url.query, "milestone"),
+                    label_filters=_query_values(parsed_url.query, "labels"),
                 ),
             )
             return
@@ -503,6 +561,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 render_board_html(
                     self.server.project,
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                    milestone_filter=_query_value(parsed_url.query, "milestone"),
+                    label_filters=_query_values(parsed_url.query, "labels"),
                 ),
             )
             return
@@ -994,22 +1054,51 @@ def _vendored_mermaid_source() -> str:
     return _load_browser_text_resource("assets", "mermaid.min.js")
 
 
-def render_board_html(project: BacklogProject, *, queue_category_filter: str | None = None) -> str:
+def render_board_html(
+    project: BacklogProject,
+    *,
+    queue_category_filter: str | None = None,
+    milestone_filter: str | None = None,
+    label_filters: Sequence[str] | None = None,
+) -> str:
     """Render a browser board with basic task creation, editing, and status movement."""
-    payload = build_board_payload(project, queue_category_filter=queue_category_filter)
+    payload = build_board_payload(
+        project,
+        queue_category_filter=queue_category_filter,
+        milestone_filter=milestone_filter,
+        label_filters=label_filters,
+    )
     project_name = escape(project.config.project_name)
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
     columns = columns_obj if isinstance(columns_obj, dict) else {}
     local_repository = MutableRepository(project, refresh_remote_refs=False)
     local_tasks = local_repository.list_tasks()
+    raw_assignable_statuses = payload.get("assignableStatuses")
+    assignable_status_list = (
+        [str(status) for status in raw_assignable_statuses]
+        if isinstance(raw_assignable_statuses, list)
+        else []
+    )
+    assignable_statuses = set(assignable_status_list)
     sortable_statuses = {
         status
-        for status in local_repository.status_assignment_options()
+        for status in assignable_statuses
         if sum(task.status == status for task in local_tasks) >= 2
     }
+    filters_active = bool(
+        payload.get("queueCategoryFilter")
+        or payload.get("milestoneFilter")
+        or payload.get("labelFilters")
+    )
     column_markup = "\n".join(
-        _render_column(str(status), tasks, sortable=str(status) in sortable_statuses)
+        _render_column(
+            str(status),
+            tasks,
+            sortable=str(status) in sortable_statuses,
+            assignable=str(status) in assignable_statuses,
+            filtered=filters_active,
+        )
         for status, tasks in columns.items()
     )
     task_create_description_editor = _render_markdown_editor(
@@ -1037,10 +1126,39 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
         data_field="finalSummary",
     )
     select_tag = "select"
-    status_options = _render_status_options(project.config.statuses or [])
-    queue_filter = _render_queue_category_filter(
-        categories=list(payload.get("queueCategories") or []),
-        selected=_metadata_string(payload.get("queueCategoryFilter")),
+    status_options = _render_status_options(
+        assignable_status_list,
+        selected=project.config.default_status,
+    )
+    raw_milestone_choices = payload.get("milestoneChoices")
+    milestone_choices = (
+        [choice for choice in raw_milestone_choices if isinstance(choice, dict)]
+        if isinstance(raw_milestone_choices, list)
+        else []
+    )
+    raw_queue_categories = payload.get("queueCategories")
+    raw_available_labels = payload.get("availableLabels")
+    raw_selected_labels = payload.get("labelFilters")
+    raw_visible_task_count = payload.get("visibleTaskCount")
+    raw_total_task_count = payload.get("totalTaskCount")
+    milestone_options = _render_task_milestone_options(milestone_choices)
+    board_filter = _render_board_filter(
+        queue_categories=raw_queue_categories if isinstance(raw_queue_categories, list) else [],
+        selected_queue=_metadata_string(payload.get("queueCategoryFilter")),
+        milestone_choices=milestone_choices,
+        selected_milestone=_metadata_string(payload.get("milestoneFilter")),
+        available_labels=raw_available_labels if isinstance(raw_available_labels, list) else [],
+        selected_labels=raw_selected_labels if isinstance(raw_selected_labels, list) else [],
+        visible_task_count=(
+            raw_visible_task_count
+            if isinstance(raw_visible_task_count, int) and not isinstance(raw_visible_task_count, bool)
+            else 0
+        ),
+        total_task_count=(
+            raw_total_task_count
+            if isinstance(raw_total_task_count, int) and not isinstance(raw_total_task_count, bool)
+            else 0
+        ),
     )
     escaped_mermaid_url = escape(_resolve_mermaid_url(), quote=True)
     html = _load_browser_text_resource("templates", "board.html").format_map(
@@ -1054,7 +1172,8 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
             "task_edit_final_summary_editor": task_edit_final_summary_editor,
             "select_tag": select_tag,
             "status_options": status_options,
-            "queue_filter": queue_filter,
+            "milestone_options": milestone_options,
+            "board_filter": board_filter,
             "board_css": _load_browser_text_resource("assets", "board.css").rstrip("\n"),
             "board_js": _load_browser_text_resource("assets", "board.js").rstrip("\n"),
             "mermaid_url": escaped_mermaid_url,
@@ -1235,7 +1354,14 @@ def _render_markdown_editor(*, field_id: str, name: str, label: str, data_field:
         </div>"""
 
 
-def _render_column(status: str, raw_tasks: object, *, sortable: bool = False) -> str:
+def _render_column(
+    status: str,
+    raw_tasks: object,
+    *,
+    sortable: bool = False,
+    assignable: bool = True,
+    filtered: bool = False,
+) -> str:
     tasks = raw_tasks if isinstance(raw_tasks, list) else []
     sort_controls = ""
     if sortable and len(tasks) >= 2:
@@ -1248,16 +1374,17 @@ def _render_column(status: str, raw_tasks: object, *, sortable: bool = False) ->
         </div>
       </details>
 """
-    task_markup = "\n".join(_render_task(task) for task in tasks)
+    task_markup = "\n".join(_render_task(task, readonly=not assignable) for task in tasks)
     if not task_markup:
-        task_markup = '      <div class="empty">No tasks</div>'
-    return f"""    <section class="column" data-status="{escape(status)}">
-      <h2><span>{escape(status)}</span><span class="count">{len(tasks)}</span></h2>
+        task_markup = f'      <div class="empty">{"No matching tasks" if filtered else "No tasks"}</div>'
+    readonly = '' if assignable else '<span class="column-readonly">Read only</span>'
+    return f"""    <section class="column" data-status="{escape(status)}" data-assignable="{str(assignable).lower()}">
+      <h2><span>{escape(status)}</span>{readonly}<span class="count">{len(tasks)}</span></h2>
 {sort_controls}{task_markup}
     </section>"""
 
 
-def _render_task(raw_task: object) -> str:
+def _render_task(raw_task: object, *, readonly: bool = False) -> str:
     task = raw_task if isinstance(raw_task, dict) else {}
     task_id = escape(str(task.get("id", "")))
     title = escape(str(task.get("title", "")))
@@ -1265,17 +1392,26 @@ def _render_task(raw_task: object) -> str:
     assignees = task.get("assignees")
     labels = task.get("labels")
     queue_category = _metadata_string(task.get("queueCategory"))
+    milestone_title = _metadata_string(task.get("milestoneTitle"))
     meta = _render_task_meta(
         priority=priority,
         assignees=assignees if isinstance(assignees, list) else [],
         labels=labels if isinstance(labels, list) else [],
         queue_category=queue_category,
+        milestone_title=milestone_title,
+        milestone_archived=task.get("milestoneArchived") is True,
+        milestone_unknown=task.get("milestoneUnknown") is True,
+        milestone_reference=_metadata_string(task.get("milestone")),
     )
-    return f"""      <article class="task" data-task-id="{task_id}" draggable="true">
+    edit_actions = "" if readonly else (
+        f'<button class="details-button" type="button" data-task-edit="{task_id}">Edit</button>'
+        f'<button class="details-button" type="button" data-task-archive="{task_id}">Archive</button>'
+    )
+    return f"""      <article class="task" data-task-id="{task_id}" draggable="{str(not readonly).lower()}">
         <div class="task-id">{task_id}</div>
         <div class="task-title">{title}</div>
 {meta}
-        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button><button class="details-button" type="button" data-task-edit="{task_id}">Edit</button><button class="details-button" type="button" data-task-archive="{task_id}">Archive</button></div>
+        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button>{edit_actions}</div>
       </article>"""
 
 
@@ -1294,25 +1430,83 @@ def _board_shutdown_sse_event(shutdown_state: Mapping[str, object]) -> str:
     return f"retry: {_BOARD_REVISION_RETRY_MS}\nevent: shutdown\ndata: {payload}\n\n"
 
 
-def _render_status_options(statuses: list[str]) -> str:
-    return "".join(f'<option value="{escape(status)}">{escape(status)}</option>' for status in statuses)
+def _render_status_options(statuses: list[str], *, selected: str | None = None) -> str:
+    return "".join(
+        f'<option value="{escape(status)}"{" selected" if status == selected else ""}>'
+        f"{escape(status)}</option>"
+        for status in statuses
+    )
 
 
-def _render_queue_category_filter(*, categories: list[object], selected: str | None) -> str:
+def _render_board_filter(
+    *,
+    queue_categories: list[object],
+    selected_queue: str | None,
+    milestone_choices: Sequence[Mapping[str, object]],
+    selected_milestone: str | None,
+    available_labels: list[object],
+    selected_labels: list[object],
+    visible_task_count: int,
+    total_task_count: int,
+) -> str:
     option_markup = ['<option value="">All queue states</option>']
-    for category in categories:
+    for category in queue_categories:
         category_text = str(category)
-        selected_attr = ' selected' if selected and selected == category_text else ""
+        selected_attr = ' selected' if selected_queue == category_text else ""
         option_markup.append(
             f'<option value="{escape(category_text)}"{selected_attr}>{escape(_queue_category_label(category_text))}</option>'
         )
+    milestone_options = ['<option value="">All milestones</option>']
+    for choice in milestone_choices:
+        value = str(choice.get("value") or "")
+        choice_label = str(choice.get("label") or value)
+        selected_attr = ' selected' if selected_milestone == value else ""
+        milestone_options.append(
+            f'<option value="{escape(value)}"{selected_attr}>{escape(choice_label)}</option>'
+        )
+    if selected_milestone and all(str(choice.get("value") or "") != selected_milestone for choice in milestone_choices):
+        milestone_options.append(
+            f'<option value="{escape(selected_milestone)}" selected>{escape(selected_milestone)}</option>'
+        )
+    selected_label_keys = {str(label).casefold() for label in selected_labels}
+    label_options = []
+    for index, available_label in enumerate(available_labels):
+        label_text = str(available_label)
+        checked = " checked" if label_text.casefold() in selected_label_keys else ""
+        label_options.append(
+            f'<label for="board-label-{index}"><input id="board-label-{index}" type="checkbox" '
+            f'name="labels" value="{escape(label_text)}"{checked}> {escape(label_text)}</label>'
+        )
+    labels_summary = f"Labels ({len(selected_label_keys)})" if selected_label_keys else "Labels"
+    count = ""
+    if selected_queue or selected_milestone or selected_label_keys:
+        count = f'<span class="filter-count">{visible_task_count} / {total_task_count} tasks</span>'
     return (
-        '<form class="queue-filter" method="get">'
+        '<form class="board-filter" method="get">'
         '<label for="queue-category-filter">Queue</label>'
         f'<select id="queue-category-filter" name="queueCategory">{"".join(option_markup)}</select>'
-        '<button class="secondary-button" type="submit">Filter</button>'
+        '<label for="milestone-filter">Milestone</label>'
+        f'<select id="milestone-filter" name="milestone">{"".join(milestone_options)}</select>'
+        '<details class="label-filter">'
+        f'<summary>{escape(labels_summary)}</summary>'
+        f'<div class="label-filter-options">{"".join(label_options) or "No labels"}</div>'
+        '</details>'
+        '<button class="secondary-button" type="submit">Apply</button>'
+        '<a class="secondary-link" href="/">Clear</a>'
+        f"{count}"
         "</form>"
     )
+
+
+def _render_task_milestone_options(choices: Sequence[Mapping[str, object]]) -> str:
+    options = ['<option value="">No milestone</option>']
+    options.extend(
+        f'<option value="{escape(str(choice.get("value") or ""))}">'
+        f'{escape(str(choice.get("label") or ""))}</option>'
+        for choice in choices
+        if not choice.get("archived") and not choice.get("unknown")
+    )
+    return "".join(options)
 
 
 def _milestone_list_payload(project: BacklogProject) -> dict[str, object]:
@@ -1448,12 +1642,20 @@ def _task_payload(
     *,
     project: BacklogProject,
     queue_item: OrchestrationQueueItem | None = None,
+    milestones: Sequence[MilestoneRecord] | None = None,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
     try:
         ordinal = normalize_ordinal_value(frontmatter.get("ordinal"))
     except TaskMutationError:
         ordinal = None
+    milestone_reference = _metadata_string(frontmatter.get("milestone"))
+    milestone_record = _resolved_milestone(milestone_reference, milestones or ())
+    milestone_unknown = milestone_reference is not None and milestone_record is None
+    if milestones is None and milestone_reference is not None:
+        loaded_milestones = MilestoneService(project).list_milestones(include_archived=True)
+        milestone_record = _resolved_milestone(milestone_reference, loaded_milestones)
+        milestone_unknown = milestone_record is None
     payload: dict[str, object] = {
         "id": task.id,
         "title": task.title,
@@ -1462,7 +1664,10 @@ def _task_payload(
         "assignees": _metadata_list(frontmatter.get("assignee")),
         "labels": _metadata_list(frontmatter.get("labels")),
         "priority": _metadata_string(frontmatter.get("priority")),
-        "milestone": _metadata_string(frontmatter.get("milestone")),
+        "milestone": milestone_reference,
+        "milestoneTitle": milestone_record.title if milestone_record is not None else None,
+        "milestoneArchived": milestone_record.archived if milestone_record is not None else False,
+        "milestoneUnknown": milestone_unknown,
         "createdDate": _metadata_string(frontmatter.get("created_date")),
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
         "ordinal": ordinal,
@@ -1662,6 +1867,10 @@ def _render_task_meta(
     assignees: list[object],
     labels: list[object],
     queue_category: str | None = None,
+    milestone_title: str | None = None,
+    milestone_archived: bool = False,
+    milestone_unknown: bool = False,
+    milestone_reference: str | None = None,
 ) -> str:
     badges: list[str] = []
     if queue_category:
@@ -1673,8 +1882,18 @@ def _render_task_meta(
         badges.append(f'<span class="badge">Priority: {escape(priority)}</span>')
     for assignee in assignees[:2]:
         badges.append(f'<span class="badge">@{escape(str(assignee).lstrip("@"))}</span>')
+    if milestone_reference:
+        if milestone_unknown:
+            milestone_label = f"Unknown: {milestone_reference}"
+        elif milestone_archived:
+            milestone_label = f"{milestone_title or milestone_reference} (archived)"
+        else:
+            milestone_label = milestone_title or milestone_reference
+        badges.append(f'<span class="badge milestone-badge">{escape(milestone_label)}</span>')
     for label in labels[:2]:
-        badges.append(f'<span class="badge">{escape(str(label))}</span>')
+        badges.append(f'<span class="badge label-badge">{escape(str(label))}</span>')
+    if len(labels) > 2:
+        badges.append(f'<span class="badge label-overflow">+{len(labels) - 2}</span>')
     if not badges:
         return ""
     return f'        <div class="task-meta">{"".join(badges)}</div>'
@@ -1735,6 +1954,101 @@ def _normalize_queue_category_filter(value: str | None) -> str | None:
     return normalized or None
 
 
+def _normalize_milestone_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_label_filters(values: Sequence[str] | None) -> list[str]:
+    normalized: dict[str, str] = {}
+    for value in values or ():
+        label = str(value).strip()
+        if label:
+            normalized.setdefault(label.casefold(), label)
+    return list(normalized.values())
+
+
+def _resolved_milestone(
+    reference: str | None,
+    milestones: Sequence[MilestoneRecord],
+) -> MilestoneRecord | None:
+    if reference is None:
+        return None
+    try:
+        return resolve_milestone_from_records(reference, milestones)
+    except (MilestoneConflictError, NotFoundError):
+        return None
+
+
+def _milestone_filter_choices(
+    milestones: Sequence[MilestoneRecord],
+    tasks: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    choices: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for record in milestones:
+        value = record.id if record.format == "current" and record.id is not None else record.name
+        if value in seen or _resolved_milestone(value, milestones) != record:
+            continue
+        seen.add(value)
+        choices.append(
+            {
+                "value": value,
+                "label": f"{record.title} (archived)" if record.archived else record.title,
+                "archived": record.archived,
+                "unknown": False,
+            }
+        )
+    unknown_references = sorted(
+        {
+            reference
+            for task in tasks
+            if (reference := _metadata_string(task.get("milestone")))
+            and _resolved_milestone(reference, milestones) is None
+        },
+        key=str.casefold,
+    )
+    choices.extend(
+        {
+            "value": reference,
+            "label": f"Unknown: {reference}",
+            "archived": False,
+            "unknown": True,
+        }
+        for reference in unknown_references
+        if reference not in seen
+    )
+    return choices
+
+
+def _matches_board_filters(
+    task: Mapping[str, object],
+    *,
+    queue_category: str | None,
+    milestone: str | None,
+    labels: Sequence[str],
+    milestones: Sequence[MilestoneRecord],
+) -> bool:
+    if not _matches_queue_category_payload(task, queue_category):
+        return False
+    task_milestone = _metadata_string(task.get("milestone"))
+    if milestone is not None:
+        selected_record = _resolved_milestone(milestone, milestones)
+        if selected_record is not None:
+            if _resolved_milestone(task_milestone, milestones) != selected_record:
+                return False
+        elif task_milestone != milestone:
+            return False
+    if labels:
+        selected_labels = {label.casefold() for label in labels}
+        task_labels = {label.casefold() for label in _metadata_list(task.get("labels"))}
+        if selected_labels.isdisjoint(task_labels):
+            return False
+    return True
+
+
 def _matches_queue_category_payload(task: object, category: str | None) -> bool:
     if category is None:
         return True
@@ -1753,6 +2067,10 @@ def _query_value(query: str, key: str) -> str | None:
     if not values:
         return None
     return values[-1]
+
+
+def _query_values(query: str, key: str) -> list[str]:
+    return parse_qs(query, keep_blank_values=True).get(key, [])
 
 
 def _metadata_list(value: object) -> list[str]:

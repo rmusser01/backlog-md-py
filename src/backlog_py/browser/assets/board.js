@@ -27,6 +27,36 @@
       if (element) element.textContent = value || "—";
     }
 
+    function milestoneDetailText(task) {
+      if (!task.milestone) return "";
+      if (task.milestoneUnknown) return `Unknown: ${task.milestone}`;
+      const title = task.milestoneTitle || task.milestone;
+      return task.milestoneArchived ? `${title} (archived)` : title;
+    }
+
+    function selectTaskMilestone(task) {
+      const select = taskEditForm?.elements.milestone;
+      if (!(select instanceof HTMLSelectElement)) return;
+      select.querySelectorAll("[data-stored-milestone]").forEach((option) => option.remove());
+      const raw = task.milestone || "";
+      if (!raw) {
+        taskEditForm.elements.milestone.value = "";
+        return;
+      }
+      const exact = Array.from(select.options).some((option) => option.value === raw);
+      if (!exact) {
+        const option = document.createElement("option");
+        option.value = raw;
+        option.dataset.storedMilestone = "true";
+        const title = task.milestoneTitle || raw;
+        if (task.milestoneUnknown) option.textContent = `Unknown: ${raw}`;
+        else if (task.milestoneArchived) option.textContent = `${title} (archived)`;
+        else option.textContent = `${title} (stored as ${raw})`;
+        select.appendChild(option);
+      }
+      taskEditForm.elements.milestone.value = raw;
+    }
+
     function setHtml(id, value) {
       const element = document.getElementById(id);
       if (element) element.innerHTML = value || '<p class="markdown-empty">No content</p>';
@@ -759,7 +789,7 @@
       setText("task-dialog-priority", task.priority);
       setText("task-dialog-assignees", (task.assignees || []).join(", "));
       setText("task-dialog-labels", (task.labels || []).join(", "));
-      setText("task-dialog-milestone", task.milestone);
+      setText("task-dialog-milestone", milestoneDetailText(task));
       setHtml("task-dialog-description-html", task.descriptionHtml);
       setHtml("task-dialog-implementation-notes", task.implementationNotesHtml);
       setHtml("task-dialog-final-summary", task.finalSummaryHtml);
@@ -783,7 +813,7 @@
       taskEditForm.elements.title.value = task.title || "";
       taskEditForm.elements.status.value = task.status || "";
       taskEditForm.elements.priority.value = task.priority || "";
-      taskEditForm.elements.milestone.value = task.milestone || "";
+      selectTaskMilestone(task);
       taskEditForm.elements.assignees.value = (task.assignees || []).join(", ");
       taskEditForm.elements.labels.value = (task.labels || []).join(", ");
       taskEditForm.elements.description.value = task.description || "";
@@ -960,6 +990,10 @@
         body: JSON.stringify({
           title: String(data.get("title") || ""),
           status: String(data.get("status") || ""),
+          priority: String(data.get("priority") || ""),
+          milestone: String(data.get("milestone") || ""),
+          assignees: metadataList(data.get("assignees")),
+          labels: metadataList(data.get("labels")),
           description: String(data.get("description") || ""),
           acceptanceCriteria: criteria,
         }),
@@ -1162,13 +1196,13 @@
       button.addEventListener("click", () => sortColumn(button));
     });
 
-    document.querySelectorAll("[data-task-id]").forEach((task) => {
+    document.querySelectorAll('[data-task-id][draggable="true"]').forEach((task) => {
       task.addEventListener("dragstart", (event) => {
         draggedTaskId = task.dataset.taskId;
         event.dataTransfer.setData("text/plain", draggedTaskId);
       });
     });
-    document.querySelectorAll("[data-status]").forEach((column) => {
+    document.querySelectorAll('[data-status][data-assignable="true"]').forEach((column) => {
       column.addEventListener("dragover", (event) => {
         event.preventDefault();
         column.classList.add("drag-over");

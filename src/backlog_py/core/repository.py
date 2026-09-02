@@ -557,8 +557,9 @@ class MutableRepository(ReadOnlyRepository):
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
         _reject_missing_dependencies(normalized_dependencies, known_tasks)
         _reject_circular_dependencies(normalized_id, normalized_dependencies, known_tasks)
-        task_status = status or current_config.default_status
-        _reject_unknown_status(task_status, current_config.statuses)
+        task_status = current_config.default_status if status is None else status
+        if not self._status_is_assignable(task_status, config=current_config):
+            raise TaskMutationError(f"Unknown status: {task_status}")
         target = self._task_path(normalized_id, title)
         if target.exists():
             raise TaskMutationError(f"Task path already exists: {target.name}")
@@ -758,7 +759,8 @@ class MutableRepository(ReadOnlyRepository):
             if title is not None:
                 updates["title"] = title
             if status is not None:
-                _reject_unknown_status(status, self.project.config.statuses)
+                if not self._status_is_assignable(status):
+                    raise TaskMutationError(f"Unknown status: {status}")
                 updates["status"] = status
             if normalized_dependencies is not None:
                 updates["dependencies"] = normalized_dependencies
@@ -840,17 +842,23 @@ class MutableRepository(ReadOnlyRepository):
         source = _replace_frontmatter_values(task.raw_source, task.parsed, updates)
         return self.replace_task_source(task.id, source)
 
-    def status_assignment_options(self) -> tuple[str, ...]:
-        config = load_config(self.project.config_path)
+    def status_assignment_options(self, *, config: BacklogConfig | None = None) -> tuple[str, ...]:
+        current_config = config or load_config(self.project.config_path)
         return tuple(
             dict.fromkeys(
                 [
-                    *(config.statuses or ()),
-                    config.default_status,
+                    *(current_config.statuses or ()),
+                    current_config.default_status,
                     *(task.status for task in self.list_tasks()),
                 ]
             )
         )
+
+    def _status_is_assignable(self, status: str, *, config: BacklogConfig | None = None) -> bool:
+        if not status.strip():
+            return False
+        current_config = config or load_config(self.project.config_path)
+        return not current_config.statuses or status in self.status_assignment_options(config=current_config)
 
     def move_task_to_status(self, task_id: str, status: str) -> TaskRecord:
         task = self.get_task(task_id)
@@ -1849,11 +1857,6 @@ def _reject_missing_dependencies(dependencies: Sequence[str], tasks: Sequence[Ta
     for dependency in dependencies:
         if _reference_key(dependency) not in existing_ids:
             raise TaskMutationError(f"Dependency not found: {dependency}")
-
-
-def _reject_unknown_status(status: str, statuses: Sequence[str] | None) -> None:
-    if statuses is not None and status not in statuses:
-        raise TaskMutationError(f"Unknown status: {status}")
 
 
 def _normalize_on_status_change_create(value: str | bool | None) -> str | None:

@@ -49,6 +49,7 @@
       padding: 20px 24px 24px;
       align-items: start;
     }
+    .board-filter,
     .queue-filter {
       display: flex;
       flex-wrap: wrap;
@@ -57,16 +58,61 @@
       padding: 12px 24px 0;
       color: var(--muted);
     }
+    .board-filter > label,
     .queue-filter label {
       font-weight: 650;
       color: var(--text);
     }
+    .board-filter select,
     .queue-filter select {
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--panel);
       color: var(--text);
       padding: 5px 8px;
+    }
+    .label-filter {
+      position: relative;
+    }
+    .label-filter summary {
+      cursor: pointer;
+      color: var(--text);
+    }
+    .label-filter-options {
+      position: absolute;
+      z-index: 1;
+      display: grid;
+      gap: 6px;
+      min-width: 180px;
+      margin-top: 6px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 10px;
+      color: var(--text);
+    }
+    .label-filter-options label {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+    }
+    .secondary-link {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 4px 9px;
+      text-decoration: none;
+    }
+    .filter-count,
+    .column-readonly {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .board-filter :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     .column {
       min-width: 0;
@@ -124,6 +170,9 @@
       margin-bottom: 10px;
       cursor: grab;
     }
+    .task[draggable="false"] {
+      cursor: default;
+    }
     .column.drag-over .empty,
     .column.drag-over .task {
       outline: 2px solid var(--accent);
@@ -155,6 +204,9 @@
     .queue-badge {
       border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
       color: var(--accent);
+    }
+    .milestone-badge {
+      color: var(--text);
     }
     .task-actions {
       display: flex;
@@ -488,7 +540,9 @@
       .subtitle { font-size: 13px; }
       .header-actions { width: 100%; justify-content: flex-start; }
       .header-actions button { flex: 1 1 180px; }
+      .board-filter,
       .queue-filter { padding-inline: 14px; }
+      .label-filter-options { position: static; }
       .board { grid-template-columns: 1fr; padding: 14px; gap: 14px; }
       .column-sort-actions button { flex: 1 1 80px; }
       .task-actions { justify-content: flex-start; }

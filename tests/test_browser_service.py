@@ -7,12 +7,13 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneService
-from backlog_py.core.repository import MutableRepository
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
 
@@ -2061,7 +2062,7 @@ def test_browser_config_settings_update_refreshes_server_project(tmp_path):
         service.shutdown()
 
     assert board["statuses"][:3] == ["Ready", "In Progress", "Done"]
-    assert '<option value="Ready">Ready</option>' in html
+    assert '<option value="Ready" selected>Ready</option>' in html
 
 
 @pytest.mark.parametrize(
@@ -3329,6 +3330,401 @@ def test_browser_milestone_get_rejects_foreign_host(tmp_path):
     assert response["status"] == 403
 
 
+def test_board_combines_queue_milestone_and_any_match_repeated_labels(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    milestone = MilestoneService(project).add_milestone("Release 2")
+    repository.edit_task("TASK-1", labels=["Frontend"], milestone=milestone.id)
+    repository.create_task(
+        title="Urgent match",
+        task_id="TASK-2",
+        status="In Progress",
+        labels=["URGENT"],
+        milestone="Release 2",
+    )
+    repository.create_task(
+        title="Wrong queue",
+        task_id="TASK-3",
+        status="To Do",
+        labels=["frontend"],
+        milestone="1",
+    )
+    repository.create_task(
+        title="Wrong milestone",
+        task_id="TASK-4",
+        status="In Progress",
+        labels=["frontend"],
+        milestone="unknown",
+    )
+    repository.create_task(
+        title="Wrong label",
+        task_id="TASK-5",
+        status="In Progress",
+        labels=["backend"],
+        milestone=milestone.id,
+    )
+
+    from backlog_py.browser.service import start_browser_service
+
+    query = urllib.parse.urlencode(
+        [
+            ("queueCategory", "in_workflow"),
+            ("milestone", "Release 2"),
+            ("labels", "frontend"),
+            ("labels", "urgent"),
+        ]
+    )
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        payload = _get_json(f"{service.root_url}/api/board?{query}")
+        html = _get_text(f"{service.root_url}/?{query}")
+    finally:
+        service.shutdown()
+
+    visible_ids = {task["id"] for tasks in payload["columns"].values() for task in tasks}
+    assert visible_ids == {"TASK-1", "TASK-2"}
+    assert payload["queueCategoryFilter"] == "in_workflow"
+    assert payload["milestoneFilter"] == "Release 2"
+    assert payload["labelFilters"] == ["frontend", "urgent"]
+    assert payload["visibleTaskCount"] == 2
+    assert payload["totalTaskCount"] == 5
+    assert '<option value="in_workflow" selected>In Workflow</option>' in html
+    assert '<option value="Release 2" selected>Release 2</option>' in html
+    assert 'name="labels" value="frontend" checked' in html
+    assert 'name="labels" value="URGENT" checked' in html
+    assert ReadOnlyRepository(project).list_tasks(labels=["frontend", "urgent"]) == []
+
+
+def test_filter_choices_come_from_unfiltered_board(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    first = MilestoneService(project).add_milestone("First release")
+    second = MilestoneService(project).add_milestone("Second release")
+    repository.edit_task("TASK-1", labels=["visible"], milestone=first.id)
+    repository.create_task(
+        title="Hidden choice source",
+        task_id="TASK-2",
+        status="To Do",
+        labels=["hidden"],
+        milestone=second.id,
+    )
+
+    from backlog_py.browser.service import build_board_payload
+
+    payload = build_board_payload(project, milestone_filter=first.id, label_filters=["visible"])
+
+    assert payload["availableLabels"] == ["hidden", "visible"]
+    choices = {choice["value"]: choice["label"] for choice in payload["milestoneChoices"]}
+    assert choices == {first.id: "First release", second.id: "Second release"}
+
+
+def test_board_resolves_milestones_against_one_shared_snapshot(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    service = MilestoneService(project)
+    milestone = service.add_milestone("Release")
+    repository = MutableRepository(project)
+    repository.edit_task("TASK-1", milestone=milestone.id)
+    repository.create_task(title="Alias", task_id="TASK-2", milestone=milestone.title)
+    records = service.list_milestones(include_archived=True)
+    list_calls = []
+
+    def list_once(self, *, include_archived=False):
+        list_calls.append(include_archived)
+        return records if len(list_calls) == 1 else []
+
+    monkeypatch.setattr(MilestoneService, "list_milestones", list_once)
+
+    from backlog_py.browser.service import build_board_payload
+
+    tasks = [task for column in build_board_payload(project)["columns"].values() for task in column]
+
+    assert list_calls == [True]
+    assert {task["milestoneTitle"] for task in tasks} == {"Release"}
+
+
+def test_filtering_does_not_change_revision(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestone = MilestoneService(project).add_milestone("Release")
+    MutableRepository(project).edit_task("TASK-1", labels=["frontend"], milestone=milestone.id)
+
+    from backlog_py.browser.service import build_board_payload
+
+    revisions = {
+        build_board_payload(project)["revision"],
+        build_board_payload(project, queue_category_filter="claimed")["revision"],
+        build_board_payload(project, milestone_filter="Release")["revision"],
+        build_board_payload(project, label_filters=["FRONTEND"])["revision"],
+    }
+
+    assert len(revisions) == 1
+
+
+def test_milestone_filter_resolves_current_title_numeric_and_archived_aliases(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestones = MilestoneService(project)
+    current = milestones.add_milestone("Release 2")
+    archived = milestones.add_milestone("Release 1")
+    milestones.archive_milestone(archived.id or "")
+    repository = MutableRepository(project)
+    repository.edit_task("TASK-1", milestone=current.id)
+    repository.create_task(title="Current title", task_id="TASK-2", milestone=current.title)
+    repository.create_task(title="Current numeric", task_id="TASK-3", milestone="1")
+    repository.create_task(title="Archived id", task_id="TASK-4", milestone=archived.id)
+    repository.create_task(title="Archived title", task_id="TASK-5", milestone=archived.title)
+
+    from backlog_py.browser.service import build_board_payload
+
+    def visible_ids(reference):
+        payload = build_board_payload(project, milestone_filter=reference)
+        return {task["id"] for tasks in payload["columns"].values() for task in tasks}
+
+    assert visible_ids(current.id) == {"TASK-1", "TASK-2", "TASK-3"}
+    assert visible_ids(current.title) == {"TASK-1", "TASK-2", "TASK-3"}
+    assert visible_ids("1") == {"TASK-1", "TASK-2", "TASK-3"}
+    assert visible_ids(archived.id) == {"TASK-4", "TASK-5"}
+    assert visible_ids(archived.title) == {"TASK-4", "TASK-5"}
+
+
+def test_unknown_milestone_reference_remains_filterable(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.edit_task("TASK-1", milestone="raw-value")
+    repository.create_task(title="Other unknown", task_id="TASK-2", milestone="other-value")
+
+    from backlog_py.browser.service import build_board_payload
+
+    payload = build_board_payload(project, milestone_filter="raw-value")
+    visible = [task for tasks in payload["columns"].values() for task in tasks]
+
+    assert [task["id"] for task in visible] == ["TASK-1"]
+    assert {(choice["value"], choice["label"]) for choice in payload["milestoneChoices"]} == {
+        ("other-value", "Unknown: other-value"),
+        ("raw-value", "Unknown: raw-value"),
+    }
+
+
+def test_task_payload_exposes_resolved_milestone_display_and_ordinal(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestones = MilestoneService(project)
+    current = milestones.add_milestone("Release 2")
+    archived = milestones.add_milestone("Release 1")
+    milestones.archive_milestone(archived.id or "")
+    repository = MutableRepository(project)
+    repository.edit_task("TASK-1", milestone=current.id, ordinal=1200)
+    repository.create_task(title="Archived", task_id="TASK-2", milestone=archived.title, ordinal=1300)
+    repository.create_task(title="Unknown", task_id="TASK-3", milestone="raw-value", ordinal=1400)
+
+    from backlog_py.browser.service import build_board_payload
+
+    tasks = {
+        task["id"]: task
+        for column in build_board_payload(project)["columns"].values()
+        for task in column
+    }
+
+    assert (tasks["TASK-1"]["ordinal"], tasks["TASK-1"]["milestoneTitle"]) == (1200, "Release 2")
+    assert tasks["TASK-1"]["milestoneArchived"] is False
+    assert tasks["TASK-1"]["milestoneUnknown"] is False
+    assert tasks["TASK-2"]["milestoneTitle"] == "Release 1"
+    assert tasks["TASK-2"]["milestoneArchived"] is True
+    assert tasks["TASK-2"]["milestoneUnknown"] is False
+    assert tasks["TASK-3"]["milestoneTitle"] is None
+    assert tasks["TASK-3"]["milestoneArchived"] is False
+    assert tasks["TASK-3"]["milestoneUnknown"] is True
+
+
+def test_task_card_shows_milestone_and_label_overflow_badges(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestone = MilestoneService(project).add_milestone("Release 2")
+    MutableRepository(project).edit_task(
+        "TASK-1", labels=["alpha", "beta", "gamma"], milestone=milestone.id
+    )
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    task = html.split('data-task-id="TASK-1"', maxsplit=1)[1].split("</article>", maxsplit=1)[0]
+
+    assert '<span class="badge milestone-badge">Release 2</span>' in task
+    assert '<span class="badge label-badge">alpha</span>' in task
+    assert '<span class="badge label-badge">beta</span>' in task
+    assert '<span class="badge label-overflow">+1</span>' in task
+    assert "gamma" not in task
+
+
+def test_task_details_show_resolved_milestone_state_not_raw_id(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestones = MilestoneService(project)
+    current = milestones.add_milestone("Release 2")
+    archived = milestones.add_milestone("Release 1")
+    milestones.archive_milestone(archived.id or "")
+    repository = MutableRepository(project)
+    repository.edit_task("TASK-1", milestone=current.id)
+    repository.create_task(title="Archived", task_id="TASK-2", milestone=archived.id)
+    repository.create_task(title="Unknown", task_id="TASK-3", milestone="raw-value")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        current_task = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+        archived_task = _get_json(f"{service.root_url}/api/tasks/TASK-2")
+        unknown_task = _get_json(f"{service.root_url}/api/tasks/TASK-3")
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert current_task["milestoneTitle"] == "Release 2"
+    assert archived_task["milestoneTitle"] == "Release 1"
+    assert archived_task["milestoneArchived"] is True
+    assert unknown_task["milestoneUnknown"] is True
+    assert "function milestoneDetailText(task)" in html
+    assert "Unknown: ${task.milestone}" in html
+    assert "${title} (archived)" in html
+    assert "function selectTaskMilestone(task)" in html
+    assert 'document.createElement("option")' in html
+    assert 'option.dataset.storedMilestone = "true"' in html
+    assert "Unknown: ${raw}" in html
+    assert "${title} (stored as ${raw})" in html
+    details = html.split("async function openTaskDetails", maxsplit=1)[1].split(
+        "async function openTaskEdit", maxsplit=1
+    )[0]
+    assert 'setText("task-dialog-milestone", milestoneDetailText(task))' in details
+    assert 'setText("task-dialog-milestone", task.milestone)' not in details
+
+
+@pytest.mark.parametrize("statuses", [None, [], ["Configured"]])
+def test_browser_status_options_separate_rendered_and_assignable_columns(tmp_path, statuses):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, statuses, default="Ready")
+
+    from backlog_py.browser.service import build_board_payload, render_board_html
+
+    payload = build_board_payload(project)
+    html = render_board_html(project)
+
+    expected_assignable = ["Ready", "In Progress"] if not statuses else ["Configured", "Ready", "In Progress"]
+    assert payload["assignableStatuses"] == expected_assignable
+    assert set(payload["statuses"]) == set(expected_assignable)
+    assert payload["columns"]["Ready"] == []
+    assert '<option value="Ready" selected>Ready</option>' in html
+
+
+def test_default_only_column_accepts_browser_drop(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, [], default="Ready")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before = _get_json(f"{service.root_url}/api/board")
+        html = _get_text(service.root_url)
+        moved = _post_json(f"{service.root_url}/api/tasks/TASK-1/status", {"status": "Ready"})
+    finally:
+        service.shutdown()
+
+    assert before["columns"]["Ready"] == []
+    assert "Ready" in before["assignableStatuses"]
+    ready_column = html.split('data-status="Ready"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    assert 'data-assignable="true"' in ready_column.split(">", maxsplit=1)[0]
+    assert moved["task"]["status"] == "Ready"
+    assert '<option value="Ready" selected>Ready</option>' in html
+
+
+def test_active_branch_only_status_is_rendered_read_only(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, ["To Do", "In Progress"], default="To Do")
+
+    from backlog_py.browser import service as browser_service
+    from backlog_py.core import repository as repository_module
+    from backlog_py.runtime.git import GitTaskSnapshot
+
+    monkeypatch.setattr(
+        repository_module,
+        "list_active_branch_task_snapshots",
+        lambda project: [
+            GitTaskSnapshot(
+                ref="refs/heads/feature",
+                relative_path="backlog/tasks/task-99 - branch-only.md",
+                source="---\nid: TASK-99\ntitle: Branch only\nstatus: Review\n---\n",
+                committed_at=1.0,
+            )
+        ],
+    )
+
+    payload = browser_service.build_board_payload(project)
+    html = browser_service.render_board_html(project)
+
+    assert "Review" in payload["statuses"]
+    assert payload["columns"]["Review"][0]["id"] == "TASK-99"
+    assert "Review" not in payload["assignableStatuses"]
+    review_column = html.split('data-status="Review"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    assert 'data-assignable="false"' in review_column.split(">", maxsplit=1)[0]
+    assert "Read only" in review_column
+    assert 'draggable="false"' in review_column
+    assert '.task[draggable="false"]' in html
+    assert 'data-task-details="TASK-99"' in review_column
+    assert "data-task-edit" not in review_column
+    assert "data-task-archive" not in review_column
+    assert 'document.querySelectorAll(\'[data-status][data-assignable="true"]\')' in html
+    create_form = html.split('id="task-create-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    edit_form = html.split('id="task-edit-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    assert '<option value="Review">Review</option>' not in create_form
+    assert '<option value="Review">Review</option>' not in edit_form
+
+
+def test_browser_filter_form_and_assignment_controls_are_native_accessible_and_complete(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestone = MilestoneService(project).add_milestone("Release 2")
+    MutableRepository(project).edit_task("TASK-1", labels=["one", "two"], milestone=milestone.id)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project, milestone_filter=milestone.id, label_filters=["one"])
+
+    assert '<form class="board-filter" method="get">' in html
+    assert 'id="queue-category-filter"' in html
+    assert 'id="milestone-filter"' in html
+    assert '<details class="label-filter">' in html
+    assert html.count('name="labels"') >= 3
+    assert 'href="/"' in html
+    assert "1 / 1 tasks" in html
+    assert "No matching tasks" in html
+    assert '<select class="task-form-select" name="milestone">' in html
+    assert '<option value="m-1">Release 2</option>' in html
+    assert ".board-filter :focus-visible" in html
+    responsive = html.split("@media (max-width: 720px)", maxsplit=1)[1]
+    assert ".board-filter" in responsive
+
+
+def test_browser_create_submission_sends_visible_metadata_fields(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    create_submit = html.split("async function submitTaskCreate", maxsplit=1)[1].split(
+        "async function submitTaskEdit", maxsplit=1
+    )[0]
+
+    assert 'priority: String(data.get("priority") || "")' in create_submit
+    assert 'milestone: String(data.get("milestone") || "")' in create_submit
+    assert 'assignees: metadataList(data.get("assignees"))' in create_submit
+    assert 'labels: metadataList(data.get("labels"))' in create_submit
+
+
 def test_browser_command_uses_config_default_port_and_no_open(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -3379,6 +3775,18 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
     return repo
+
+
+def _configure_statuses(repo: Path, statuses: list[str] | None, *, default: str):
+    config_path = repo / "backlog" / "config.yml"
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if statuses is None:
+        raw.pop("statuses", None)
+    else:
+        raw["statuses"] = statuses
+    raw["defaultStatus"] = default
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return discover_project(Path.cwd(), explicit_cwd=repo)
 
 
 def _write_browser_legacy_milestone(repo: Path, name: str, *, filename: str) -> Path:

@@ -1440,6 +1440,49 @@ def test_mcp_task_create_and_edit_use_safe_core(tmp_path):
     assert "MCP appended plan." not in plan_cleared
 
 
+@pytest.mark.parametrize("statuses", [None, [], ["Configured"]])
+def test_create_and_edit_accept_every_exposed_status_option(tmp_path, statuses):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    source = config_path.read_text(encoding="utf-8")
+    source = re.sub(r"statuses:\n(?:  - .*\n)+", "", source)
+    if statuses is not None:
+        rendered = "statuses:\n" + "".join(f"  - {status}\n" for status in statuses)
+        source = f"{rendered}{source}"
+    source = re.sub(r"defaultStatus: .*", "defaultStatus: Ready", source)
+    config_path.write_text(source, encoding="utf-8")
+    repository = MutableRepository(_project(repo))
+
+    options = repository.status_assignment_options()
+    expected = ("Ready", "In Progress") if not statuses else ("Configured", "Ready", "In Progress")
+    assert options == expected
+    for index, status in enumerate(options, start=2):
+        created = repository.create_task(title=f"Status {status}", task_id=f"TASK-{index}", status=status)
+        assert created.status == status
+        assert repository.edit_task(created.id, status="In Progress").status == "In Progress"
+        assert repository.edit_task(created.id, status=status).status == status
+
+
+@pytest.mark.parametrize("statuses", [None, []])
+def test_absent_and_empty_status_config_keep_open_core_assignment_compatibility(tmp_path, statuses):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    source = re.sub(
+        r"statuses:\n(?:  - .*\n)+",
+        "" if statuses is None else "statuses: []\n",
+        config_path.read_text(encoding="utf-8"),
+    )
+    config_path.write_text(source, encoding="utf-8")
+    repository = MutableRepository(_project(repo))
+
+    assert repository.create_task(title="Ad hoc", task_id="TASK-2", status="Ad Hoc").status == "Ad Hoc"
+    assert repository.edit_task("TASK-1", status="Another State").status == "Another State"
+    with pytest.raises(TaskMutationError, match="Unknown status"):
+        repository.create_task(title="Blank", task_id="TASK-3", status="   ")
+    with pytest.raises(TaskMutationError, match="Unknown status"):
+        repository.edit_task("TASK-1", status="")
+
+
 def test_mcp_bool_string_values_are_parsed_explicitly(tmp_path):
     repo = _copy_fixture(tmp_path)
     project = _project(repo)
