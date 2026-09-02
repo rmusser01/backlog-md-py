@@ -178,9 +178,7 @@ class MilestoneService:
             if not same_path:
                 move_source = self._mutation_path(safe_existing)
                 move_target = self._mutation_path(safe_target)
-                if move_target.exists():
-                    raise MilestoneConflictError(f"Milestone path conflicts with an existing file: {move_target.name}")
-                os.replace(move_source, move_target)
+                _move_no_clobber(move_source, move_target, base=self.project.backlog_dir)
             result = self._load_milestone(safe_target, archived=False)
         except Exception:
             _rollback_task_updates(written_updates, base=self.project.backlog_dir)
@@ -242,9 +240,7 @@ class MilestoneService:
         try:
             move_source = self._mutation_path(safe_existing)
             move_target = self._mutation_path(safe_target)
-            if move_target.exists():
-                raise MilestoneConflictError(f"Archived milestone already exists: {existing.name}")
-            os.replace(move_source, move_target)
+            _move_no_clobber(move_source, move_target, base=self.project.backlog_dir)
             result = self._load_milestone(safe_target, archived=True)
         except Exception:
             _rollback_milestone_move(
@@ -445,27 +441,64 @@ def _load_milestone(project: BacklogProject, path: Path, *, archived: bool) -> M
 _CURRENT_FILENAME_RE = re.compile(r"^m-([0-9]+)(?:\s+-|$)", re.IGNORECASE | re.ASCII)
 _CURRENT_ID_RE = re.compile(r"^m-[0-9]+$", re.IGNORECASE | re.ASCII)
 _FORBIDDEN_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\\\|?*]')
+_FENCE_OPEN_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<rest>.*)$")
+_FENCE_CLOSE_RE = re.compile(r"^ {0,3}(?P<fence>`+|~+)[ \t]*$")
+_DESCRIPTION_H2_RE = re.compile(r"^ {0,3}##[ \t]+Description(?:[ \t]+#+)?[ \t]*$")
+_H2_RE = re.compile(r"^ {0,3}##(?:[ \t]+|$)")
 
 
 def _description_from_body(content: str) -> str:
-    match = re.search(r"^## Description$(.*?)(?=^[ ]{0,3}##(?:[ \t]|$)|\Z)", content, re.MULTILINE | re.DOTALL)
-    return match.group(1).strip() if match else ""
+    bounds = _description_section_bounds(content)
+    return "" if bounds is None else content[bounds[1] : bounds[2]].strip()
 
 
 def _replace_first_description(content: str, description: str) -> str:
-    heading = re.search(r"^## Description(?:\r?\n|$)", content, re.MULTILINE)
     replacement = f"## Description\n\n{description.strip()}".rstrip()
-    if heading is None:
+    bounds = _description_section_bounds(content)
+    if bounds is None:
         return f"{replacement}\n\n{content}".rstrip()
-    next_heading = re.search(
-        r"^[ ]{0,3}##(?:[ \t]|$)",
-        content[heading.end() :],
-        re.MULTILINE,
-    )
-    section_end = heading.end() + next_heading.start() if next_heading is not None else len(content)
-    suffix = content[section_end:].lstrip("\r\n")
+    section_start, _, section_end = bounds
+    suffix = content[section_end:]
     separator = "\n\n" if suffix else ""
-    return f"{content[: heading.start()]}{replacement}{separator}{suffix}".rstrip()
+    return f"{content[:section_start]}{replacement}{separator}{suffix}".rstrip()
+
+
+def _description_section_bounds(content: str) -> tuple[int, int, int] | None:
+    description: tuple[int, int] | None = None
+    fence_character: str | None = None
+    fence_length = 0
+    offset = 0
+    for line in content.splitlines(keepends=True):
+        text = line.rstrip("\r\n")
+        if fence_character is not None:
+            closing = _FENCE_CLOSE_RE.fullmatch(text)
+            if (
+                closing is not None
+                and closing.group("fence")[0] == fence_character
+                and len(closing.group("fence")) >= fence_length
+            ):
+                fence_character = None
+            offset += len(line)
+            continue
+
+        opening = _FENCE_OPEN_RE.fullmatch(text)
+        if opening is not None:
+            fence = opening.group("fence")
+            rest = opening.group("rest")
+            if fence[0] == "~" or "`" not in rest:
+                fence_character = fence[0]
+                fence_length = len(fence)
+                offset += len(line)
+                continue
+
+        if description is None and _DESCRIPTION_H2_RE.fullmatch(text):
+            description = (offset, offset + len(line))
+        elif description is not None and _H2_RE.match(text):
+            return description[0], description[1], offset
+        offset += len(line)
+    if description is None:
+        return None
+    return description[0], description[1], len(content)
 
 
 def _current_aliases(milestone_id: str, title: str, path_stem: str) -> set[str]:
@@ -551,6 +584,61 @@ def _rollback_task_updates(updates: list[_TaskReferenceUpdate], *, base: Path) -
             logger.warning("Failed to rollback task milestone reference {}: {}", update.path, exc)
 
 
+def _move_no_clobber(source: Path, target: Path, *, base: Path) -> None:
+    safe_source = _mutation_path(base, source)
+    safe_target = _mutation_path(base, target)
+    source_identity = _path_identity(safe_source)
+    try:
+        os.link(safe_source, safe_target, follow_symlinks=False)
+    except FileExistsError as exc:
+        raise MilestoneConflictError(f"Milestone path conflicts with an existing file: {safe_target.name}") from exc
+    except Exception:
+        _remove_created_link(safe_source, safe_target, source_identity, base=base)
+        raise
+    try:
+        safe_source = _mutation_path(base, safe_source)
+        safe_target = _mutation_path(base, safe_target)
+        if _path_identity(safe_source) != source_identity or _path_identity(safe_target) != source_identity:
+            raise MilestoneConflictError(f"Milestone path conflict during move: {safe_target.name}")
+        safe_source.unlink()
+    except Exception:
+        _remove_created_link(safe_source, safe_target, source_identity, base=base)
+        raise
+
+
+def _path_identity(path: Path) -> tuple[int, int]:
+    stat = path.stat(follow_symlinks=False)
+    return stat.st_dev, stat.st_ino
+
+
+def _remove_created_link(
+    source: Path,
+    target: Path,
+    identity: tuple[int, int],
+    *,
+    base: Path,
+) -> None:
+    try:
+        safe_source = _mutation_path(base, source)
+        safe_target = _mutation_path(base, target)
+        if _path_identity(safe_target) != identity:
+            return
+        try:
+            source_identity = _path_identity(safe_source)
+        except FileNotFoundError:
+            safe_source = _mutation_path(base, safe_source)
+            safe_target = _mutation_path(base, safe_target)
+            os.link(safe_target, safe_source, follow_symlinks=False)
+            source_identity = _path_identity(safe_source)
+        if source_identity != identity or _path_identity(safe_target) != identity:
+            return
+        _mutation_path(base, safe_target).unlink()
+    except FileNotFoundError:
+        return
+    except Exception as exc:
+        logger.warning("Failed to rollback milestone link {}: {}", target, exc)
+
+
 def _rollback_milestone_edit(
     original: Path,
     target: Path,
@@ -573,7 +661,7 @@ def _rollback_milestone_edit(
     try:
         safe_target = _mutation_path(base, target)
         if safe_target.exists():
-            os.replace(safe_target, safe_original)
+            _move_no_clobber(safe_target, safe_original, base=base)
         _atomic_write_text(safe_original, original_source, base=base)
     except Exception as exc:
         logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
@@ -584,7 +672,7 @@ def _rollback_milestone_move(original: Path, target: Path, *, base: Path) -> Non
         safe_original = _mutation_path(base, original)
         safe_target = _mutation_path(base, target)
         if not safe_original.exists() and safe_target.exists():
-            os.replace(safe_target, safe_original)
+            _move_no_clobber(safe_target, safe_original, base=base)
     except Exception as exc:
         logger.warning("Failed to rollback milestone move {}: {}", original, exc)
 

@@ -885,9 +885,45 @@ def test_current_edit_preserves_id_unknown_frontmatter_and_other_body_sections(t
     assert edited.frontmatter["custom"] == "preserved"
     assert edited.path.name == "m-9 - release-final.md"
     assert edited.description == "Updated"
-    assert edited.content.startswith("Preface.")
-    assert "## Risks\n\nKeep me" in edited.content
+    assert edited.content == "Preface.\n\n## Description\n\nUpdated\n\n## Risks\n\nKeep me"
     assert not old_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("opening_fence", "closing_fence"),
+    [
+        ("```python", "`````   "),
+        ("   ~~~~ python", "  ~~~~~\t"),
+    ],
+)
+def test_current_description_edit_ignores_h2_headings_inside_fences(tmp_path, opening_fence, closing_fence):
+    repo = _copy_fixture(tmp_path)
+    prefix = (
+        f"Preface.\n\n{opening_fence}\n## Description\n\nThis fenced heading is not the section.\n{closing_fence}\n\n"
+    )
+    old_description = (
+        "Old scope.\n\n"
+        f"{opening_fence}\n"
+        "## Risks\n\n"
+        "This fenced H2 is not a boundary.\n"
+        f"{closing_fence}\n\n"
+        "Still old scope."
+    )
+    suffix = "## Risks\n\nKeep this suffix byte-for-byte.\n\nExtra suffix line."
+    _write_current_milestone(
+        repo,
+        "m-9",
+        "Release",
+        body=f"{prefix}## Description\n\n{old_description}\n\n{suffix}",
+    )
+    service = _service(repo)
+
+    assert service.resolve_milestone("m-9").description == old_description
+
+    edited = service.edit_milestone("m-9", description="Updated scope.")
+
+    assert edited.description == "Updated scope."
+    assert edited.content == f"{prefix}## Description\n\nUpdated scope.\n\n{suffix}"
 
 
 def test_legacy_edit_preserves_name_format_filename_and_unknown_frontmatter(tmp_path):
@@ -1105,16 +1141,16 @@ def test_current_edit_rolls_back_sources_when_final_rename_fails(tmp_path, monke
     milestone_before = added.path.read_bytes()
     task_before = task_path.read_bytes()
     target = added.path.parent / "m-1 - beta.md"
-    original_replace = milestones_module.os.replace
+    original_link = milestones_module.os.link
 
-    def fail_final_rename(source, destination):
+    def fail_final_link(source, destination, *args, **kwargs):
         if Path(source) == added.path and Path(destination) == target:
-            raise OSError("simulated rename failure")
-        original_replace(source, destination)
+            raise OSError("simulated link failure")
+        return original_link(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr(milestones_module.os, "replace", fail_final_rename)
+    monkeypatch.setattr(milestones_module.os, "link", fail_final_link)
 
-    with pytest.raises(OSError, match="simulated rename failure"):
+    with pytest.raises(OSError, match="simulated link failure"):
         service.edit_milestone("Alpha", title="Beta", update_tasks=True)
 
     assert added.path.read_bytes() == milestone_before
@@ -1147,6 +1183,60 @@ def test_current_edit_does_not_overwrite_a_target_created_during_transaction(tmp
     assert target.read_bytes() == b"concurrent file\n"
 
 
+def test_current_edit_no_clobber_move_preserves_target_created_inside_link(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    original_link = milestones_module.os.link
+    planted = False
+
+    def plant_target_inside_link(source, destination, *args, **kwargs):
+        nonlocal planted
+        if Path(source) == added.path and Path(destination) == target and not planted:
+            planted = True
+            target.write_bytes(b"concurrent edit target\n")
+        return original_link(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(milestones_module.os, "link", plant_target_inside_link)
+
+    with pytest.raises(MilestoneMutationError, match="conflict") as exc_info:
+        service.edit_milestone("m-1", title="Beta")
+
+    assert type(exc_info.value).__name__ == "MilestoneConflictError"
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == b"concurrent edit target\n"
+
+
+def test_current_edit_preserves_source_if_created_link_is_replaced_before_unlink(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    original_link = milestones_module.os.link
+    replaced = False
+
+    def replace_created_link(source, destination, *args, **kwargs):
+        nonlocal replaced
+        result = original_link(source, destination, *args, **kwargs)
+        if Path(source) == added.path and Path(destination) == target and not replaced:
+            replaced = True
+            target.unlink()
+            target.write_bytes(b"concurrent replacement\n")
+        return result
+
+    monkeypatch.setattr(milestones_module.os, "link", replace_created_link)
+
+    with pytest.raises(MilestoneMutationError, match="conflict") as exc_info:
+        service.edit_milestone("m-1", title="Beta")
+
+    assert type(exc_info.value).__name__ == "MilestoneConflictError"
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == b"concurrent replacement\n"
+
+
 def test_current_edit_restores_original_before_inspecting_redirected_target(tmp_path, monkeypatch):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -1177,25 +1267,52 @@ def test_current_edit_restores_original_before_inspecting_redirected_target(tmp_
     assert outside.read_bytes() == b"outside stays unchanged\n"
 
 
-def test_current_edit_rolls_back_a_rename_that_raises_after_moving(tmp_path, monkeypatch):
+def test_current_edit_rolls_back_a_link_that_raises_after_creation(tmp_path, monkeypatch):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
     added = service.add_milestone("Alpha")
     original_source = added.path.read_bytes()
     target = added.path.parent / "m-1 - beta.md"
-    original_replace = milestones_module.os.replace
+    original_link = milestones_module.os.link
     failed = False
 
-    def fail_after_final_rename(source, destination):
+    def fail_after_final_link(source, destination, *args, **kwargs):
         nonlocal failed
-        original_replace(source, destination)
+        result = original_link(source, destination, *args, **kwargs)
         if Path(source) == added.path and Path(destination) == target and not failed:
             failed = True
-            raise OSError("simulated post-rename failure")
+            raise OSError("simulated post-link failure")
+        return result
 
-    monkeypatch.setattr(milestones_module.os, "replace", fail_after_final_rename)
+    monkeypatch.setattr(milestones_module.os, "link", fail_after_final_link)
 
-    with pytest.raises(OSError, match="simulated post-rename failure"):
+    with pytest.raises(OSError, match="simulated post-link failure"):
+        service.edit_milestone("Alpha", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert not target.exists()
+
+
+def test_current_edit_rolls_back_when_source_unlink_raises_after_deleting(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    original_unlink = Path.unlink
+    failed = False
+
+    def fail_after_source_unlink(path: Path, *args, **kwargs):
+        nonlocal failed
+        result = original_unlink(path, *args, **kwargs)
+        if path == added.path and not failed:
+            failed = True
+            raise OSError("simulated post-unlink move failure")
+        return result
+
+    monkeypatch.setattr(Path, "unlink", fail_after_source_unlink)
+
+    with pytest.raises(OSError, match="simulated post-unlink move failure"):
         service.edit_milestone("Alpha", title="Beta")
 
     assert added.path.read_bytes() == original_source
@@ -1250,29 +1367,30 @@ def test_remove_restores_a_milestone_when_unlink_raises_after_deleting(tmp_path,
     assert added.path.read_bytes() == original_source
 
 
-def test_archive_rolls_back_a_move_that_raises_after_moving(tmp_path, monkeypatch):
+def test_archive_no_clobber_move_preserves_target_created_inside_link(tmp_path, monkeypatch):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
     added = service.add_milestone("Alpha")
     original_source = added.path.read_bytes()
     target = repo / "backlog" / "archive" / "milestones" / added.path.name
-    original_replace = milestones_module.os.replace
-    failed = False
+    original_link = milestones_module.os.link
+    planted = False
 
-    def fail_after_archive_move(source, destination):
-        nonlocal failed
-        original_replace(source, destination)
-        if Path(source) == added.path and Path(destination) == target and not failed:
-            failed = True
-            raise OSError("simulated archive failure")
+    def plant_archive_target_inside_link(source, destination, *args, **kwargs):
+        nonlocal planted
+        if Path(source) == added.path and Path(destination) == target and not planted:
+            planted = True
+            target.write_bytes(b"concurrent archive target\n")
+        return original_link(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr(milestones_module.os, "replace", fail_after_archive_move)
+    monkeypatch.setattr(milestones_module.os, "link", plant_archive_target_inside_link)
 
-    with pytest.raises(OSError, match="simulated archive failure"):
+    with pytest.raises(MilestoneMutationError, match="conflict") as exc_info:
         service.archive_milestone("Alpha")
 
+    assert type(exc_info.value).__name__ == "MilestoneConflictError"
     assert added.path.read_bytes() == original_source
-    assert not target.exists()
+    assert target.read_bytes() == b"concurrent archive target\n"
 
 
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):
