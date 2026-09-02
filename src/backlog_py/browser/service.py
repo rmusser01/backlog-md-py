@@ -1662,7 +1662,7 @@ def _sort_request_from_payload(payload: object) -> tuple[str, str, str | None]:
         if direction is not None:
             raise ValueError("Priority sorting does not support a direction")
         return status, sort, None
-    if direction not in {"asc", "desc"}:
+    if not isinstance(direction, str) or direction not in {"asc", "desc"}:
         raise ValueError("Created-date sorting requires an asc or desc direction")
     return status, sort, direction
 

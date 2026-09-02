@@ -2296,6 +2296,8 @@ def test_browser_sort_endpoint_ignores_current_board_filters(tmp_path):
         {"status": "To Do", "sort": "created", "direction": None},
         {"status": "To Do", "sort": "created", "direction": "sideways"},
         {"status": "To Do", "sort": "created", "direction": 7},
+        {"status": "To Do", "sort": "created", "direction": []},
+        {"status": "To Do", "sort": "created", "direction": {}},
         {"status": "To Do", "sort": "priority", "direction": "asc"},
         {"status": "To Do", "sort": "priority", "direction": False},
     ],
