@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ _KEY_ALIASES = {
     ),
     "active_branch_days": ("active_branch_days", "activeBranchDays"),
     "definition_of_done": ("definition_of_done", "definitionOfDone"),
+    "priorities": ("priorities",),
 }
 _NORMALIZED_KEY_BY_ALIAS = {
     alias.casefold(): normalized_key
@@ -58,17 +60,17 @@ _BOOLEAN_CONFIG_KEYS = {
 _INTEGER_CONFIG_KEYS = {"active_branch_days"}
 _PORT_CONFIG_KEYS = {"default_port"}
 _OPTIONAL_PADDING_KEYS = {"zero_padded_ids"}
-_LIST_CONFIG_KEYS = {"statuses", "definition_of_done"}
+_LIST_CONFIG_KEYS = {"statuses", "definition_of_done", "priorities"}
 _READ_ONLY_CONFIG_KEYS = {"task_prefix"}
 _READ_ONLY_CONFIG_ALIASES = {"prefixes"}
 
 
 def load_config(path: Path) -> BacklogConfig:
     """Load a Backlog.md YAML config file into the normalized Python model."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"Backlog config must contain a mapping: {path}")
+    return _config_from_raw(_load_raw_config(path), path)
 
+
+def _config_from_raw(raw: dict[Any, Any], path: Path) -> BacklogConfig:
     return BacklogConfig(
         project_name=_string_value(raw, "project_name", _default_project_name(path)),
         default_assignee=_optional_string_value(raw, "default_assignee"),
@@ -89,6 +91,7 @@ def load_config(path: Path) -> BacklogConfig:
         task_frontmatter_status_callbacks=_bool_value(raw, "task_frontmatter_status_callbacks", False),
         active_branch_days=_int_value(raw, "active_branch_days", 30),
         definition_of_done=_optional_definition_of_done_defaults(_get(raw, "definition_of_done", None)),
+        priorities=_optional_string_list(_get(raw, "priorities", None)),
     )
 
 
@@ -147,6 +150,26 @@ def get_config_value(project: BacklogProject, key: str) -> Any:
 def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str, Any]:
     """Persist one config value from CLI text and return the written key/value."""
     raw = _load_raw_config(project.config_path)
+    raw_key, display_value = _apply_config_value(raw, key, value)
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
+    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
+    return raw_key, display_value
+
+
+def set_config_values(project: BacklogProject, updates: Mapping[str, str]) -> BacklogConfig:
+    """Persist multiple config values with one atomic replacement."""
+    if not updates:
+        return load_config(project.config_path)
+    raw = _load_raw_config(project.config_path)
+    for key, value in updates.items():
+        _apply_config_value(raw, key, value)
+    config = _config_from_raw(raw, project.config_path)
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
+    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
+    return config
+
+
+def _apply_config_value(raw: dict[Any, Any], key: str, value: str) -> tuple[str, Any]:
     normalized_key = _normalized_config_key(key)
     if normalized_key in _READ_ONLY_CONFIG_KEYS or key.casefold() in _READ_ONLY_CONFIG_ALIASES:
         raise ValueError(
@@ -155,9 +178,11 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
         )
     parsed_value = _parse_config_value(normalized_key, value)
     raw_key = _target_config_key(raw, key, normalized_key)
+    existing_aliases = (
+        [alias for alias in _KEY_ALIASES[normalized_key] if alias in raw] if normalized_key is not None else []
+    )
     if normalized_key in {"zero_padded_ids", "on_status_change"} and parsed_value is None:
-        existing_key = _find_existing_config_key(raw, key)
-        if existing_key is not None:
+        for existing_key in existing_aliases:
             raw.pop(existing_key, None)
         display_value = (
             _zero_padded_ids_display(parsed_value)
@@ -165,10 +190,9 @@ def set_config_value(project: BacklogProject, key: str, value: str) -> tuple[str
             else _on_status_change_display(parsed_value)
         )
     else:
-        raw[raw_key] = parsed_value
+        for target_key in existing_aliases or [raw_key]:
+            raw[target_key] = parsed_value
         display_value = parsed_value
-    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
-    _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
     return raw_key, display_value
 
 

@@ -29,6 +29,7 @@ class BacklogConfig:
     task_frontmatter_status_callbacks: bool = False
     active_branch_days: int = 30
     definition_of_done: list[str] | None = None
+    priorities: list[str] | None = None
 
 
 @dataclass(frozen=True)

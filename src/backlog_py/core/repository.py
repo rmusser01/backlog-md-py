@@ -5,7 +5,7 @@ import re
 import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import inf, isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -33,6 +33,7 @@ _TASK_ID_RE = re.compile(r"^[A-Z]+-\d+(?:\.\d+)*$")
 _CHECKLIST_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*]\s+\[)[ xX](?P<suffix>\]\s+.*)$")
 _SECTION_MARKER_LINE_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):(?P<kind>BEGIN|END) -->\s*$")
 _NO_STATUS_CALLBACK_UPDATE = object()
+_DEFAULT_PRIORITIES = ("high", "medium", "low")
 _SECTION_NAME_ALIASES = {
     "IMPLEMENTATION_NOTES": ("IMPLEMENTATION_NOTES", "NOTES"),
 }
@@ -64,6 +65,20 @@ class TaskRecord:
     @property
     def raw_source(self) -> str:
         return self.parsed.raw_source
+
+
+@dataclass(frozen=True)
+class TaskSortResult:
+    task_ids: tuple[str, ...]
+    changed_task_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _TaskSourceUpdate:
+    task_id: str
+    path: Path
+    original_source: str
+    updated_source: str
 
 
 @dataclass(frozen=True)
@@ -541,8 +556,9 @@ class MutableRepository(ReadOnlyRepository):
         normalized_dependencies = _normalize_dependency_ids(dependencies, current_config.task_prefix)
         _reject_missing_dependencies(normalized_dependencies, known_tasks)
         _reject_circular_dependencies(normalized_id, normalized_dependencies, known_tasks)
-        task_status = status or current_config.default_status
-        _reject_unknown_status(task_status, current_config.statuses)
+        task_status = current_config.default_status if status is None else status
+        if not self._status_is_assignable(task_status, config=current_config):
+            raise TaskMutationError(f"Unknown status: {task_status}")
         target = self._task_path(normalized_id, title)
         if target.exists():
             raise TaskMutationError(f"Task path already exists: {target.name}")
@@ -742,7 +758,8 @@ class MutableRepository(ReadOnlyRepository):
             if title is not None:
                 updates["title"] = title
             if status is not None:
-                _reject_unknown_status(status, self.project.config.statuses)
+                if not self._status_is_assignable(status):
+                    raise TaskMutationError(f"Unknown status: {status}")
                 updates["status"] = status
             if normalized_dependencies is not None:
                 updates["dependencies"] = normalized_dependencies
@@ -824,6 +841,141 @@ class MutableRepository(ReadOnlyRepository):
         source = _replace_frontmatter_values(task.raw_source, task.parsed, updates)
         return self.replace_task_source(task.id, source)
 
+    def status_assignment_options(self, *, config: BacklogConfig | None = None) -> tuple[str, ...]:
+        current_config = config or load_config(self.project.config_path)
+        return tuple(
+            dict.fromkeys(
+                status
+                for status in [
+                    *(current_config.statuses or ()),
+                    current_config.default_status,
+                    *(task.status for task in self.list_tasks()),
+                ]
+                if status.strip()
+            )
+        )
+
+    def _status_is_assignable(self, status: str, *, config: BacklogConfig | None = None) -> bool:
+        if not status.strip():
+            return False
+        current_config = config or load_config(self.project.config_path)
+        return not current_config.statuses or status in self.status_assignment_options(config=current_config)
+
+    def move_task_to_status(self, task_id: str, status: str) -> TaskRecord:
+        task = self.get_task(task_id)
+        if task.status == status:
+            return task
+
+        local_tasks = self.list_tasks()
+        if not status.strip() or status not in self.status_assignment_options():
+            raise TaskMutationError(f"Unknown status: {status}")
+        targets = [
+            candidate
+            for candidate in local_tasks
+            if candidate.status == status and candidate.id != task.id
+        ]
+        base = max((_task_ordinal(candidate) or 0 for candidate in targets), default=0)
+        updates: list[_TaskSourceUpdate] = []
+        for target in targets:
+            if _task_ordinal(target) is not None:
+                continue
+            base = _next_task_ordinal(base)
+            updates.append(
+                _TaskSourceUpdate(
+                    task_id=target.id,
+                    path=target.path,
+                    original_source=target.raw_source,
+                    updated_source=_replace_frontmatter_values(
+                        target.raw_source, target.parsed, {"ordinal": base}
+                    ),
+                )
+            )
+
+        base = _next_task_ordinal(base)
+        config = load_config(self.project.config_path)
+        updates.append(
+            _TaskSourceUpdate(
+                task_id=task.id,
+                path=task.path,
+                original_source=task.raw_source,
+                updated_source=_replace_frontmatter_values(
+                    task.raw_source,
+                    task.parsed,
+                    {
+                        "status": status,
+                        "ordinal": base,
+                        "updated_date": _current_task_timestamp(
+                            config.include_datetime_in_dates
+                        ),
+                    },
+                ),
+            )
+        )
+        _write_task_source_batch(self, updates)
+        moved = self.get_task(task.id)
+        _run_status_change_callback(self.project, moved, task.status, moved.status)
+        return moved
+
+    def sort_tasks(self, status: str, *, sort: str, direction: str | None = None) -> TaskSortResult:
+        if sort == "priority":
+            if direction is not None:
+                raise TaskMutationError("Priority sorting does not support a direction")
+        elif sort == "created":
+            if direction not in {"asc", "desc"}:
+                raise TaskMutationError("Created-date sorting requires an asc or desc direction")
+        else:
+            raise TaskMutationError(f"Unsupported task sort: {sort}")
+
+        config = load_config(self.project.config_path)
+        active_tasks = _load_tasks_from_dir(self.project.backlog_dir / "tasks")
+        if status not in (config.statuses or ()) and status not in {task.status for task in active_tasks}:
+            raise TaskMutationError(f"Unknown status: {status}")
+        tasks = [task for task in active_tasks if task.status == status]
+        if sort == "priority":
+            priorities = config.priorities or _DEFAULT_PRIORITIES
+            ordered_tasks = sorted(tasks, key=lambda task: _priority_order_key(task, priorities))
+        else:
+            valid_tasks: list[tuple[TaskRecord, datetime]] = []
+            invalid_tasks: list[TaskRecord] = []
+            for task in tasks:
+                created = _created_datetime(task)
+                if created is None:
+                    invalid_tasks.append(task)
+                else:
+                    valid_tasks.append((task, created))
+            valid_tasks.sort(key=lambda item: _task_sort_key(item[0].id))
+            valid_tasks.sort(key=lambda item: item[1], reverse=direction == "desc")
+            ordered_tasks = [
+                *(task for task, _ in valid_tasks),
+                *sorted(invalid_tasks, key=lambda task: _task_sort_key(task.id)),
+            ]
+
+        changed_task_ids = self._assign_task_ordinals(ordered_tasks)
+        return TaskSortResult(
+            task_ids=tuple(task.id for task in ordered_tasks),
+            changed_task_ids=changed_task_ids,
+        )
+
+    def _assign_task_ordinals(self, tasks: Sequence[TaskRecord]) -> tuple[str, ...]:
+        updates: list[_TaskSourceUpdate] = []
+        for index, task in enumerate(tasks, start=1):
+            ordinal = index * 1000
+            current_ordinal = task.parsed.frontmatter.get("ordinal")
+            updated_source = task.raw_source
+            if type(current_ordinal) is not int or current_ordinal != ordinal:
+                updated_source = _replace_frontmatter_values(
+                    task.raw_source, task.parsed, {"ordinal": ordinal}
+                )
+            updates.append(
+                _TaskSourceUpdate(
+                    task_id=task.id,
+                    path=task.path,
+                    original_source=task.raw_source,
+                    updated_source=updated_source,
+                )
+            )
+        return tuple(_write_task_source_batch(self, updates))
+
     def archive_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
         safe_current_path = self._safe_task_path(task.path)
@@ -879,6 +1031,41 @@ class MutableRepository(ReadOnlyRepository):
         task_dir.mkdir(parents=True, exist_ok=True)
         path = task_dir / f"{task_id.lower()} - {_slug_title(title)}.md"
         return self._safe_task_path(path)
+
+
+def _write_task_source_batch(
+    repository: MutableRepository,
+    updates: Sequence[_TaskSourceUpdate],
+) -> list[str]:
+    prepared: list[tuple[_TaskSourceUpdate, Path]] = []
+    for update in updates:
+        parse_task_markdown(update.updated_source)
+        safe_path = repository._safe_task_path(update.path)
+        if update.updated_source != update.original_source:
+            prepared.append((update, safe_path))
+
+    completed: list[tuple[_TaskSourceUpdate, Path]] = []
+    try:
+        for update, path in prepared:
+            _atomic_write_text(path, update.updated_source, base=repository.project.backlog_dir)
+            completed.append((update, path))
+    except Exception:
+        for update, path in reversed(completed):
+            try:
+                _atomic_write_text(path, update.original_source, base=repository.project.backlog_dir)
+            except Exception as rollback_error:
+                logger.warning(
+                    "Failed to roll back task {} at {}: {}",
+                    update.task_id,
+                    path,
+                    rollback_error,
+                )
+        repository._invalidate_task_cache()
+        raise
+
+    if prepared:
+        repository._invalidate_task_cache()
+    return [update.task_id for update, _ in prepared]
 
 
 def _load_task(path: Path) -> TaskRecord:
@@ -1570,7 +1757,7 @@ def normalize_ordinal_value(value: int | float | str | None) -> int | float | No
             raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.") from exc
     else:
         raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
-    if not isfinite(float(number)) or number < 0:
+    if (isinstance(number, float) and not isfinite(number)) or number < 0:
         raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
     return number
 
@@ -1671,11 +1858,6 @@ def _reject_missing_dependencies(dependencies: Sequence[str], tasks: Sequence[Ta
     for dependency in dependencies:
         if _reference_key(dependency) not in existing_ids:
             raise TaskMutationError(f"Dependency not found: {dependency}")
-
-
-def _reject_unknown_status(status: str, statuses: Sequence[str] | None) -> None:
-    if statuses is not None and status not in statuses:
-        raise TaskMutationError(f"Unknown status: {status}")
 
 
 def _normalize_on_status_change_create(value: str | bool | None) -> str | None:
@@ -1815,16 +1997,51 @@ def _statuses_from_tasks(tasks: Iterable[TaskRecord]) -> list[str]:
     return statuses
 
 
+def _priority_order_key(task: TaskRecord, priorities: Sequence[str]) -> tuple[int, tuple[object, ...]]:
+    raw = task.parsed.frontmatter.get("priority")
+    priority = str(raw).strip().casefold() if raw is not None else ""
+    order = {value.strip().casefold(): index for index, value in enumerate(priorities)}
+    return order.get(priority, len(order)), _task_sort_key(task.id)
+
+
+def _created_datetime(task: TaskRecord) -> datetime | None:
+    raw = task.parsed.frontmatter.get("created_date")
+    if isinstance(raw, datetime):
+        value = raw
+    elif isinstance(raw, date):
+        value = datetime.combine(raw, datetime.min.time())
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        try:
+            value = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    try:
+        return value.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        return None
+
+
 def _task_sort_key(task_id: str) -> tuple[str, tuple[tuple[int, int | str], ...]]:
     prefix, _, suffix = task_id.partition("-")
     return prefix, tuple(_sort_segment(segment) for segment in suffix.replace(".", "-").split("-"))
 
 
-def _task_record_sort_key(task: TaskRecord) -> tuple[int, float, tuple[str, tuple[tuple[int, int | str], ...]], str]:
+def _task_record_sort_key(
+    task: TaskRecord,
+) -> tuple[int, int | float, tuple[str, tuple[tuple[int, int | str], ...]], str]:
     ordinal = _task_ordinal(task)
     if ordinal is None:
         return 1, 0.0, _task_sort_key(task.id), task.title
-    return 0, float(ordinal), _task_sort_key(task.id), task.title
+    return 0, ordinal, _task_sort_key(task.id), task.title
 
 
 def _task_ordinal(task: TaskRecord) -> int | float | None:
@@ -1832,6 +2049,13 @@ def _task_ordinal(task: TaskRecord) -> int | float | None:
         return normalize_ordinal_value(task.parsed.frontmatter.get("ordinal"))
     except TaskMutationError:
         return None
+
+
+def _next_task_ordinal(ordinal: int | float) -> int | float:
+    candidate = ordinal + 1000
+    if candidate > ordinal and (isinstance(candidate, int) or isfinite(candidate)):
+        return candidate
+    return int(ordinal) + 1000
 
 
 def _sort_segment(segment: str) -> tuple[int, int | str]:

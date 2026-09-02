@@ -259,6 +259,34 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser edit form updates assignees, labels, priority, and milestone",
         ),
         _implemented(
+            "browser:persistent-column-sort",
+            "browser-implemented",
+            "web TaskColumn sort actions and /api/tasks/reorder",
+            "persistent per-column priority and creation-date sorting through task ordinals",
+            oracle_fixture=False,
+        ),
+        _implemented(
+            "browser:milestone-management",
+            "browser-implemented",
+            "web MilestonesPage and milestone API",
+            "browser current-format milestone create, edit, archive, remove, and task assignment",
+            oracle_fixture=False,
+        ),
+        _implemented(
+            "browser:milestone-label-filters",
+            "browser-implemented",
+            "web board milestone and label filters",
+            "browser milestone and case-insensitive any-match multi-label board filtering",
+            oracle_fixture=False,
+        ),
+        _implemented(
+            "browser:structured-status-editor",
+            "browser-implemented",
+            "web Settings default-status selector; Python structured status extension",
+            "browser ordered status add, remove, and move controls with default and usage safeguards",
+            oracle_fixture=False,
+        ),
+        _implemented(
             "browser:task-create-form",
             "browser-implemented",
             "web task create form",
@@ -435,14 +463,19 @@ def _golden(name: str, upstream_reference: str, expected: str) -> CompatibilityI
     )
 
 
-def _implemented(name: str, classification: str, upstream_reference: str, expected: str) -> CompatibilityItem:
+def _implemented(
+    name: str,
+    classification: str,
+    upstream_reference: str,
+    expected: str,
+    *,
+    oracle_fixture: bool = True,
+) -> CompatibilityItem:
     return CompatibilityItem(
         name=name,
         classification=classification,
         upstream_reference=upstream_reference,
         expected=expected,
         status="implemented",
-        fixture=name,
+        fixture=name if oracle_fixture else None,
     )
-
-

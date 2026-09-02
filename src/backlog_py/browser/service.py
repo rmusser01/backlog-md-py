@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from base64 import b64decode, urlsafe_b64encode
+from binascii import Error as BinasciiError
 from collections import deque
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -8,13 +10,15 @@ import json
 import os
 import re
 import threading
+import unicodedata
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html import escape
 from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Mapping, Sequence
+from pathlib import Path
+from typing import Mapping, Sequence, TypedDict
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
@@ -22,8 +26,22 @@ from loguru import logger
 from backlog_py.runtime.scan_cache import ProjectScanCache
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
+from backlog_py.core.errors import NotFoundError
+from backlog_py.core.milestones import (
+    MilestoneConflictError,
+    MilestoneMutationError,
+    MilestoneRecord,
+    MilestoneService,
+    resolve_milestone_from_records,
+)
 from backlog_py.core.models import BacklogConfig, BacklogProject
-from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
+from backlog_py.core.repository import (
+    MutableRepository,
+    ReadOnlyRepository,
+    TaskMutationError,
+    TaskRecord,
+    normalize_ordinal_value,
+)
 from backlog_py.orchestration import (
     OrchestrationQueueItem,
     OrchestrationService,
@@ -38,7 +56,7 @@ from backlog_py.storage.config import (
     load_config,
     normalize_definition_of_done_defaults,
     replace_definition_of_done_defaults,
-    set_config_value,
+    set_config_values,
 )
 
 # Sourced from the shared helper so the browser and MCP servers cannot drift
@@ -91,6 +109,28 @@ _BROWSER_CONFIG_SETTING_KEYS = frozenset(
         "zeroPaddedIds",
     )
 )
+
+
+class _BrowserConflictError(ValueError):
+    pass
+
+
+class _MilestoneCreateKwargs(TypedDict):
+    name: str
+    description: str
+    due_date: str | None
+
+
+class _MilestoneEditKwargs(TypedDict, total=False):
+    title: str
+    description: str
+    due_date: str | None
+
+
+@dataclass(frozen=True)
+class _CachedBoardPayload:
+    payload: dict[str, object]
+    milestones: tuple[MilestoneRecord, ...]
 
 
 @dataclass(frozen=True)
@@ -182,6 +222,8 @@ def build_board_payload(
     project: BacklogProject,
     *,
     queue_category_filter: str | None = None,
+    milestone_filter: str | None = None,
+    label_filters: Sequence[str] | None = None,
     cache: ProjectScanCache | None = None,
 ) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service.
@@ -189,70 +231,157 @@ def build_board_payload(
     Args:
         project: The project to render.
         queue_category_filter: Optional queue category to narrow columns to.
+        milestone_filter: Optional milestone id, name, or title to display.
+        label_filters: Optional labels; a task matching any selected label is displayed.
         cache: Reuses an unchanged scan and its rendered columns across
             requests. Without one, every call re-reads and re-renders the whole
             project, which is what a fresh CLI invocation wants and what an HTTP
             request emphatically does not.
 
     Returns:
-        dict: the board payload, filtered by ``queue_category_filter``.
+        dict: the board payload with the requested view filters applied.
     """
+    project = _refreshed_project(project)
     if cache is not None:
-        unfiltered = cache.board_payload(project, lambda repository: _board_payload_body(project, repository))
+        snapshot = cache.board_payload(
+            project,
+            lambda repository: _build_cached_board_payload(project, repository),
+        )
     else:
         repository = ReadOnlyRepository(project, refresh_remote_refs=False)
-        unfiltered = _board_payload_body(project, repository)
-    return _apply_queue_category_filter(unfiltered, queue_category_filter)
+        snapshot = _build_cached_board_payload(project, repository)
+    return _apply_board_filters(
+        snapshot.payload,
+        queue_category_filter=queue_category_filter,
+        milestone_filter=milestone_filter,
+        label_filters=label_filters,
+        milestones=snapshot.milestones,
+    )
 
 
-def _board_payload_body(project: BacklogProject, repository: ReadOnlyRepository) -> dict[str, object]:
+def _build_cached_board_payload(
+    project: BacklogProject,
+    repository: ReadOnlyRepository,
+) -> _CachedBoardPayload:
+    milestones = tuple(MilestoneService(project).list_milestones(include_archived=True))
+    return _CachedBoardPayload(
+        payload=_board_payload_body(project, repository, milestones=milestones),
+        milestones=milestones,
+    )
+
+
+def _board_payload_body(
+    project: BacklogProject,
+    repository: ReadOnlyRepository,
+    *,
+    milestones: Sequence[MilestoneRecord],
+) -> dict[str, object]:
     """Build the unfiltered board payload from one repository scan."""
     board = repository.board()
+    board.setdefault(project.config.default_status, [])
     # Reuse the scan just done: the queue would otherwise build its own
     # repository and parse every task file a second time, on every request.
     queue_report = OrchestrationService(project).queue(repository=repository)
     queue_items = {item.task_id.casefold(): item for item in queue_report.items}
-    columns = {
+    local_tasks = repository._task_dir_records_cached(project.backlog_dir / "tasks")
+    local_task_signatures = {_task_record_signature(task) for task in local_tasks}
+    unfiltered_columns = {
         status: [
-            _task_payload(task, project=project, queue_item=queue_items.get(task.id.casefold()))
+            _task_payload(
+                task,
+                project=project,
+                queue_item=queue_items.get(task.id.casefold()),
+                milestones=milestones,
+                mutable=_task_record_is_mutable(task, local_task_signatures),
+            )
             for task in tasks
         ]
         for status, tasks in board.items()
     }
+    unfiltered_tasks = [task for tasks in unfiltered_columns.values() for task in tasks]
+    assignable_statuses = list(
+        dict.fromkeys(
+            status
+            for status in [
+                *(project.config.statuses or ()),
+                project.config.default_status,
+                *(task.status for task in local_tasks),
+            ]
+            if status.strip()
+        )
+    )
+    milestone_choices = _milestone_filter_choices(milestones, unfiltered_tasks)
+    labels_by_key: dict[str, str] = {}
+    for task in unfiltered_tasks:
+        for label in _metadata_list(task.get("labels")):
+            normalized_label = label.strip()
+            if normalized_label:
+                labels_by_key.setdefault(normalized_label.casefold(), normalized_label)
+    available_labels = sorted(labels_by_key.values(), key=str.casefold)
+    total_task_count = len(unfiltered_tasks)
     payload: dict[str, object] = {
         "project": {
             "name": project.config.project_name,
             "root": str(project.root),
             "backlogDir": str(project.backlog_dir),
         },
+        "defaultStatus": project.config.default_status,
         "statuses": list(board.keys()),
+        "assignableStatuses": assignable_statuses,
         "queueCategories": sorted(queue_report.by_category),
         "queueCategoryFilter": None,
-        "columns": columns,
+        "milestoneFilter": None,
+        "labelFilters": [],
+        "availableLabels": available_labels,
+        "milestoneChoices": milestone_choices,
+        "visibleTaskCount": total_task_count,
+        "totalTaskCount": total_task_count,
+        "columns": unfiltered_columns,
     }
     payload["revision"] = _board_revision(payload)
     return payload
 
 
-def _apply_queue_category_filter(
-    payload: Mapping[str, object], queue_category_filter: str | None
+def _apply_board_filters(
+    payload: Mapping[str, object],
+    *,
+    queue_category_filter: str | None,
+    milestone_filter: str | None,
+    label_filters: Sequence[str] | None,
+    milestones: Sequence[MilestoneRecord],
 ) -> dict[str, object]:
-    """Narrow a cached, unfiltered payload without rebuilding it.
-
-    The revision is deliberately the *unfiltered* one: it identifies the project
-    state that change-detection watches, not the view a particular request asked
-    for.
-    """
+    """Filter a cached board without changing its project-state revision."""
     category_filter = _normalize_queue_category_filter(queue_category_filter)
+    normalized_milestone_filter = _normalize_milestone_filter(milestone_filter)
+    normalized_label_filters = _normalize_label_filters(label_filters)
     columns = payload.get("columns")
-    assert isinstance(columns, Mapping)
+    if not isinstance(columns, Mapping):
+        raise TypeError("Board payload columns must be a mapping")
+    filtered_columns = {
+        status: [
+            task
+            for task in tasks
+            if isinstance(task, Mapping)
+            and _matches_board_filters(
+                task,
+                queue_category=category_filter,
+                milestone=normalized_milestone_filter,
+                labels=normalized_label_filters,
+                milestones=milestones,
+            )
+        ]
+        for status, tasks in columns.items()
+        if isinstance(tasks, list)
+    }
+    total_task_count = sum(len(tasks) for tasks in columns.values() if isinstance(tasks, list))
     return {
         **payload,
         "queueCategoryFilter": category_filter,
-        "columns": {
-            status: [task for task in tasks if _matches_queue_category_payload(task, category_filter)]
-            for status, tasks in columns.items()
-        },
+        "milestoneFilter": normalized_milestone_filter,
+        "labelFilters": normalized_label_filters,
+        "visibleTaskCount": sum(len(tasks) for tasks in filtered_columns.values()),
+        "totalTaskCount": total_task_count,
+        "columns": filtered_columns,
     }
 
 
@@ -442,21 +571,40 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 build_board_payload(
                     self.server.project,
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                    milestone_filter=_query_value(parsed_url.query, "milestone"),
+                    label_filters=_query_values(parsed_url.query, "labels"),
                     cache=self.server.scan_cache,
                 ),
             )
             return
         if path == "/api/settings/config":
+            config = load_config(self.server.project.config_path)
+            project = replace(self.server.project, config=config)
             self._send_json(
                 HTTPStatus.OK,
-                {"settings": _config_settings_payload(load_config(self.server.project.config_path))},
+                {"settings": _config_settings_payload(config, project=project)},
             )
+            return
+        if path == "/api/settings/status-key":
+            value = _query_value(parsed_url.query, "value")
+            if value is None:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Query parameter value is required"})
+                return
+            self._send_json(HTTPStatus.OK, {"key": _status_key(value)})
             return
         if path == "/api/settings/dod-defaults":
             self._send_json(
                 HTTPStatus.OK,
                 {"items": get_definition_of_done_defaults(self.server.project)},
             )
+            return
+        if path in {"/api/milestones", "/api/milestones/"}:
+            try:
+                milestone_payload = _milestone_list_payload(self.server.project)
+            except Exception as exc:
+                self._send_readonly_listing_error("milestones", exc)
+                return
+            self._send_json(HTTPStatus.OK, milestone_payload)
             return
         if path in {"/api/docs", "/api/docs/"}:
             try:
@@ -503,15 +651,25 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
-            repository = self.server.scan_cache.repository(self.server.project)
+            project = _refreshed_project(self.server.project)
+            repository = self.server.scan_cache.repository(project)
             try:
                 task = repository.get_task(task_id)
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
                 return
+            mutable = _task_record_is_mutable(
+                task,
+                _local_task_signatures(repository, task.path.parent),
+            )
             self._send_json(
                 HTTPStatus.OK,
-                _task_detail_payload(task, project=self.server.project, repository=repository),
+                _task_detail_payload(
+                    task,
+                    project=project,
+                    mutable=mutable,
+                    repository=repository,
+                ),
             )
             return
         if path in {"", "/", "/index.html"}:
@@ -520,6 +678,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 render_board_html(
                     self.server.project,
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
+                    milestone_filter=_query_value(parsed_url.query, "milestone"),
+                    label_filters=_query_values(parsed_url.query, "labels"),
                     cache=self.server.scan_cache,
                 ),
             )
@@ -527,9 +687,16 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
-        if not self._host_allowed():
-            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
-            return
+        try:
+            if not self._host_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            self._handle_post()
+        except Exception:
+            logger.exception("Unhandled error serving POST {}", self.path)
+            self._safe_send_error()
+
+    def _handle_post(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/markdown/preview":
             if not self._origin_allowed():
@@ -570,24 +737,28 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
                 def update_project() -> BacklogProject:
                     project = self.server.project
-                    for key, value in settings.items():
-                        set_config_value(project, key, value)
-                    return BacklogProject(
-                        root=project.root,
-                        backlog_dir=project.backlog_dir,
-                        config_path=project.config_path,
-                        config=load_config(project.config_path),
-                    )
+                    project = replace(project, config=load_config(project.config_path))
+                    validated_settings = _validate_status_settings(project, project.config, settings)
+                    config = set_config_values(project, validated_settings)
+                    updated_project = replace(project, config=config)
+                    self.server.project = updated_project
+                    return updated_project
 
-                self.server.project = with_project_write_lock(
+                updated_project = with_project_write_lock(
                     self.server.project,
                     "browser_config_settings_update",
                     update_project,
                 )
+            except _BrowserConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
             except (json.JSONDecodeError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"settings": _config_settings_payload(self.server.project.config)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"settings": _config_settings_payload(updated_project.config, project=updated_project)},
+            )
             return
 
         if path == "/api/settings/dod-defaults":
@@ -607,6 +778,136 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"items": config.definition_of_done or []})
             return
 
+        if path in {"/api/milestones", "/api/milestones/"}:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                milestone_create_kwargs = _milestone_create_kwargs_from_payload(self._read_json_body())
+
+                def create_milestone() -> tuple[MilestoneRecord, int]:
+                    record = MilestoneService(self.server.project).add_milestone(**milestone_create_kwargs)
+                    return record, _milestone_reference_count(self.server.project, record)
+
+                milestone, reference_count = with_project_write_lock(
+                    self.server.project,
+                    "browser_milestone_create",
+                    create_milestone,
+                )
+            except MilestoneConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
+            except (json.JSONDecodeError, MilestoneMutationError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.CREATED,
+                {"milestone": _milestone_payload(milestone, task_reference_count=reference_count)},
+            )
+            return
+
+        milestone_action = _milestone_action_endpoint(path)
+        if milestone_action is not None:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            raw_key, action = milestone_action
+            try:
+                reference = _milestone_reference_from_key(raw_key)
+                if action == "edit":
+                    milestone_edit_kwargs = _milestone_edit_kwargs_from_payload(self._read_json_body())
+
+                    def edit_milestone() -> tuple[MilestoneRecord, int]:
+                        service = MilestoneService(self.server.project)
+                        existing = _resolve_active_milestone_api_key(service, raw_key, reference)
+                        if existing.format == "legacy" and "due_date" in milestone_edit_kwargs:
+                            raise MilestoneMutationError("Legacy milestones do not support dueDate")
+                        record = service.edit_milestone(reference, **milestone_edit_kwargs)
+                        return record, _milestone_reference_count(self.server.project, record)
+
+                    milestone, reference_count = with_project_write_lock(
+                        self.server.project,
+                        "browser_milestone_edit",
+                        edit_milestone,
+                    )
+                elif action == "archive":
+                    _require_json_object(self._read_json_body())
+
+                    def archive_milestone() -> tuple[MilestoneRecord, int]:
+                        service = MilestoneService(self.server.project)
+                        _resolve_active_milestone_api_key(service, raw_key, reference)
+                        record = service.archive_milestone(reference)
+                        return record, _milestone_reference_count(self.server.project, record)
+
+                    milestone, reference_count = with_project_write_lock(
+                        self.server.project,
+                        "browser_milestone_archive",
+                        archive_milestone,
+                    )
+                else:
+                    task_handling = _milestone_task_handling_from_payload(self._read_json_body())
+
+                    def remove_milestone() -> tuple[MilestoneRecord, int]:
+                        service = MilestoneService(self.server.project)
+                        record = _resolve_active_milestone_api_key(service, raw_key, reference)
+                        count = _milestone_reference_count(self.server.project, record)
+                        if count and task_handling is None:
+                            raise MilestoneConflictError(
+                                "Referenced milestone removal requires taskHandling to be keep or clear"
+                            )
+                        removed = service.remove_milestone(reference, clear_tasks=task_handling == "clear")
+                        return removed, count
+
+                    milestone, reference_count = with_project_write_lock(
+                        self.server.project,
+                        "browser_milestone_remove",
+                        remove_milestone,
+                    )
+            except MilestoneConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
+            except NotFoundError as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            except (json.JSONDecodeError, MilestoneMutationError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"milestone": _milestone_payload(milestone, task_reference_count=reference_count)},
+            )
+            return
+
+        if path == "/api/tasks/sort":
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                status, sort, direction = _sort_request_from_payload(self._read_json_body())
+                result = with_project_write_lock(
+                    self.server.project,
+                    "browser_task_sort",
+                    lambda: MutableRepository(self.server.project).sort_tasks(
+                        status,
+                        sort=sort,
+                        direction=direction,
+                    ),
+                )
+            except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "status": status,
+                    "sort": sort,
+                    "direction": direction,
+                    "taskIds": list(result.task_ids),
+                    "changedCount": len(result.changed_task_ids),
+                },
+            )
+            return
+
         if path in {"/api/tasks", "/api/tasks/"}:
             if not self._origin_allowed():
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
@@ -621,7 +922,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.CREATED, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.CREATED,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         edit_task_id = _task_edit_endpoint_task_id(path)
@@ -631,10 +935,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             try:
                 edit_kwargs = _task_edit_kwargs_from_payload(self._read_json_body())
+
+                def edit_task() -> TaskRecord:
+                    repository = _mutable_browser_task_repository(self.server.project, edit_task_id)
+                    return repository.edit_task(edit_task_id, **edit_kwargs)
+
                 task = with_project_write_lock(
                     self.server.project,
                     "browser_task_edit",
-                    lambda: MutableRepository(self.server.project).edit_task(edit_task_id, **edit_kwargs),
+                    edit_task,
                 )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {edit_task_id}"})
@@ -642,7 +951,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         checklist_task_id = _task_checklist_endpoint_task_id(path)
@@ -652,10 +964,15 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             try:
                 checklist_kwargs = _task_checklist_kwargs_from_payload(self._read_json_body())
+
+                def edit_task_checklist() -> TaskRecord:
+                    repository = _mutable_browser_task_repository(self.server.project, checklist_task_id)
+                    return repository.edit_task(checklist_task_id, **checklist_kwargs)
+
                 task = with_project_write_lock(
                     self.server.project,
                     "browser_task_checklist",
-                    lambda: MutableRepository(self.server.project).edit_task(checklist_task_id, **checklist_kwargs),
+                    edit_task_checklist,
                 )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {checklist_task_id}"})
@@ -663,7 +980,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         archive_task_id = _task_archive_endpoint_task_id(path)
@@ -672,10 +992,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
                 return
             try:
+                def archive_task() -> TaskRecord:
+                    repository = _mutable_browser_task_repository(self.server.project, archive_task_id)
+                    return repository.archive_task(archive_task_id)
+
                 task = with_project_write_lock(
                     self.server.project,
                     "browser_task_archive",
-                    lambda: MutableRepository(self.server.project).archive_task(archive_task_id),
+                    archive_task,
                 )
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {archive_task_id}"})
@@ -683,7 +1007,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             except (TaskMutationError, ValueError) as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
-            self._send_json(HTTPStatus.OK, {"task": _task_detail_payload(task, project=self.server.project)})
+            self._send_json(
+                HTTPStatus.OK,
+                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+            )
             return
 
         task_id = _status_endpoint_task_id(path)
@@ -695,11 +1022,16 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            status = _status_from_payload(self._read_json_body())
+            status = _task_status_from_payload(self._read_json_body())
+
+            def move_task() -> TaskRecord:
+                repository = _mutable_browser_task_repository(self.server.project, task_id)
+                return repository.move_task_to_status(task_id, status)
+
             task = with_project_write_lock(
                 self.server.project,
                 "browser_task_status",
-                lambda: MutableRepository(self.server.project).edit_task(task_id, status=status),
+                move_task,
             )
         except KeyError:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
@@ -708,7 +1040,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        self._send_json(HTTPStatus.OK, {"task": _task_payload(task, project=self.server.project)})
+        self._send_json(
+            HTTPStatus.OK,
+            {"task": _task_payload(task, project=self.server.project, mutable=True)},
+        )
 
     def log_message(self, format: str, *args: object) -> None:
         _ = format, args
@@ -881,16 +1216,51 @@ def render_board_html(
     project: BacklogProject,
     *,
     queue_category_filter: str | None = None,
+    milestone_filter: str | None = None,
+    label_filters: Sequence[str] | None = None,
     cache: ProjectScanCache | None = None,
 ) -> str:
     """Render a browser board with basic task creation, editing, and status movement."""
-    payload = build_board_payload(project, queue_category_filter=queue_category_filter, cache=cache)
-    project_name = escape(project.config.project_name)
+    payload = build_board_payload(
+        project,
+        queue_category_filter=queue_category_filter,
+        milestone_filter=milestone_filter,
+        label_filters=label_filters,
+        cache=cache,
+    )
+    raw_project = payload.get("project")
+    payload_project = raw_project if isinstance(raw_project, dict) else {}
+    project_name = escape(str(payload_project.get("name") or ""))
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
     columns = columns_obj if isinstance(columns_obj, dict) else {}
+    raw_assignable_statuses = payload.get("assignableStatuses")
+    assignable_status_list = (
+        [str(status) for status in raw_assignable_statuses]
+        if isinstance(raw_assignable_statuses, list)
+        else []
+    )
+    assignable_statuses = set(assignable_status_list)
+    sortable_statuses = {
+        str(status)
+        for status, tasks in columns.items()
+        if str(status) in assignable_statuses
+        and isinstance(tasks, list)
+        and sum(isinstance(task, dict) and task.get("mutable") is True for task in tasks) >= 2
+    }
+    filters_active = bool(
+        payload.get("queueCategoryFilter")
+        or payload.get("milestoneFilter")
+        or payload.get("labelFilters")
+    )
     column_markup = "\n".join(
-        _render_column(str(status), tasks)
+        _render_column(
+            str(status),
+            tasks,
+            sortable=str(status) in sortable_statuses,
+            assignable=str(status) in assignable_statuses,
+            filtered=filters_active,
+        )
         for status, tasks in columns.items()
     )
     task_create_description_editor = _render_markdown_editor(
@@ -918,10 +1288,39 @@ def render_board_html(
         data_field="finalSummary",
     )
     select_tag = "select"
-    status_options = _render_status_options(project.config.statuses or [])
-    queue_filter = _render_queue_category_filter(
-        categories=list(payload.get("queueCategories") or []),
-        selected=_metadata_string(payload.get("queueCategoryFilter")),
+    status_options = _render_status_options(
+        assignable_status_list,
+        selected=_metadata_string(payload.get("defaultStatus")),
+    )
+    raw_milestone_choices = payload.get("milestoneChoices")
+    milestone_choices = (
+        [choice for choice in raw_milestone_choices if isinstance(choice, dict)]
+        if isinstance(raw_milestone_choices, list)
+        else []
+    )
+    raw_queue_categories = payload.get("queueCategories")
+    raw_available_labels = payload.get("availableLabels")
+    raw_selected_labels = payload.get("labelFilters")
+    raw_visible_task_count = payload.get("visibleTaskCount")
+    raw_total_task_count = payload.get("totalTaskCount")
+    milestone_options = _render_task_milestone_options(milestone_choices)
+    board_filter = _render_board_filter(
+        queue_categories=raw_queue_categories if isinstance(raw_queue_categories, list) else [],
+        selected_queue=_metadata_string(payload.get("queueCategoryFilter")),
+        milestone_choices=milestone_choices,
+        selected_milestone=_metadata_string(payload.get("milestoneFilter")),
+        available_labels=raw_available_labels if isinstance(raw_available_labels, list) else [],
+        selected_labels=raw_selected_labels if isinstance(raw_selected_labels, list) else [],
+        visible_task_count=(
+            raw_visible_task_count
+            if isinstance(raw_visible_task_count, int) and not isinstance(raw_visible_task_count, bool)
+            else 0
+        ),
+        total_task_count=(
+            raw_total_task_count
+            if isinstance(raw_total_task_count, int) and not isinstance(raw_total_task_count, bool)
+            else 0
+        ),
     )
     escaped_mermaid_url = escape(_resolve_mermaid_url(), quote=True)
     html = _load_browser_text_resource("templates", "board.html").format_map(
@@ -935,7 +1334,8 @@ def render_board_html(
             "task_edit_final_summary_editor": task_edit_final_summary_editor,
             "select_tag": select_tag,
             "status_options": status_options,
-            "queue_filter": queue_filter,
+            "milestone_options": milestone_options,
+            "board_filter": board_filter,
             "board_css": _load_browser_text_resource("assets", "board.css").rstrip("\n"),
             "board_js": _load_browser_text_resource("assets", "board.js").rstrip("\n"),
             "mermaid_url": escaped_mermaid_url,
@@ -1116,18 +1516,43 @@ def _render_markdown_editor(*, field_id: str, name: str, label: str, data_field:
         </div>"""
 
 
-def _render_column(status: str, raw_tasks: object) -> str:
+def _render_column(
+    status: str,
+    raw_tasks: object,
+    *,
+    sortable: bool = False,
+    assignable: bool = True,
+    filtered: bool = False,
+) -> str:
     tasks = raw_tasks if isinstance(raw_tasks, list) else []
-    task_markup = "\n".join(_render_task(task) for task in tasks)
+    sort_controls = ""
+    if sortable and len(tasks) >= 2:
+        sort_controls = """      <details class="column-sort">
+        <summary>Sort</summary>
+        <div class="column-sort-actions">
+          <button type="button" data-sort="priority">Priority</button>
+          <button type="button" data-sort="created" data-direction="asc">Oldest</button>
+          <button type="button" data-sort="created" data-direction="desc">Newest</button>
+        </div>
+      </details>
+"""
+    task_markup = "\n".join(
+        _render_task(
+            task,
+            readonly=not assignable or not (isinstance(task, dict) and task.get("mutable") is True),
+        )
+        for task in tasks
+    )
     if not task_markup:
-        task_markup = '      <div class="empty">No tasks</div>'
-    return f"""    <section class="column" data-status="{escape(status)}">
-      <h2><span>{escape(status)}</span><span class="count">{len(tasks)}</span></h2>
-{task_markup}
+        task_markup = f'      <div class="empty">{"No matching tasks" if filtered else "No tasks"}</div>'
+    readonly = '' if assignable else '<span class="column-readonly">Read only</span>'
+    return f"""    <section class="column" data-status="{escape(status)}" data-assignable="{str(assignable).lower()}">
+      <h2><span>{escape(status)}</span>{readonly}<span class="count">{len(tasks)}</span></h2>
+{sort_controls}{task_markup}
     </section>"""
 
 
-def _render_task(raw_task: object) -> str:
+def _render_task(raw_task: object, *, readonly: bool = False) -> str:
     task = raw_task if isinstance(raw_task, dict) else {}
     task_id = escape(str(task.get("id", "")))
     title = escape(str(task.get("title", "")))
@@ -1135,17 +1560,26 @@ def _render_task(raw_task: object) -> str:
     assignees = task.get("assignees")
     labels = task.get("labels")
     queue_category = _metadata_string(task.get("queueCategory"))
+    milestone_title = _metadata_string(task.get("milestoneTitle"))
     meta = _render_task_meta(
         priority=priority,
         assignees=assignees if isinstance(assignees, list) else [],
         labels=labels if isinstance(labels, list) else [],
         queue_category=queue_category,
+        milestone_title=milestone_title,
+        milestone_archived=task.get("milestoneArchived") is True,
+        milestone_unknown=task.get("milestoneUnknown") is True,
+        milestone_reference=_metadata_string(task.get("milestone")),
     )
-    return f"""      <article class="task" data-task-id="{task_id}" draggable="true">
+    edit_actions = "" if readonly else (
+        f'<button class="details-button" type="button" data-task-edit="{task_id}">Edit</button>'
+        f'<button class="details-button" type="button" data-task-archive="{task_id}">Archive</button>'
+    )
+    return f"""      <article class="task" data-task-id="{task_id}" draggable="{str(not readonly).lower()}">
         <div class="task-id">{task_id}</div>
         <div class="task-title">{title}</div>
 {meta}
-        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button><button class="details-button" type="button" data-task-edit="{task_id}">Edit</button><button class="details-button" type="button" data-task-archive="{task_id}">Archive</button></div>
+        <div class="task-actions"><button class="details-button" type="button" data-task-details="{task_id}">Details</button>{edit_actions}</div>
       </article>"""
 
 
@@ -1164,25 +1598,157 @@ def _board_shutdown_sse_event(shutdown_state: Mapping[str, object]) -> str:
     return f"retry: {_BOARD_REVISION_RETRY_MS}\nevent: shutdown\ndata: {payload}\n\n"
 
 
-def _render_status_options(statuses: list[str]) -> str:
-    return "".join(f'<option value="{escape(status)}">{escape(status)}</option>' for status in statuses)
+def _render_status_options(statuses: list[str], *, selected: str | None = None) -> str:
+    return "".join(
+        f'<option value="{escape(status)}"{" selected" if status == selected else ""}>'
+        f"{escape(status)}</option>"
+        for status in statuses
+    )
 
 
-def _render_queue_category_filter(*, categories: list[object], selected: str | None) -> str:
+def _render_board_filter(
+    *,
+    queue_categories: list[object],
+    selected_queue: str | None,
+    milestone_choices: Sequence[Mapping[str, object]],
+    selected_milestone: str | None,
+    available_labels: list[object],
+    selected_labels: list[object],
+    visible_task_count: int,
+    total_task_count: int,
+) -> str:
     option_markup = ['<option value="">All queue states</option>']
-    for category in categories:
+    queue_category_values: set[str] = set()
+    for category in queue_categories:
         category_text = str(category)
-        selected_attr = ' selected' if selected and selected == category_text else ""
+        queue_category_values.add(category_text)
+        selected_attr = ' selected' if selected_queue == category_text else ""
         option_markup.append(
             f'<option value="{escape(category_text)}"{selected_attr}>{escape(_queue_category_label(category_text))}</option>'
         )
+    if selected_queue and selected_queue not in queue_category_values:
+        option_markup.append(
+            f'<option value="{escape(selected_queue)}" selected>'
+            f"{escape(f'Unknown: {selected_queue}')}</option>"
+        )
+    milestone_options = ['<option value="">All milestones</option>']
+    for choice in milestone_choices:
+        value = str(choice.get("value") or "")
+        choice_label = str(choice.get("label") or value)
+        selected_attr = ' selected' if selected_milestone == value else ""
+        milestone_options.append(
+            f'<option value="{escape(value)}"{selected_attr}>{escape(choice_label)}</option>'
+        )
+    if selected_milestone and all(str(choice.get("value") or "") != selected_milestone for choice in milestone_choices):
+        milestone_options.append(
+            f'<option value="{escape(selected_milestone)}" selected>{escape(selected_milestone)}</option>'
+        )
+    selected_labels_by_key = {str(label).casefold(): str(label) for label in selected_labels}
+    selected_label_keys = set(selected_labels_by_key)
+    label_options = []
+    available_label_keys: set[str] = set()
+    for index, available_label in enumerate(available_labels):
+        label_text = str(available_label)
+        available_label_keys.add(label_text.casefold())
+        checked = " checked" if label_text.casefold() in selected_label_keys else ""
+        label_options.append(
+            f'<label for="board-label-{index}"><input id="board-label-{index}" type="checkbox" '
+            f'name="labels" value="{escape(label_text)}"{checked}> {escape(label_text)}</label>'
+        )
+    for label_key, label_text in selected_labels_by_key.items():
+        if label_key in available_label_keys:
+            continue
+        index = len(label_options)
+        label_options.append(
+            f'<label for="board-label-{index}"><input id="board-label-{index}" type="checkbox" '
+            f'name="labels" value="{escape(label_text)}" checked> '
+            f"{escape(f'Unknown: {label_text}')}</label>"
+        )
+    labels_summary = f"Labels ({len(selected_label_keys)})" if selected_label_keys else "Labels"
+    count = ""
+    if selected_queue or selected_milestone or selected_label_keys:
+        count = f'<span class="filter-count">{visible_task_count} / {total_task_count} tasks</span>'
     return (
-        '<form class="queue-filter" method="get">'
+        '<form class="board-filter" method="get">'
         '<label for="queue-category-filter">Queue</label>'
         f'<select id="queue-category-filter" name="queueCategory">{"".join(option_markup)}</select>'
-        '<button class="secondary-button" type="submit">Filter</button>'
+        '<label for="milestone-filter">Milestone</label>'
+        f'<select id="milestone-filter" name="milestone">{"".join(milestone_options)}</select>'
+        '<details class="label-filter">'
+        f'<summary>{escape(labels_summary)}</summary>'
+        f'<div class="label-filter-options">{"".join(label_options) or "No labels"}</div>'
+        '</details>'
+        '<button class="secondary-button" type="submit">Apply</button>'
+        '<a class="secondary-link" href="/">Clear</a>'
+        f"{count}"
         "</form>"
     )
+
+
+def _render_task_milestone_options(choices: Sequence[Mapping[str, object]]) -> str:
+    options = ['<option value="">No milestone</option>']
+    options.extend(
+        f'<option value="{escape(str(choice.get("value") or ""))}">'
+        f'{escape(str(choice.get("label") or ""))}</option>'
+        for choice in choices
+        if not choice.get("archived") and not choice.get("unknown")
+    )
+    return "".join(options)
+
+
+def _milestone_list_payload(project: BacklogProject) -> dict[str, object]:
+    records = MilestoneService(project).list_milestones(include_archived=True)
+    reference_counts = _milestone_reference_counts(project, records)
+    return {
+        "milestones": [
+            _milestone_payload(record, task_reference_count=reference_counts.get(record.path, 0))
+            for record in records
+        ]
+    }
+
+
+def _milestone_payload(record: MilestoneRecord, *, task_reference_count: int) -> dict[str, object]:
+    return {
+        "key": _milestone_api_key(record),
+        "selectionKey": record.path_relative,
+        "id": record.id,
+        "title": record.title,
+        "name": record.name,
+        "dueDate": record.due_date,
+        "description": record.description,
+        "format": record.format,
+        "path": record.path_relative,
+        "archived": record.archived,
+        "taskReferenceCount": task_reference_count,
+    }
+
+
+def _milestone_reference_count(project: BacklogProject, record: MilestoneRecord) -> int:
+    records = MilestoneService(project).list_milestones(include_archived=True)
+    return _milestone_reference_counts(project, records).get(record.path, 0)
+
+
+def _milestone_reference_counts(
+    project: BacklogProject,
+    records: list[MilestoneRecord],
+) -> dict[Path, int]:
+    counts = {record.path: 0 for record in records}
+    repository = ReadOnlyRepository(
+        project,
+        refresh_remote_refs=False,
+        include_active_branch_snapshots=False,
+    )
+    for task in repository.list_tasks():
+        raw_reference = task.parsed.frontmatter.get("milestone")
+        if isinstance(raw_reference, bool) or not isinstance(raw_reference, (str, int)):
+            continue
+        try:
+            resolved = resolve_milestone_from_records(str(raw_reference), records)
+        except (MilestoneConflictError, NotFoundError):
+            continue
+        if resolved.path in counts:
+            counts[resolved.path] += 1
+    return counts
 
 
 def _document_list_payload(project: BacklogProject) -> list[dict[str, object]]:
@@ -1258,14 +1824,88 @@ def _decision_detail_payload(decision: DecisionRecord) -> dict[str, object]:
     return payload
 
 
+def _refreshed_project(project: BacklogProject) -> BacklogProject:
+    return BacklogProject(
+        root=project.root,
+        backlog_dir=project.backlog_dir,
+        config_path=project.config_path,
+        config=load_config(project.config_path),
+    )
+
+
+def _task_record_signature(task: TaskRecord) -> tuple[str, Path, str]:
+    """Identify the exact local record backing a visible task."""
+    return task.id, task.path, task.raw_source
+
+
+def _task_record_is_mutable(
+    task: TaskRecord,
+    local_task_signatures: set[tuple[str, Path, str]],
+) -> bool:
+    return _task_record_signature(task) in local_task_signatures
+
+
+def _local_task_signatures(
+    repository: ReadOnlyRepository,
+    directory: Path,
+) -> set[tuple[str, Path, str]]:
+    """Identify local records in one bucket while reusing parsed task files."""
+    return {
+        _task_record_signature(task)
+        for task in repository._task_dir_records_cached(directory)
+    }
+
+
+def _browser_task_provenance(
+    project: BacklogProject,
+    task_id: str,
+) -> tuple[BacklogProject, TaskRecord, MutableRepository, bool]:
+    current_project = _refreshed_project(project)
+    visible_task = ReadOnlyRepository(
+        current_project,
+        refresh_remote_refs=False,
+    ).get_task(task_id)
+    local_repository = MutableRepository(current_project, refresh_remote_refs=False)
+    try:
+        local_task = local_repository.get_task(task_id)
+    except NotFoundError:
+        mutable = False
+    else:
+        mutable = _task_record_is_mutable(visible_task, {_task_record_signature(local_task)})
+    return current_project, visible_task, local_repository, mutable
+
+
+def _mutable_browser_task_repository(
+    project: BacklogProject,
+    task_id: str,
+) -> MutableRepository:
+    _, _, local_repository, mutable = _browser_task_provenance(project, task_id)
+    if not mutable:
+        raise TaskMutationError(f"Task is read only in the browser: {task_id}")
+    return local_repository
+
+
 def _task_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
     queue_item: OrchestrationQueueItem | None = None,
+    milestones: Sequence[MilestoneRecord] | None = None,
+    mutable: bool | None = None,
     repository: ReadOnlyRepository | None = None,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
+    try:
+        ordinal = normalize_ordinal_value(frontmatter.get("ordinal"))
+    except TaskMutationError:
+        ordinal = None
+    milestone_reference = _metadata_string(frontmatter.get("milestone"))
+    milestone_record = _resolved_milestone(milestone_reference, milestones or ())
+    milestone_unknown = milestone_reference is not None and milestone_record is None
+    if milestones is None and milestone_reference is not None:
+        loaded_milestones = MilestoneService(project).list_milestones(include_archived=True)
+        milestone_record = _resolved_milestone(milestone_reference, loaded_milestones)
+        milestone_unknown = milestone_record is None
     payload: dict[str, object] = {
         "id": task.id,
         "title": task.title,
@@ -1274,10 +1914,16 @@ def _task_payload(
         "assignees": _metadata_list(frontmatter.get("assignee")),
         "labels": _metadata_list(frontmatter.get("labels")),
         "priority": _metadata_string(frontmatter.get("priority")),
-        "milestone": _metadata_string(frontmatter.get("milestone")),
+        "milestone": milestone_reference,
+        "milestoneTitle": milestone_record.title if milestone_record is not None else None,
+        "milestoneArchived": milestone_record.archived if milestone_record is not None else False,
+        "milestoneUnknown": milestone_unknown,
         "createdDate": _metadata_string(frontmatter.get("created_date")),
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
+        "ordinal": ordinal,
     }
+    if mutable is not None:
+        payload["mutable"] = mutable
     if queue_item is None:
         queue_item = _queue_item_for_task(project, task.id, repository)
     if queue_item is not None:
@@ -1289,9 +1935,15 @@ def _task_detail_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
+    mutable: bool | None = None,
     repository: ReadOnlyRepository | None = None,
 ) -> dict[str, object]:
-    payload = _task_payload(task, project=project, repository=repository)
+    payload = _task_payload(
+        task,
+        project=project,
+        mutable=mutable,
+        repository=repository,
+    )
     description = task.description_or_legacy_body
     implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
     final_summary = _section_content(task, "FINAL_SUMMARY")
@@ -1478,6 +2130,10 @@ def _render_task_meta(
     assignees: list[object],
     labels: list[object],
     queue_category: str | None = None,
+    milestone_title: str | None = None,
+    milestone_archived: bool = False,
+    milestone_unknown: bool = False,
+    milestone_reference: str | None = None,
 ) -> str:
     badges: list[str] = []
     if queue_category:
@@ -1489,8 +2145,18 @@ def _render_task_meta(
         badges.append(f'<span class="badge">Priority: {escape(priority)}</span>')
     for assignee in assignees[:2]:
         badges.append(f'<span class="badge">@{escape(str(assignee).lstrip("@"))}</span>')
+    if milestone_reference:
+        if milestone_unknown:
+            milestone_label = f"Unknown: {milestone_reference}"
+        elif milestone_archived:
+            milestone_label = f"{milestone_title or milestone_reference} (archived)"
+        else:
+            milestone_label = milestone_title or milestone_reference
+        badges.append(f'<span class="badge milestone-badge">{escape(milestone_label)}</span>')
     for label in labels[:2]:
-        badges.append(f'<span class="badge">{escape(str(label))}</span>')
+        badges.append(f'<span class="badge label-badge">{escape(str(label))}</span>')
+    if len(labels) > 2:
+        badges.append(f'<span class="badge label-overflow">+{len(labels) - 2}</span>')
     if not badges:
         return ""
     return f'        <div class="task-meta">{"".join(badges)}</div>'
@@ -1562,6 +2228,105 @@ def _normalize_queue_category_filter(value: str | None) -> str | None:
     return normalized or None
 
 
+def _normalize_milestone_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_label_filters(values: Sequence[str] | None) -> list[str]:
+    normalized: dict[str, str] = {}
+    for value in values or ():
+        label = str(value).strip()
+        if label:
+            normalized.setdefault(label.casefold(), label)
+    return list(normalized.values())
+
+
+def _resolved_milestone(
+    reference: str | None,
+    milestones: Sequence[MilestoneRecord],
+) -> MilestoneRecord | None:
+    if reference is None:
+        return None
+    try:
+        return resolve_milestone_from_records(reference, milestones)
+    except (MilestoneConflictError, NotFoundError):
+        return None
+
+
+def _milestone_filter_choices(
+    milestones: Sequence[MilestoneRecord],
+    tasks: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    choices: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for record in milestones:
+        value = record.id if record.format == "current" and record.id is not None else record.name
+        if value in seen or _resolved_milestone(value, milestones) != record:
+            continue
+        seen.add(value)
+        choices.append(
+            {
+                "value": value,
+                "label": f"{record.title} (archived)" if record.archived else record.title,
+                "archived": record.archived,
+                "unknown": False,
+            }
+        )
+    unknown_references = sorted(
+        {
+            reference
+            for task in tasks
+            if (reference := _metadata_string(task.get("milestone")))
+            and _resolved_milestone(reference, milestones) is None
+        },
+        key=str.casefold,
+    )
+    choices.extend(
+        {
+            "value": reference,
+            "label": f"Unknown: {reference}",
+            "archived": False,
+            "unknown": True,
+        }
+        for reference in unknown_references
+        if reference not in seen
+    )
+    return choices
+
+
+def _matches_board_filters(
+    task: Mapping[str, object],
+    *,
+    queue_category: str | None,
+    milestone: str | None,
+    labels: Sequence[str],
+    milestones: Sequence[MilestoneRecord],
+) -> bool:
+    if not _matches_queue_category_payload(task, queue_category):
+        return False
+    task_milestone = _metadata_string(task.get("milestone"))
+    if milestone is not None:
+        selected_record = _resolved_milestone(milestone, milestones)
+        if selected_record is not None:
+            if _resolved_milestone(task_milestone, milestones) != selected_record:
+                return False
+        elif task_milestone != milestone:
+            return False
+    if labels:
+        selected_labels = {label.strip().casefold() for label in labels if label.strip()}
+        task_labels = {
+            label.strip().casefold()
+            for label in _metadata_list(task.get("labels"))
+            if label.strip()
+        }
+        if selected_labels.isdisjoint(task_labels):
+            return False
+    return True
+
+
 def _matches_queue_category_payload(task: object, category: str | None) -> bool:
     if category is None:
         return True
@@ -1580,6 +2345,10 @@ def _query_value(query: str, key: str) -> str | None:
     if not values:
         return None
     return values[-1]
+
+
+def _query_values(query: str, key: str) -> list[str]:
+    return parse_qs(query, keep_blank_values=True).get(key, [])
 
 
 def _metadata_list(value: object) -> list[str]:
@@ -1625,6 +2394,60 @@ def _endpoint_segment(path: str, prefix: str, suffix: str = "", *, allow_separat
     return identifier
 
 
+def _milestone_action_endpoint(path: str) -> tuple[str, str] | None:
+    for action in ("edit", "archive", "remove"):
+        key = _endpoint_segment(path, "/api/milestones/", f"/{action}")
+        if key is not None:
+            return key, action
+    return None
+
+
+def _legacy_milestone_key(name: str) -> str:
+    token = urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"legacy-{token}"
+
+
+def _legacy_name_from_key(key: str) -> str:
+    token = key.removeprefix("legacy-") if key.startswith("legacy-") else ""
+    if not token or re.fullmatch(r"[A-Za-z0-9_-]+", token, flags=re.ASCII) is None:
+        raise ValueError("Invalid milestone key")
+    try:
+        raw_name = b64decode(token + "=" * (-len(token) % 4), altchars=b"-_", validate=True)
+        name = raw_name.decode("utf-8")
+    except (BinasciiError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Invalid milestone key") from exc
+    if not name or _legacy_milestone_key(name) != key:
+        raise ValueError("Invalid milestone key")
+    return name
+
+
+def _milestone_api_key(record: MilestoneRecord) -> str:
+    return record.id if record.id is not None else _legacy_milestone_key(record.name)
+
+
+def _milestone_reference_from_key(key: str) -> str:
+    if re.fullmatch(r"m-(?:0|[1-9][0-9]*)", key, flags=re.ASCII):
+        return key
+    if key.startswith("legacy-"):
+        return _legacy_name_from_key(key)
+    raise ValueError("Invalid milestone key")
+
+
+def _resolve_active_milestone_api_key(
+    service: MilestoneService,
+    key: str,
+    reference: str,
+) -> MilestoneRecord:
+    record = service.resolve_milestone(reference, include_archived=False)
+    if key.startswith("legacy-"):
+        matches_key = record.format == "legacy" and _legacy_milestone_key(record.name) == key
+    else:
+        matches_key = record.format == "current" and record.id == key
+    if not matches_key:
+        raise NotFoundError(f"Milestone not found: {key}")
+    return record
+
+
 def _status_endpoint_task_id(path: str) -> str | None:
     return _endpoint_segment(path, "/api/tasks/", "/status")
 
@@ -1656,7 +2479,7 @@ def _task_detail_endpoint_task_id(path: str) -> str | None:
     return _endpoint_segment(path, "/api/tasks/")
 
 
-def _status_from_payload(payload: object) -> str:
+def _task_status_from_payload(payload: object) -> str:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
     status = payload.get("status")
@@ -1665,13 +2488,74 @@ def _status_from_payload(payload: object) -> str:
     return status
 
 
+def _sort_request_from_payload(payload: object) -> tuple[str, str, str | None]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    status = payload.get("status")
+    if not isinstance(status, str) or not status.strip():
+        raise ValueError("Request body field status must be a non-empty string")
+    sort = payload.get("sort")
+    if not isinstance(sort, str) or sort not in {"priority", "created"}:
+        raise ValueError("Request body field sort must be priority or created")
+    direction = payload.get("direction")
+    if sort == "priority":
+        if direction is not None:
+            raise ValueError("Priority sorting does not support a direction")
+        return status, sort, None
+    if not isinstance(direction, str) or direction not in {"asc", "desc"}:
+        raise ValueError("Created-date sorting requires an asc or desc direction")
+    return status, sort, direction
+
+
+def _milestone_create_kwargs_from_payload(payload: object) -> _MilestoneCreateKwargs:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    return {
+        "name": _required_string_field(payload, "title"),
+        "description": _required_text_field(payload, "description") if "description" in payload else "",
+        "due_date": _required_text_field(payload, "dueDate") if "dueDate" in payload else None,
+    }
+
+
+def _milestone_edit_kwargs_from_payload(payload: object) -> _MilestoneEditKwargs:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    edit_kwargs = _MilestoneEditKwargs()
+    if "title" in payload:
+        edit_kwargs["title"] = _required_string_field(payload, "title")
+    if "description" in payload:
+        edit_kwargs["description"] = _required_text_field(payload, "description")
+    if "dueDate" in payload:
+        edit_kwargs["due_date"] = _required_text_field(payload, "dueDate")
+    if not edit_kwargs:
+        raise ValueError("Request body must include title, description, or dueDate")
+    return edit_kwargs
+
+
+def _milestone_task_handling_from_payload(payload: object) -> str | None:
+    payload = _require_json_object(payload)
+    task_handling = payload.get("taskHandling")
+    if task_handling is None:
+        return None
+    if not isinstance(task_handling, str) or task_handling not in {"keep", "clear"}:
+        raise ValueError("Request body field taskHandling must be keep or clear")
+    return task_handling
+
+
+def _require_json_object(payload: object) -> dict[object, object]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    return payload
+
+
 def _task_create_kwargs_from_payload(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
     title = _required_string_field(payload, "title")
     create_kwargs: dict[str, object] = {"title": title}
+    if "status" in payload:
+        create_kwargs["status"] = _task_status_from_payload(payload)
     for payload_key, repository_key in (
-        ("status", "status"),
         ("description", "description"),
         ("priority", "priority"),
         ("milestone", "milestone"),
@@ -1695,9 +2579,10 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
     edit_kwargs: dict[str, object] = {}
-    for payload_key, repository_key in (("title", "title"), ("status", "status")):
-        if payload_key in payload:
-            edit_kwargs[repository_key] = _required_string_field(payload, payload_key)
+    if "title" in payload:
+        edit_kwargs["title"] = _required_string_field(payload, "title")
+    if "status" in payload:
+        edit_kwargs["status"] = _task_status_from_payload(payload)
     for payload_key, repository_key in (
         ("description", "description"),
         ("implementationNotes", "notes"),
@@ -1756,7 +2641,8 @@ def _dod_defaults_items_from_payload(payload: object) -> list[str]:
     return normalize_definition_of_done_defaults(payload["items"])
 
 
-def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:
+def _config_settings_payload(config: BacklogConfig, *, project: BacklogProject) -> dict[str, object]:
+    status_rows = _status_rows(project, config)
     return {
         "activeBranchDays": config.active_branch_days,
         "autoCommit": config.auto_commit,
@@ -1766,12 +2652,89 @@ def _config_settings_payload(config: BacklogConfig) -> dict[str, object]:
         "defaultAssignee": config.default_assignee,
         "defaultPort": config.default_port,
         "defaultStatus": config.default_status,
+        "defaultStatusKey": _status_key(config.default_status),
         "includeDatetimeInDates": config.include_datetime_in_dates,
         "projectName": config.project_name,
         "remoteOperations": config.remote_operations,
+        "statusRows": status_rows,
+        "statusKeys": [_status_key(str(row["name"])) for row in status_rows],
         "statuses": list(config.statuses or []),
         "zeroPaddedIds": config.zero_padded_ids,
     }
+
+
+def _status_key(status: str) -> str:
+    return unicodedata.normalize("NFC", status).casefold()
+
+
+def _status_rows(project: BacklogProject, config: BacklogConfig) -> list[dict[str, object]]:
+    tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
+    statuses = list(config.statuses or [])
+    if not statuses:
+        statuses = []
+        seen_statuses: set[str] = set()
+        for task in tasks:
+            key = _status_key(task.status)
+            if key not in seen_statuses:
+                seen_statuses.add(key)
+                statuses.append(task.status)
+
+    default_key = _status_key(config.default_status)
+    if default_key not in {_status_key(status) for status in statuses}:
+        statuses.append(config.default_status)
+
+    counts: dict[str, int] = {}
+    for task in tasks:
+        key = _status_key(task.status)
+        counts[key] = counts.get(key, 0) + 1
+    return [{"name": status, "taskCount": counts.get(_status_key(status), 0)} for status in statuses]
+
+
+def _validate_status_settings(
+    project: BacklogProject,
+    current: BacklogConfig,
+    updates: Mapping[str, str],
+) -> dict[str, str]:
+    if "statuses" not in updates and "defaultStatus" not in updates:
+        return dict(updates)
+
+    validated = dict(updates)
+    default = updates.get("defaultStatus", current.default_status)
+    if "statuses" in updates:
+        statuses = json.loads(updates["statuses"])
+        if not isinstance(statuses, list) or not all(isinstance(status, str) for status in statuses):
+            raise ValueError("Request body setting statuses must be a list of strings")
+        status_by_key: dict[str, str] = {}
+        for status in statuses:
+            key = _status_key(status)
+            if key in status_by_key:
+                raise ValueError("Request body setting statuses must be case-insensitively unique")
+            status_by_key[key] = status
+
+        canonical_default = status_by_key.get(_status_key(default))
+        if canonical_default is None:
+            raise _BrowserConflictError(f'Default status "{default}" must be included in statuses')
+        if "defaultStatus" in updates or canonical_default != current.default_status:
+            validated["defaultStatus"] = canonical_default
+
+        tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
+        prior_statuses = current.statuses or [*(task.status for task in tasks), current.default_status]
+        prior_status_keys = {_status_key(status) for status in prior_statuses}
+        for task in tasks:
+            task_status_key = _status_key(task.status)
+            if task_status_key in prior_status_keys and task_status_key not in status_by_key:
+                raise _BrowserConflictError(f'Status "{task.status}" is still used by active task {task.id}')
+        return validated
+
+    configured_by_key: dict[str, str] = {}
+    for status in current.statuses or []:
+        configured_by_key.setdefault(_status_key(status), status)
+    if configured_by_key:
+        canonical_default = configured_by_key.get(_status_key(default))
+        if canonical_default is None:
+            raise _BrowserConflictError(f'Default status "{default}" must be included in statuses')
+        validated["defaultStatus"] = canonical_default
+    return validated
 
 
 def _config_settings_from_payload(payload: object) -> dict[str, str]:

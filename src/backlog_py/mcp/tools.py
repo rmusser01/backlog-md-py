@@ -1012,7 +1012,11 @@ def _document_detail(project: BacklogProject, document: DocumentRecord) -> dict[
 
 def _milestone_detail(project: BacklogProject, milestone: MilestoneRecord) -> dict[str, Any]:
     return {
+        "id": milestone.id,
         "name": milestone.name,
+        "title": milestone.title,
+        "due_date": milestone.due_date,
+        "format": milestone.format,
         "path": milestone.path_relative,
         "content": milestone.content,
         "frontmatter": dict(milestone.frontmatter),

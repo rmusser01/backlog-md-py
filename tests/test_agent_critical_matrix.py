@@ -722,15 +722,19 @@ def test_agent_critical_inventory_has_fixture_coverage():
     assert missing == []
 
 
-def test_agent_critical_manifest_tracks_all_inventory_items():
+def test_agent_critical_manifest_items_remain_covered_by_inventory():
     inventory = load_builtin_inventory()
     manifest = load_oracle_manifest(MANIFEST_PATH)
+    inventory_by_name = {item.name: item for item in inventory.items}
     fixture_by_name = {fixture.name: fixture for fixture in manifest.fixtures}
 
-    assert sorted({item.name for item in inventory.items} - fixture_by_name.keys()) == []
+    assert len(fixture_by_name) == 102
+    assert set(fixture_by_name) == {
+        item.name for item in inventory.items if item.fixture is not None
+    }
 
-    for item in inventory.items:
-        fixture = fixture_by_name[item.name]
+    for name, fixture in fixture_by_name.items():
+        item = inventory_by_name[name]
         assert fixture.classification == item.classification
         assert fixture.agent_critical is (item.classification == "golden-required")
 
@@ -741,7 +745,11 @@ def test_agent_critical_matrix_doc_matches_inventory():
     matrix_lines = matrix.splitlines()
 
     for item in inventory.items:
-        detail = item.fixture if item.status == "implemented" else item.deferred_reason
+        detail = (
+            item.fixture
+            if item.fixture is not None
+            else "self-declared; no 1.45.2 oracle"
+        )
         assert any(
             item.name in line
             and item.expected in line

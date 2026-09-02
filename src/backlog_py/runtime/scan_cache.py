@@ -18,12 +18,14 @@ import json
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Callable
+from dataclasses import asdict, dataclass
+from typing import Callable, TypeVar, cast
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository
 from backlog_py.indexing.sqlite import _file_signature
+
+_T = TypeVar("_T")
 
 
 class ProjectScanCache:
@@ -43,27 +45,24 @@ class ProjectScanCache:
         self._lock = threading.Lock()
         self._signature: str | None = None
         self._repository: ReadOnlyRepository | None = None
-        self._board_payload: dict[str, object] | None = None
+        self._board_payload: object | None = None
 
     def repository(self, project: BacklogProject) -> ReadOnlyRepository:
         """A repository whose scan is current for `project`."""
         with self._lock:
-            self._refresh_locked(project)
-            assert self._repository is not None
-            return self._repository
+            return self._refresh_locked(project)
 
     def board_payload(
-        self, project: BacklogProject, build: Callable[[ReadOnlyRepository], dict[str, object]]
-    ) -> dict[str, object]:
+        self, project: BacklogProject, build: Callable[[ReadOnlyRepository], _T]
+    ) -> _T:
         """The unfiltered board payload, built at most once per project state."""
         with self._lock:
-            self._refresh_locked(project)
-            assert self._repository is not None
+            repository = self._refresh_locked(project)
             if self._board_payload is None:
-                self._board_payload = build(self._repository)
-            return self._board_payload
+                self._board_payload = build(repository)
+            return cast(_T, self._board_payload)
 
-    def _refresh_locked(self, project: BacklogProject) -> None:
+    def _refresh_locked(self, project: BacklogProject) -> ReadOnlyRepository:
         signature = _project_signature(project)
         if signature != self._signature or self._repository is None:
             self._signature = signature
@@ -75,19 +74,33 @@ class ProjectScanCache:
             # concurrent requests cannot both pay for the same scan. `get_task`
             # consults this set first, so task detail is warmed by it too.
             self._repository.board()
+        return self._repository
 
 
 def _project_signature(project: BacklogProject) -> str:
-    """A cheap fingerprint of every task file the repository can resolve."""
+    """A cheap fingerprint of files that affect cached repositories and boards."""
     now_ns = time.time_ns()
     signatures: list[dict[str, object]] = []
-    for bucket in ("tasks", "completed", "archive/tasks", "drafts"):
+    if project.config_path.is_file():
+        signatures.append(_file_signature(project.root, project.config_path, now_ns=now_ns))
+    for bucket in (
+        "tasks",
+        "completed",
+        "archive/tasks",
+        "drafts",
+        "milestones",
+        "archive/milestones",
+    ):
         directory = project.backlog_dir.joinpath(*bucket.split("/"))
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("*.md")):
             signatures.append(_file_signature(project.root, path, now_ns=now_ns))
-    return json.dumps(signatures, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        {"config": asdict(project.config), "files": signatures},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 # A parsed repository is large, so this cache is bounded twice over: by how many

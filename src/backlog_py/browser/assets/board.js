@@ -8,27 +8,471 @@
     const taskArchiveConfirm = document.getElementById("task-archive-confirm");
     const configSettingsDialog = document.getElementById("config-settings-dialog");
     const configSettingsForm = document.getElementById("config-settings-form");
+    const configStatusAddInput = document.getElementById("config-status-add");
+    const configStatusAddButton = document.getElementById("config-status-add-button");
     const dodDefaultsDialog = document.getElementById("dod-defaults-dialog");
     const dodDefaultsForm = document.getElementById("dod-defaults-form");
     const serviceStatusDialog = document.getElementById("service-status-dialog");
     const serviceShutdownConfirm = document.getElementById("service-shutdown-confirm");
     const documentsDialog = document.getElementById("documents-dialog");
     const decisionsDialog = document.getElementById("decisions-dialog");
+    const milestonesDialog = document.getElementById("milestones-dialog");
+    const milestoneCreateForm = document.getElementById("milestone-create-form");
+    const milestoneEditForm = document.getElementById("milestone-edit-form");
+    const milestoneArchiveButton = document.getElementById("milestone-archive");
+    const milestoneRemoveButton = document.getElementById("milestone-remove");
     const boardElement = document.querySelector("[data-board-revision]");
+    const boardStatus = document.getElementById("board-status");
     const boardRefreshIntervalMs = 5000;
     let currentBoardRevision = boardElement?.dataset.boardRevision || "";
     let boardRefreshInFlight = false;
     let boardRefreshTimer = null;
     let boardRevisionEvents = null;
+    let pendingBoardRevision = "";
+    let milestones = [];
+    let selectedMilestoneKey = "";
+    let milestoneLoadGeneration = 0;
+    let statusRows = [];
+    const statusKeyByName = new Map();
+    let configDefaultStatus = "";
+    let configDefaultStatusKey = "";
+    let configSettingsLoadGeneration = 0;
+    let statusAddInFlight = false;
 
     function setText(id, value) {
       const element = document.getElementById(id);
       if (element) element.textContent = value || "—";
     }
 
+    function milestoneDetailText(task) {
+      if (!task.milestone) return "";
+      if (task.milestoneUnknown) return `Unknown: ${task.milestone}`;
+      const title = task.milestoneTitle || task.milestone;
+      return task.milestoneArchived ? `${title} (archived)` : title;
+    }
+
+    function selectTaskStatus(task) {
+      const select = taskEditForm?.elements.status;
+      if (!(select instanceof HTMLSelectElement)) return;
+      select.querySelectorAll("[data-stored-status]").forEach((option) => option.remove());
+      const raw = task.status || "";
+      if (!raw) {
+        taskEditForm.elements.status.value = "";
+        return;
+      }
+      const exact = Array.from(select.options).some((option) => option.value === raw);
+      if (!exact) {
+        const option = document.createElement("option");
+        option.value = raw;
+        option.dataset.storedStatus = "true";
+        option.textContent = raw;
+        select.appendChild(option);
+      }
+      taskEditForm.elements.status.value = raw;
+    }
+
+    function selectTaskMilestone(task) {
+      const select = taskEditForm?.elements.milestone;
+      if (!(select instanceof HTMLSelectElement)) return;
+      select.querySelectorAll("[data-stored-milestone]").forEach((option) => option.remove());
+      const raw = task.milestone || "";
+      if (!raw) {
+        taskEditForm.elements.milestone.value = "";
+        return;
+      }
+      const exact = Array.from(select.options).some((option) => option.value === raw);
+      if (!exact) {
+        const option = document.createElement("option");
+        option.value = raw;
+        option.dataset.storedMilestone = "true";
+        const title = task.milestoneTitle || raw;
+        if (task.milestoneUnknown) option.textContent = `Unknown: ${raw}`;
+        else if (task.milestoneArchived) option.textContent = `${title} (archived)`;
+        else option.textContent = `${title} (stored as ${raw})`;
+        select.appendChild(option);
+      }
+      taskEditForm.elements.milestone.value = raw;
+    }
+
     function setHtml(id, value) {
       const element = document.getElementById(id);
       if (element) element.innerHTML = value || '<p class="markdown-empty">No content</p>';
+    }
+
+    function showBoardMessage(message) {
+      if (boardStatus) boardStatus.textContent = message || "";
+    }
+
+    async function responseErrorMessage(response, fallback) {
+      try {
+        const payload = await response.json();
+        return payload.error || fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function showMilestoneMessage(message) {
+      const status = document.getElementById("milestone-message");
+      if (status) status.textContent = message || "";
+    }
+
+    function showConfigStatusMessage(message) {
+      const status = document.getElementById("config-status-message");
+      if (status) status.textContent = message || "";
+    }
+
+    function statusKey(value) {
+      return String(value || "").trim().normalize("NFC").toUpperCase().toLowerCase();
+    }
+
+    function statusRowKey(row) {
+      if (statusKeyByName.has(row.name)) return statusKeyByName.get(row.name);
+      if (typeof row.key === "string") return row.key;
+      return statusKey(row.name);
+    }
+
+    function canonicalStatusName(value, key = statusKey(value)) {
+      const raw = String(value || "");
+      const exact = statusRows.find((row) => row.name === raw);
+      if (exact) return exact.name;
+      const match = statusRows.find((row) => statusRowKey(row) === key);
+      return match?.name || String(value || "");
+    }
+
+    function renderStatusRows() {
+      const container = document.getElementById("config-status-rows");
+      const select = configSettingsForm?.elements.defaultStatus;
+      if (!container || !select) return [];
+      const renderedRows = [];
+      configDefaultStatus = canonicalStatusName(configDefaultStatus, configDefaultStatusKey);
+      const defaultRow = statusRows.find((row) => row.name === configDefaultStatus);
+      if (defaultRow) configDefaultStatusKey = statusRowKey(defaultRow);
+      container.replaceChildren();
+      select.replaceChildren();
+      statusRows.forEach((row, index) => {
+        const option = document.createElement("option");
+        option.value = row.name;
+        option.textContent = row.name;
+        select.appendChild(option);
+
+        const item = document.createElement("div");
+        item.className = "status-row";
+        const summary = document.createElement("div");
+        summary.className = "status-row-summary";
+        const name = document.createElement("span");
+        name.className = "status-row-name";
+        name.textContent = row.name;
+        const details = document.createElement("span");
+        details.className = "status-row-meta";
+        const usage = document.createElement("span");
+        usage.textContent = row.taskCount === 1 ? "1 task" : `${row.taskCount} tasks`;
+        const state = document.createElement("span");
+        state.className = "status-row-state";
+        const isDefault = row.name === configDefaultStatus;
+        state.textContent = isDefault ? "Default status" : row.taskCount > 0 ? "In use" : "Available";
+        details.append(usage, state);
+        summary.append(name, details);
+
+        const actions = document.createElement("div");
+        actions.className = "status-row-actions";
+        const up = document.createElement("button");
+        up.type = "button";
+        up.textContent = "Up";
+        up.setAttribute("aria-label", `Move ${row.name} up`);
+        up.disabled = index === 0;
+        up.addEventListener("click", () => moveStatus(index, -1));
+        const down = document.createElement("button");
+        down.type = "button";
+        down.textContent = "Down";
+        down.setAttribute("aria-label", `Move ${row.name} down`);
+        down.disabled = index === statusRows.length - 1;
+        down.addEventListener("click", () => moveStatus(index, 1));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Remove";
+        remove.setAttribute("aria-label", `Remove ${row.name}`);
+        remove.disabled = isDefault || row.taskCount > 0;
+        remove.addEventListener("click", () => removeStatus(index));
+        actions.append(up, down, remove);
+        renderedRows.push({up, down, remove});
+        item.append(summary, actions);
+        container.appendChild(item);
+      });
+      if (configDefaultStatus && !statusRows.some((row) => row.name === configDefaultStatus)) {
+        const option = document.createElement("option");
+        option.value = configDefaultStatus;
+        option.textContent = configDefaultStatus;
+        select.appendChild(option);
+      }
+      select.value = configDefaultStatus;
+      return renderedRows;
+    }
+
+    function focusStatusRowControl(renderedRows, index, preferred) {
+      const controls = renderedRows[index];
+      const order = preferred === "up"
+        ? ["up", "down", "remove"]
+        : preferred === "down"
+          ? ["down", "up", "remove"]
+          : ["remove", "up", "down"];
+      const target = order.map((action) => controls?.[action]).find((control) => control && !control.disabled)
+        || [configSettingsForm?.elements.defaultStatus, configStatusAddInput]
+          .find((control) => control && !control.disabled);
+      target?.focus();
+    }
+
+    async function addStatus(value) {
+      const generation = configSettingsLoadGeneration;
+      const name = String(value || "").trim();
+      if (!name) {
+        showConfigStatusMessage("Enter a status name.");
+        return false;
+      }
+      let key;
+      try {
+        const response = await fetch(`/api/settings/status-key?value=${encodeURIComponent(name)}`);
+        if (generation !== configSettingsLoadGeneration) return false;
+        if (!response.ok) {
+          const message = await responseErrorMessage(response, "Unable to check the status name");
+          if (generation !== configSettingsLoadGeneration) return false;
+          showConfigStatusMessage(message);
+          return false;
+        }
+        const payload = await response.json();
+        if (generation !== configSettingsLoadGeneration) return false;
+        if (typeof payload.key !== "string") throw new Error("Unable to check the status name");
+        key = payload.key;
+      } catch (error) {
+        if (generation === configSettingsLoadGeneration) {
+          showConfigStatusMessage(error instanceof Error ? error.message : "Unable to check the status name");
+        }
+        return false;
+      }
+      if (statusRows.some((row) => statusRowKey(row) === key)) {
+        showConfigStatusMessage(`A status named “${name}” already exists.`);
+        return false;
+      }
+      statusRows.push({name, taskCount: 0});
+      statusKeyByName.set(name, key);
+      showConfigStatusMessage("");
+      renderStatusRows();
+      return true;
+    }
+
+    function moveStatus(index, offset) {
+      const target = index + offset;
+      if (index < 0 || index >= statusRows.length || target < 0 || target >= statusRows.length) return false;
+      const [row] = statusRows.splice(index, 1);
+      statusRows.splice(target, 0, row);
+      const renderedRows = renderStatusRows();
+      focusStatusRowControl(renderedRows, target, offset < 0 ? "up" : "down");
+      showConfigStatusMessage(`Moved ${row.name} to position ${target + 1} of ${statusRows.length}.`);
+      return true;
+    }
+
+    function removeStatus(index) {
+      const row = statusRows[index];
+      if (!row) return false;
+      if (row.name === configDefaultStatus) {
+        showConfigStatusMessage("Choose a different default status before removing this one.");
+        return false;
+      }
+      if (row.taskCount > 0) {
+        showConfigStatusMessage("Move its active tasks before removing this status.");
+        return false;
+      }
+      statusRows.splice(index, 1);
+      statusKeyByName.delete(row.name);
+      const renderedRows = renderStatusRows();
+      focusStatusRowControl(renderedRows, Math.min(index, statusRows.length - 1), "remove");
+      const remaining = statusRows.length === 1 ? "1 status remains." : `${statusRows.length} statuses remain.`;
+      showConfigStatusMessage(`Removed ${row.name}. ${remaining}`);
+      return true;
+    }
+
+    async function addStatusFromInput() {
+      if (!configStatusAddInput || statusAddInFlight) return;
+      const generation = configSettingsLoadGeneration;
+      statusAddInFlight = true;
+      configStatusAddInput.disabled = true;
+      if (configStatusAddButton) configStatusAddButton.disabled = true;
+      const submittedName = configStatusAddInput.value;
+      let added = false;
+      try {
+        added = await addStatus(submittedName);
+        if (added && configStatusAddInput.value === submittedName) configStatusAddInput.value = "";
+      } finally {
+        statusAddInFlight = false;
+        configStatusAddInput.disabled = false;
+        if (configStatusAddButton) configStatusAddButton.disabled = false;
+      }
+      if (generation === configSettingsLoadGeneration && configSettingsDialog?.open) {
+        configStatusAddInput.focus();
+      }
+    }
+
+    function setMilestoneBusy(control, busy) {
+      if (control) control.disabled = busy;
+    }
+
+    function dueDateInputValue(value) {
+      return value ? String(value).replace(" ", "T").slice(0, 16) : "";
+    }
+
+    function selectedMilestone() {
+      return milestones.find((record) => selectedMilestoneKey === record.selectionKey);
+    }
+
+    function renderMilestoneLists() {
+      const activeList = document.getElementById("milestone-active-list");
+      const archivedList = document.getElementById("milestone-archived-list");
+      if (!activeList || !archivedList) return;
+      activeList.replaceChildren();
+      archivedList.replaceChildren();
+      const appendRecords = (list, records, emptyMessage) => {
+        if (records.length === 0) {
+          renderEmptyReadonlyList(list, emptyMessage);
+          return;
+        }
+        records.forEach((record) => {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.milestoneSelectionKey = record.selectionKey;
+          button.setAttribute("aria-pressed", selectedMilestoneKey === record.selectionKey ? "true" : "false");
+          const title = document.createElement("span");
+          title.className = "readonly-list-title";
+          title.textContent = record.title || "Untitled";
+          const meta = document.createElement("span");
+          meta.className = "readonly-list-meta";
+          meta.textContent = [record.id || "Legacy", record.dueDate].filter(Boolean).join(" · ");
+          const selectedMarker = document.createElement("span");
+          selectedMarker.className = "milestone-selected-marker";
+          selectedMarker.textContent = "Selected";
+          selectedMarker.setAttribute("aria-hidden", "true");
+          selectedMarker.hidden = selectedMilestoneKey !== record.selectionKey;
+          button.append(title, meta, selectedMarker);
+          button.addEventListener("click", () => selectMilestone(record.selectionKey));
+          item.appendChild(button);
+          list.appendChild(item);
+        });
+      };
+      appendRecords(
+        activeList,
+        milestones.filter((record) => !record.archived),
+        "No active milestones. Create one with the form.",
+      );
+      appendRecords(
+        archivedList,
+        milestones.filter((record) => record.archived),
+        "No archived milestones",
+      );
+    }
+
+    function selectMilestone(key) {
+      selectedMilestoneKey = key || "";
+      const record = milestones.find((record) => selectedMilestoneKey === record.selectionKey);
+      const editor = document.getElementById("milestone-editor");
+      if (editor) editor.hidden = !record;
+      document.querySelectorAll(".milestone-list button").forEach((button) => {
+        const isSelected = button.dataset.milestoneSelectionKey === selectedMilestoneKey;
+        button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        const selectedMarker = button.querySelector(".milestone-selected-marker");
+        if (selectedMarker) selectedMarker.hidden = !isSelected;
+      });
+      if (!record || !milestoneEditForm) return;
+      setText("milestone-editor-title", record.title || "Milestone details");
+      setText("milestone-editor-id", record.id);
+      setText("milestone-editor-format", record.format);
+      setText("milestone-editor-path", record.path);
+      setText("milestone-editor-references", String(record.taskReferenceCount ?? 0));
+      const readOnly = Boolean(record.archived);
+      milestoneEditForm.elements.title.value = record.title || "";
+      milestoneEditForm.elements.title.readOnly = readOnly;
+      milestoneEditForm.elements.description.value = record.description || "";
+      milestoneEditForm.elements.description.readOnly = readOnly;
+      const dueDate = milestoneEditForm.elements.dueDate;
+      dueDate.value = dueDateInputValue(record.dueDate);
+      dueDate.disabled = readOnly || record.format === "legacy";
+      const legacyDueNote = document.getElementById("milestone-legacy-due-note");
+      if (legacyDueNote) legacyDueNote.hidden = record.format !== "legacy";
+      const archiveButton = milestoneArchiveButton;
+      const removeButton = milestoneRemoveButton;
+      const editSubmit = document.getElementById("milestone-edit-submit");
+      if (archiveButton) archiveButton.hidden = readOnly;
+      if (removeButton) removeButton.hidden = readOnly;
+      if (editSubmit) editSubmit.hidden = readOnly;
+      const archivedNote = document.getElementById("milestone-archived-note");
+      if (archivedNote) archivedNote.hidden = !readOnly;
+      const removeOptions = document.getElementById("milestone-remove-options");
+      if (removeOptions) removeOptions.hidden = readOnly || !(record.taskReferenceCount > 0);
+      milestoneEditForm.querySelectorAll('input[name="taskHandling"]').forEach((input) => {
+        input.checked = false;
+      });
+    }
+
+    async function loadMilestones(completedAction = "") {
+      const generation = ++milestoneLoadGeneration;
+      try {
+        const response = await fetch("/api/milestones", {
+          headers: {"Accept": "application/json"},
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to load milestones"));
+        }
+        const payload = await response.json();
+        if (generation !== milestoneLoadGeneration) return false;
+        milestones = Array.isArray(payload.milestones) ? payload.milestones : [];
+        if (!milestones.some((record) => selectedMilestoneKey === record.selectionKey)) {
+          selectedMilestoneKey = "";
+        }
+        renderMilestoneLists();
+        selectMilestone(selectedMilestoneKey);
+        return true;
+      } catch (error) {
+        if (generation !== milestoneLoadGeneration) return false;
+        const message = error instanceof Error ? error.message : "Unable to load milestones";
+        showMilestoneMessage(
+          completedAction
+            ? `${completedAction}, but the list could not be refreshed: ${message}`
+            : message,
+        );
+        return false;
+      }
+    }
+
+    async function openMilestones() {
+      showMilestoneMessage("");
+      if (milestonesDialog?.showModal) milestonesDialog.showModal();
+      else milestonesDialog?.setAttribute("open", "open");
+      const loaded = await loadMilestones();
+      if (loaded && !selectedMilestoneKey) milestoneCreateForm?.elements.title.focus();
+    }
+
+    async function sortColumn(button) {
+      const column = button.closest("[data-status]");
+      const status = column ? column.dataset.status : null;
+      const sort = button.dataset.sort;
+      const direction = button.dataset.direction || null;
+      if (!status || !sort) return;
+      button.disabled = true;
+      showBoardMessage("");
+      try {
+        const response = await fetch("/api/tasks/sort", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({status, sort, direction}),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to sort tasks"));
+        }
+        window.location.reload();
+      } catch (error) {
+        showBoardMessage(error instanceof Error ? error.message : "Unable to sort tasks");
+        button.disabled = false;
+      }
     }
 
     function readonlyListItem(title, meta, onClick) {
@@ -112,9 +556,12 @@
     }
 
     function handleBoardRevision(nextRevision) {
-      if (nextRevision && nextRevision !== currentBoardRevision && !hasOpenDialog()) {
-        window.location.reload();
+      if (!nextRevision || nextRevision === currentBoardRevision) return;
+      if (hasOpenDialog()) {
+        pendingBoardRevision = nextRevision;
+        return;
       }
+      window.location.reload();
     }
 
     async function pollBoardRevision() {
@@ -190,7 +637,7 @@
       return true;
     }
 
-    function renderChecklist(id, items, section) {
+    function renderChecklist(id, items, section, mutable) {
       const list = document.getElementById(id);
       if (!list) return;
       list.replaceChildren();
@@ -207,9 +654,10 @@
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.checked = Boolean(item.checked);
+        checkbox.disabled = !mutable;
         checkbox.setAttribute("data-checklist-section", section);
         checkbox.setAttribute("data-checklist-index", String(index + 1));
-        checkbox.addEventListener("change", submitTaskChecklistState);
+        if (mutable) checkbox.addEventListener("change", submitTaskChecklistState);
         const text = document.createElement("span");
         const itemId = item.itemId ? `#${item.itemId} ` : "";
         text.textContent = `${itemId}${item.text}`;
@@ -721,13 +1169,23 @@
       setText("task-dialog-priority", task.priority);
       setText("task-dialog-assignees", (task.assignees || []).join(", "));
       setText("task-dialog-labels", (task.labels || []).join(", "));
-      setText("task-dialog-milestone", task.milestone);
+      setText("task-dialog-milestone", milestoneDetailText(task));
       setHtml("task-dialog-description-html", task.descriptionHtml);
       setHtml("task-dialog-implementation-notes", task.implementationNotesHtml);
       setHtml("task-dialog-final-summary", task.finalSummaryHtml);
       renderMermaidDiagrams(taskDialog || document);
-      renderChecklist("task-dialog-acceptance", task.acceptanceCriteria, "acceptanceCriteria");
-      renderChecklist("task-dialog-dod", task.definitionOfDone, "definitionOfDone");
+      renderChecklist(
+        "task-dialog-acceptance",
+        task.acceptanceCriteria,
+        "acceptanceCriteria",
+        task.mutable === true,
+      );
+      renderChecklist(
+        "task-dialog-dod",
+        task.definitionOfDone,
+        "definitionOfDone",
+        task.mutable === true,
+      );
       renderRunHistoryEvents(task.runHistoryEvents, task.runHistoryIssues);
       if (taskDialog && taskDialog.showModal) taskDialog.showModal();
       else if (taskDialog) taskDialog.setAttribute("open", "open");
@@ -743,9 +1201,9 @@
       if (!taskEditForm) return;
       taskEditForm.dataset.taskId = task.id;
       taskEditForm.elements.title.value = task.title || "";
-      taskEditForm.elements.status.value = task.status || "";
+      selectTaskStatus(task);
       taskEditForm.elements.priority.value = task.priority || "";
-      taskEditForm.elements.milestone.value = task.milestone || "";
+      selectTaskMilestone(task);
       taskEditForm.elements.assignees.value = (task.assignees || []).join(", ");
       taskEditForm.elements.labels.value = (task.labels || []).join(", ");
       taskEditForm.elements.description.value = task.description || "";
@@ -780,30 +1238,56 @@
     }
 
     async function openConfigSettings() {
-      const response = await fetch("/api/settings/config");
-      if (!response.ok) {
-        console.error(await response.text());
-        return;
+      const generation = ++configSettingsLoadGeneration;
+      showConfigStatusMessage("");
+      try {
+        const response = await fetch("/api/settings/config");
+        if (generation !== configSettingsLoadGeneration) return;
+        if (!response.ok) {
+          const message = await responseErrorMessage(response, "Unable to load project settings");
+          if (generation !== configSettingsLoadGeneration) return;
+          showConfigStatusMessage(message);
+          return;
+        }
+        const payload = await response.json();
+        if (generation !== configSettingsLoadGeneration) return;
+        const settings = payload.settings || {};
+        if (configSettingsForm) {
+          configSettingsForm.elements.projectName.value = settings.projectName || "";
+          configSettingsForm.elements.defaultAssignee.value = settings.defaultAssignee || "";
+          configSettingsForm.elements.dateFormat.value = settings.dateFormat || "";
+          configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
+          configSettingsForm.elements.activeBranchDays.value = settings.activeBranchDays || "";
+          configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
+          configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
+          configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
+          configSettingsForm.elements.remoteOperations.checked = Boolean(settings.remoteOperations);
+          configSettingsForm.elements.checkActiveBranches.checked = Boolean(settings.checkActiveBranches);
+          configSettingsForm.elements.autoCommit.checked = Boolean(settings.autoCommit);
+        }
+        statusRows = Array.isArray(settings.statusRows)
+          ? settings.statusRows.map((row) => ({name: String(row.name || ""), taskCount: Number(row.taskCount) || 0}))
+          : [];
+        statusKeyByName.clear();
+        const statusKeys = Array.isArray(settings.statusKeys) ? settings.statusKeys : [];
+        statusRows.forEach((row, index) => {
+          if (typeof statusKeys[index] === "string") statusKeyByName.set(row.name, statusKeys[index]);
+        });
+        configDefaultStatus = String(settings.defaultStatus || "");
+        configDefaultStatusKey = typeof settings.defaultStatusKey === "string"
+          ? settings.defaultStatusKey
+          : statusKey(configDefaultStatus);
+        renderStatusRows();
+        if (configSettingsDialog && !configSettingsDialog.open && configSettingsDialog.showModal) {
+          configSettingsDialog.showModal();
+        } else if (configSettingsDialog && !configSettingsDialog.open) {
+          configSettingsDialog.setAttribute("open", "open");
+        }
+      } catch (error) {
+        if (generation === configSettingsLoadGeneration) {
+          showConfigStatusMessage(error instanceof Error ? error.message : "Unable to load project settings");
+        }
       }
-      const payload = await response.json();
-      const settings = payload.settings || {};
-      if (configSettingsForm) {
-        configSettingsForm.elements.projectName.value = settings.projectName || "";
-        configSettingsForm.elements.defaultAssignee.value = settings.defaultAssignee || "";
-        configSettingsForm.elements.defaultStatus.value = settings.defaultStatus || "";
-        configSettingsForm.elements.dateFormat.value = settings.dateFormat || "";
-        configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
-        configSettingsForm.elements.activeBranchDays.value = settings.activeBranchDays || "";
-        configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
-        configSettingsForm.elements.statuses.value = (settings.statuses || []).join("\n");
-        configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
-        configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
-        configSettingsForm.elements.remoteOperations.checked = Boolean(settings.remoteOperations);
-        configSettingsForm.elements.checkActiveBranches.checked = Boolean(settings.checkActiveBranches);
-        configSettingsForm.elements.autoCommit.checked = Boolean(settings.autoCommit);
-      }
-      if (configSettingsDialog && configSettingsDialog.showModal) configSettingsDialog.showModal();
-      else if (configSettingsDialog) configSettingsDialog.setAttribute("open", "open");
     }
 
     async function openDodDefaultsSettings() {
@@ -907,6 +1391,133 @@
       setText("service-status-message", payload.message || "Server is stopping.");
     }
 
+    async function submitMilestoneCreate(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const control = event.submitter;
+      const data = new FormData(form);
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch("/api/milestones", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            title: String(data.get("title") || ""),
+            description: String(data.get("description") || ""),
+            dueDate: String(data.get("dueDate") || ""),
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to create milestone"));
+        }
+        const created = (await response.json()).milestone;
+        selectedMilestoneKey = created.selectionKey;
+        form.reset();
+        const completedAction = `Created ${created.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to create milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
+    async function submitMilestoneEdit(event) {
+      event.preventDefault();
+      const selected = selectedMilestone();
+      if (!selected || selected.archived) return;
+      const form = event.currentTarget;
+      const control = event.submitter;
+      const data = new FormData(form);
+      const body = {
+        title: String(data.get("title") || ""),
+        description: String(data.get("description") || ""),
+        ...(selected.format === "current"
+          ? {dueDate: String(data.get("dueDate") || "")}
+          : {}),
+      };
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch(`/api/milestones/${encodeURIComponent(selected.key)}/edit`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to update milestone"));
+        }
+        const updated = (await response.json()).milestone;
+        selectedMilestoneKey = updated.selectionKey;
+        const completedAction = `Saved ${updated.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to update milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
+    async function archiveSelectedMilestone() {
+      const selected = selectedMilestone();
+      const control = milestoneArchiveButton;
+      if (!selected || selected.archived) return;
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch(`/api/milestones/${encodeURIComponent(selected.key)}/archive`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({}),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to archive milestone"));
+        }
+        const archived = (await response.json()).milestone;
+        selectedMilestoneKey = archived.selectionKey;
+        const completedAction = `Archived ${archived.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to archive milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
+    async function removeSelectedMilestone() {
+      const selected = selectedMilestone();
+      const control = milestoneRemoveButton;
+      if (!selected || selected.archived || !milestoneEditForm) return;
+      const policy = milestoneEditForm.querySelector('input[name="taskHandling"]:checked');
+      if (selected.taskReferenceCount > 0 && !policy) {
+        showMilestoneMessage("Choose whether to keep or clear task references before removing.");
+        milestoneEditForm.querySelector('input[name="taskHandling"]')?.focus();
+        return;
+      }
+      const body = selected.taskReferenceCount > 0 ? {taskHandling: policy.value} : {};
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch(`/api/milestones/${encodeURIComponent(selected.key)}/remove`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to remove milestone"));
+        }
+        const removed = (await response.json()).milestone;
+        selectedMilestoneKey = "";
+        const completedAction = `Removed ${removed.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to remove milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
     async function submitTaskCreate(event) {
       event.preventDefault();
       const form = event.currentTarget;
@@ -922,6 +1533,10 @@
         body: JSON.stringify({
           title: String(data.get("title") || ""),
           status: String(data.get("status") || ""),
+          priority: String(data.get("priority") || ""),
+          milestone: String(data.get("milestone") || ""),
+          assignees: metadataList(data.get("assignees")),
+          labels: metadataList(data.get("labels")),
           description: String(data.get("description") || ""),
           acceptanceCriteria: criteria,
         }),
@@ -985,8 +1600,18 @@
       }
       const payload = await response.json();
       setText("task-dialog-updated", payload.task.updatedDate);
-      renderChecklist("task-dialog-acceptance", payload.task.acceptanceCriteria, "acceptanceCriteria");
-      renderChecklist("task-dialog-dod", payload.task.definitionOfDone, "definitionOfDone");
+      renderChecklist(
+        "task-dialog-acceptance",
+        payload.task.acceptanceCriteria,
+        "acceptanceCriteria",
+        payload.task.mutable === true,
+      );
+      renderChecklist(
+        "task-dialog-dod",
+        payload.task.definitionOfDone,
+        "definitionOfDone",
+        payload.task.mutable === true,
+      );
     }
 
     async function submitTaskArchive(event) {
@@ -1007,38 +1632,47 @@
 
     async function submitConfigSettings(event) {
       event.preventDefault();
-      const form = event.currentTarget;
-      const data = new FormData(form);
-      const statuses = String(data.get("statuses") || "")
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean);
-      const response = await fetch("/api/settings/config", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          settings: {
-            projectName: String(data.get("projectName") || ""),
-            defaultAssignee: String(data.get("defaultAssignee") || ""),
-            defaultStatus: String(data.get("defaultStatus") || ""),
-            dateFormat: String(data.get("dateFormat") || ""),
-            defaultPort: Number(data.get("defaultPort") || 0),
-            activeBranchDays: Number(data.get("activeBranchDays") || 0),
-            zeroPaddedIds: String(data.get("zeroPaddedIds") || ""),
-            statuses,
-            includeDatetimeInDates: Boolean(form.elements.includeDatetimeInDates?.checked),
-            autoOpenBrowser: Boolean(form.elements.autoOpenBrowser?.checked),
-            remoteOperations: Boolean(form.elements.remoteOperations?.checked),
-            checkActiveBranches: Boolean(form.elements.checkActiveBranches?.checked),
-            autoCommit: Boolean(form.elements.autoCommit?.checked),
-          },
-        }),
-      });
-      if (!response.ok) {
-        console.error(await response.text());
+      if (statusAddInFlight) {
+        showConfigStatusMessage("Wait for the status name check to finish.");
         return;
       }
-      window.location.reload();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const control = event.submitter;
+      if (control) control.disabled = true;
+      showConfigStatusMessage("");
+      try {
+        const response = await fetch("/api/settings/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            settings: {
+              projectName: String(data.get("projectName") || ""),
+              defaultAssignee: String(data.get("defaultAssignee") || ""),
+              defaultStatus: String(form.elements.defaultStatus.value || ""),
+              dateFormat: String(data.get("dateFormat") || ""),
+              defaultPort: Number(data.get("defaultPort") || 0),
+              activeBranchDays: Number(data.get("activeBranchDays") || 0),
+              zeroPaddedIds: String(data.get("zeroPaddedIds") || ""),
+              statuses: statusRows.map((row) => row.name),
+              includeDatetimeInDates: Boolean(form.elements.includeDatetimeInDates?.checked),
+              autoOpenBrowser: Boolean(form.elements.autoOpenBrowser?.checked),
+              remoteOperations: Boolean(form.elements.remoteOperations?.checked),
+              checkActiveBranches: Boolean(form.elements.checkActiveBranches?.checked),
+              autoCommit: Boolean(form.elements.autoCommit?.checked),
+            },
+          }),
+        });
+        if (!response.ok) {
+          showConfigStatusMessage(await responseErrorMessage(response, "Unable to save project settings"));
+          return;
+        }
+        window.location.reload();
+      } catch (error) {
+        showConfigStatusMessage(error instanceof Error ? error.message : "Unable to save project settings");
+      } finally {
+        if (control) control.disabled = false;
+      }
     }
 
     async function submitDodDefaultsSettings(event) {
@@ -1061,6 +1695,11 @@
       window.location.reload();
     }
 
+    document.getElementById("milestones-open")?.addEventListener("click", openMilestones);
+    milestoneCreateForm?.addEventListener("submit", submitMilestoneCreate);
+    milestoneEditForm?.addEventListener("submit", submitMilestoneEdit);
+    milestoneArchiveButton?.addEventListener("click", archiveSelectedMilestone);
+    milestoneRemoveButton?.addEventListener("click", removeSelectedMilestone);
     document.getElementById("task-create-open")?.addEventListener("click", openTaskCreate);
     document.getElementById("task-create-cancel")?.addEventListener("click", () => taskCreateDialog?.close());
     taskCreateForm?.addEventListener("submit", submitTaskCreate);
@@ -1071,6 +1710,19 @@
     document.getElementById("config-settings-open")?.addEventListener("click", openConfigSettings);
     document.getElementById("config-settings-cancel")?.addEventListener("click", () => configSettingsDialog?.close());
     configSettingsForm?.addEventListener("submit", submitConfigSettings);
+    configSettingsForm?.elements.defaultStatus?.addEventListener("change", (event) => {
+      configDefaultStatus = event.currentTarget.value;
+      const row = statusRows.find((item) => item.name === configDefaultStatus);
+      configDefaultStatusKey = row ? statusRowKey(row) : statusKey(configDefaultStatus);
+      showConfigStatusMessage("");
+      renderStatusRows();
+    });
+    configStatusAddButton?.addEventListener("click", addStatusFromInput);
+    configStatusAddInput?.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      await addStatusFromInput();
+    });
     document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
     dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);
@@ -1120,14 +1772,17 @@
         openTaskArchive(button.dataset.taskArchive);
       });
     });
+    document.querySelectorAll("[data-sort]").forEach((button) => {
+      button.addEventListener("click", () => sortColumn(button));
+    });
 
-    document.querySelectorAll("[data-task-id]").forEach((task) => {
+    document.querySelectorAll('[data-task-id][draggable="true"]').forEach((task) => {
       task.addEventListener("dragstart", (event) => {
         draggedTaskId = task.dataset.taskId;
         event.dataTransfer.setData("text/plain", draggedTaskId);
       });
     });
-    document.querySelectorAll("[data-status]").forEach((column) => {
+    document.querySelectorAll('[data-status][data-assignable="true"]').forEach((column) => {
       column.addEventListener("dragover", (event) => {
         event.preventDefault();
         column.classList.add("drag-over");
@@ -1139,16 +1794,25 @@
         const taskId = event.dataTransfer.getData("text/plain") || draggedTaskId;
         const status = column.dataset.status;
         if (!taskId || !status) return;
-        const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/status`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({status}),
-        });
-        if (!response.ok) {
-          console.error(await response.text());
-          return;
+        showBoardMessage("");
+        try {
+          const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/status`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({status}),
+          });
+          if (!response.ok) {
+            throw new Error(await responseErrorMessage(response, "Unable to move task"));
+          }
+          window.location.reload();
+        } catch (error) {
+          showBoardMessage(error instanceof Error ? error.message : "Unable to move task");
         }
-        window.location.reload();
+      });
+    });
+    document.querySelectorAll("dialog").forEach((dialog) => {
+      dialog.addEventListener("close", () => {
+        if (pendingBoardRevision && !hasOpenDialog()) window.location.reload();
       });
     });
     if (!connectBoardRevisionEvents()) startBoardRevisionPolling();

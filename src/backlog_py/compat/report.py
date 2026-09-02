@@ -14,10 +14,17 @@ RELEASE_EVIDENCE_SCHEMA_VERSION = 1
 DEFAULT_RELEASE_EVIDENCE_MAX_AGE_DAYS = 14
 # Parity statuses are a maintained declaration, not automated verification.
 VERIFICATION_METHOD = "self-declared"
+COVERAGE_SCOPE = {
+    "kind": "explicit-inventory",
+    "note": (
+        "Counts and readiness cover only the explicit compatibility inventory and "
+        "release gates; they do not assert exhaustive Backlog.md 1.50.1 WebUI parity."
+    ),
+}
 UPSTREAM_BASELINE = {
     "package": "backlog.md",
-    "version": "1.45.2",
-    "audit_date": "2026-05-31",
+    "version": "1.50.1",
+    "audit_date": "2026-09-01",
 }
 
 
@@ -133,6 +140,7 @@ def build_compatibility_report(
         "agent_cutover_ready": _agent_cutover_ready(inventory.items),
         "full_browser_release_ready": _full_browser_release_ready(release_gates),
         "upstream_baseline": dict(UPSTREAM_BASELINE),
+        "coverage_scope": dict(COVERAGE_SCOPE),
         "summary": summary,
         "categories": categories,
         "items": [_item_to_dict(item) for item in inventory.items],
@@ -185,14 +193,20 @@ def _release_gates() -> tuple[ReleaseGate, ...]:
             name="browser:rich-edit-e2e-release-check",
             status="required",
             scope="full-browser-release",
-            requirement="Run browser E2E coverage for rich edit flows before advertising full browser parity.",
+            requirement=(
+                "Run browser E2E coverage for the inventoried rich-edit flow before declaring "
+                "the inventoried browser release scope ready."
+            ),
             evidence="docs/browser-parity.md",
         ),
         ReleaseGate(
             name="browser:desktop-mobile-screenshot-release-check",
             status="required",
             scope="full-browser-release",
-            requirement="Capture desktop and mobile browser screenshots before advertising full browser parity.",
+            requirement=(
+                "Capture desktop and mobile browser screenshots before declaring the inventoried "
+                "browser release scope ready."
+            ),
             evidence="docs/browser-parity.md",
         ),
         ReleaseGate(

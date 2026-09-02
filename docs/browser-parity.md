@@ -1,18 +1,22 @@
 # Browser Parity And Release Evidence
 
-This document records browser UI parity requirements for the audited
-Backlog.md baseline, separates them from the first local-file agent cutover
-candidate, and explains the extra evidence required before advertising full
-browser release readiness. Browser support is valuable for human project
-management, but it is not required for agent workflows that use plain CLI
-output and pure MCP helpers.
+This document records the explicit browser compatibility inventory for the
+audited Backlog.md slice, separates it from the first local-file agent cutover
+candidate, and explains the extra evidence required before declaring that
+inventoried browser release scope ready. Browser support is valuable for human
+project management, but it is not required for agent workflows that use plain
+CLI output and pure MCP helpers.
 
 ## Decision
 
-Browser feature coverage for the audited `backlog.md@1.45.2` baseline is
-implemented in the current compatibility inventory. Browser release readiness
-is still evidence-gated: releases that advertise full browser parity must
-attach fresh rich-edit E2E and desktop/mobile screenshot evidence through
+The implemented WebUI slice audited against `backlog.md@1.50.1` is represented
+by the current explicit compatibility inventory, including persistent column
+sorting, current-format milestone management, milestone/label filters, and the
+structured status editor. This is not exhaustive 1.50.1 WebUI parity: the
+detailed source-path comparison and ten remaining dependencies are in
+[webui-gap-analysis.md](webui-gap-analysis.md). Release readiness for the
+inventoried slice is still evidence-gated and requires fresh rich-edit E2E and
+desktop/mobile screenshot evidence through
 `backlog-py compat status --release-evidence <manifest.json>`.
 
 Browser capabilities remain independent from the first agent cutover candidate.
@@ -26,36 +30,41 @@ frontend bundler step. The served board is rendered from packaged resources unde
 metadata includes those resources in wheels and sdists so installed-package
 behavior matches source-tree behavior.
 
-## Browser Requirements
+## Inventoried Browser Coverage
 
 | Requirement | Classification | Agent cutover impact | Rationale |
 | --- | --- | --- | --- |
-| Responsive Kanban board | Required for full clone | Implemented for narrow viewports | The static board includes explicit mobile viewport rules for header actions, board columns, task actions, dialogs, and form actions while preserving the dependency-free browser service. |
-| drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
-| Task detail dialog | Required for full clone | Implemented for inspection, Markdown rendering, Mermaid diagrams, and checklist state | Browser cards can open a detail dialog backed by `/api/tasks/<id>` for metadata, safe Markdown-rendered description, client-side Mermaid diagrams, Implementation Notes, Final Summary, Acceptance Criteria, and Definition of Done. Checklist controls update AC/DoD check state through a locked `/api/tasks/<id>/checklist` endpoint. |
-| Document and decision detail | Required for full clone | Implemented for read-only inspection | Browser users can open read-only Documents and Decisions dialogs. The loopback service exposes `/api/docs`, `/api/docs/<id-or-path>`, `/api/decisions`, and `/api/decisions/<id>` for list/detail payloads, with safe Markdown HTML rendering for document bodies and decision sections. |
-| Task create/edit forms | Required for full clone | Basic create/edit plus metadata, Markdown toolbar, safe preview, Rich mode v1, and rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including assignees, labels, priority, milestone, raw Markdown replacement for Implementation Notes and Final Summary, a local Markdown formatting toolbar for raw textareas, safe server-rendered preview mode, and dependency-free Rich mode for the supported Markdown subset. Broader WYSIWYG edit flows remain deferred. |
-| Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
-| Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
-| General project settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, `zeroPaddedIds`, and `statuses` through a locked settings endpoint. Shell-hook settings remain outside the browser surface. |
-| Git automation settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `remoteOperations`, `checkActiveBranches`, `activeBranchDays`, and `autoCommit` through the locked project settings endpoint. `onStatusChange` and `bypassGitHooks` remain rejected by the browser API because they introduce shell execution or hook-bypass risk. |
-| Real-time updates | Required for full clone | Implemented with SSE, shutdown events, and polling fallback | The browser page subscribes to `/api/board/events` for deterministic board revision events and reloads when external CLI, MCP, or browser-tab edits change task state. Browsers without `EventSource` keep using conservative `/api/board` polling. When service shutdown starts, the same SSE endpoint emits a shutdown event so the client closes the EventSource and stops revision polling. |
-| Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
-| Rich Markdown editing | Required for full clone | Safe rendering, Mermaid detail diagrams, Markdown toolbar, server-rendered preview, dependency-free Rich mode v1, and owned-section replacement implemented | Task detail Markdown is rendered through a safe HTML renderer, Mermaid fences are exposed to the client-side Mermaid renderer with strict security settings, and the browser edit form can replace raw Markdown Implementation Notes and Final Summary sections through the existing parser-preserving writer. Description, Implementation Notes, and Final Summary editors expose raw Edit mode, safe Preview mode, and Rich mode for headings, paragraphs, lists, links, bold, italic, inline code, and fenced code blocks while keeping textareas as the submission source of truth. Full WYSIWYG parity remains deferred. |
-| mermaid rendering | Required for full clone | Implemented for task details | Mermaid fenced blocks in task detail Markdown render as browser diagrams through a client-side Mermaid loader while preserving escaped server HTML and safe fallback source text if rendering fails. |
-| Custom port and no-open flags | Required for full clone | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
-| service mode | Required for full clone | Implemented for status, request logging, guarded local shutdown state, and SSE shutdown policy | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Shutdown requests are idempotent, surface pending shutdown state in the Service dialog, and notify the SSE board transport so the browser stops reconnecting or polling. |
-| Mobile behavior | Required for full clone | Implemented for narrow viewport layout | Narrow viewport layout is covered by the browser HTML/CSS contract; richer device-specific visual QA can be handled as release validation instead of a missing parity feature. |
+| Responsive Kanban board | Explicit inventory | Implemented for narrow viewports | The static board includes explicit mobile viewport rules for header actions, board columns, task actions, dialogs, and form actions while preserving the dependency-free browser service. |
+| drag-and-drop task movement | Explicit inventory | Implemented for append status changes | Native drag/drop moves local working-tree tasks across status columns through a loopback browser API protected by the project write lock. Cross-column moves append below ordinal-bearing and ordinal-less target tasks; arbitrary positional and keyboard movement remain follow-ups. |
+| Persistent column sorting | Explicit inventory | Implemented for priority and created date | Each sortable local column exposes persistent priority and created-date actions. The locked server operation loads the complete unfiltered status column and writes deterministic ordinals without changing task update timestamps. |
+| Milestone management | Explicit inventory | Implemented for current and legacy files | The Milestones dialog and locked API support active/archive inspection, current-format create/edit/archive/remove, due dates, task assignment, and explicit keep/clear removal policy. Current `m-N` files and legacy `name` files are both read; new files use current format and existing files are never auto-migrated. |
+| Milestone and label filters | Explicit inventory | Implemented | One URL-backed filter form combines queue, milestone, and repeated labels. Labels use case-insensitive any-match semantics only in the WebUI; milestone aliases, archives, and unknown stored values remain visible and preservable. |
+| Task detail dialog | Explicit inventory | Implemented for inspection, Markdown rendering, Mermaid diagrams, and checklist state | Browser cards can open a detail dialog backed by `/api/tasks/<id>` for metadata, safe Markdown-rendered description, client-side Mermaid diagrams, Implementation Notes, Final Summary, Acceptance Criteria, and Definition of Done. Checklist controls update AC/DoD check state through a locked `/api/tasks/<id>/checklist` endpoint. |
+| Document and decision detail | Explicit inventory | Implemented for read-only inspection | Browser users can open read-only Documents and Decisions dialogs. The loopback service exposes `/api/docs`, `/api/docs/<id-or-path>`, `/api/decisions`, and `/api/decisions/<id>` for list/detail payloads, with safe Markdown HTML rendering for document bodies and decision sections. |
+| Task create/edit forms | Explicit inventory | Basic create/edit plus metadata, Markdown toolbar, safe preview, Rich mode v1, and rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including assignees, labels, priority, milestone, raw Markdown replacement for Implementation Notes and Final Summary, a local Markdown formatting toolbar for raw textareas, safe server-rendered preview mode, and dependency-free Rich mode for the supported Markdown subset. Broader WYSIWYG edit flows remain deferred. |
+| Acceptance criteria editor | Explicit inventory | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
+| Definition of Done settings | Explicit inventory | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
+| General project settings | Explicit inventory | Implemented for safe non-shell settings and structured statuses | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, and `zeroPaddedIds` through a locked settings endpoint. Statuses use ordered add/move/remove controls with usage/default safeguards and one atomic config replacement. Status-list editing is a user-requested extension beyond the audited upstream WebUI. Shell-hook settings remain outside the browser surface. |
+| Git automation settings | Explicit inventory | Implemented for safe non-shell settings | Browser users can view and update `remoteOperations`, `checkActiveBranches`, `activeBranchDays`, and `autoCommit` through the locked project settings endpoint. `onStatusChange` and `bypassGitHooks` remain rejected by the browser API because they introduce shell execution or hook-bypass risk. |
+| Real-time updates | Explicit inventory | Implemented with SSE, shutdown events, and polling fallback | The browser page subscribes to `/api/board/events` for deterministic board revision events and reloads when external CLI, MCP, or browser-tab edits change task state. Browsers without `EventSource` keep using conservative `/api/board` polling. When service shutdown starts, the same SSE endpoint emits a shutdown event so the client closes the EventSource and stops revision polling. |
+| Archive confirmations | Explicit inventory | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
+| Rich Markdown editing | Explicit inventory | Safe rendering, Mermaid detail diagrams, Markdown toolbar, server-rendered preview, dependency-free Rich mode v1, and owned-section replacement implemented | Task detail Markdown is rendered through a safe HTML renderer, Mermaid fences are exposed to the client-side Mermaid renderer with strict security settings, and the browser edit form can replace raw Markdown Implementation Notes and Final Summary sections through the existing parser-preserving writer. Description, Implementation Notes, and Final Summary editors expose raw Edit mode, safe Preview mode, and Rich mode for headings, paragraphs, lists, links, bold, italic, inline code, and fenced code blocks while keeping textareas as the submission source of truth. Full WYSIWYG parity remains deferred. |
+| mermaid rendering | Explicit inventory | Implemented for task details | Mermaid fenced blocks in task detail Markdown render as browser diagrams through a client-side Mermaid loader while preserving escaped server HTML and safe fallback source text if rendering fails. |
+| Custom port and no-open flags | Explicit inventory | Implemented for loopback board service | `backlog-py browser --port <port> --no-open` starts a loopback board service, honors config defaults, and has port-collision and launch-policy tests. |
+| service mode | Explicit inventory | Implemented for status, request logging, guarded local shutdown state, and SSE shutdown policy | The Python service can start, serve health/board/HTML endpoints, expose `/api/service/status`, expose a bounded body-free `/api/service/requests` request log, mutate create/edit/status through the project write lock, and stop through a same-origin `/api/service/shutdown` dialog action. Shutdown requests are idempotent, surface pending shutdown state in the Service dialog, and notify the SSE board transport so the browser stops reconnecting or polling. |
+| Mobile behavior | Explicit inventory | Implemented for narrow viewport layout | Narrow viewport layout is covered by the browser HTML/CSS contract; richer device-specific visual QA can be handled as release validation instead of a missing parity feature. |
 
-## Release Evidence For Full Browser Readiness
+## Release Evidence For The Inventoried Browser Slice
 
 `backlog-py compat status` tracks these release checks separately from feature
-coverage. The browser feature inventory can be implemented while
-`fullBrowserReleaseReady` remains false until the release-validation gates below
-have evidence. The machine-readable evidence format is documented in
+coverage. The browser inventory can be implemented while the legacy
+`fullBrowserReleaseReady` field remains false until the release-validation
+gates below have evidence. That field applies only to the explicitly inventoried
+release scope; it does not assert exhaustive upstream WebUI parity. The
+machine-readable evidence format is documented in
 `docs/browser-release-validation.md`.
 
-The current browser release-readiness milestone is complete when a fresh
+The inventoried browser release scope is evidence-complete when a fresh
 `backlog-py compat status --release-evidence <manifest.json>` reports
 `fullBrowserReleaseReady: true`. Historical validation runs are recorded in
 `docs/browser-release-validation.md`, but current release candidates should
@@ -65,8 +74,9 @@ artifacts.
 Future browser milestones should not be marked complete until they have:
 
 - End-to-end browser tests for rich edit flows beyond the
-  implemented drag-and-drop status movement, basic create/edit forms, Markdown
-  edit toolbar, safe server-rendered preview, Rich mode v1, archive
+  implemented sorting, append status movement, milestone management and
+  filtering, multi-label filters, structured status editing, basic create/edit
+  forms, Markdown edit toolbar, safe server-rendered preview, Rich mode v1, archive
   confirmation, checklist-state controls, document/decision read-only
   inspection, task detail inspection, safe
   Markdown rendering, Mermaid detail diagrams, raw Markdown Implementation
@@ -74,7 +84,7 @@ Future browser milestones should not be marked complete until they have:
   default settings, safe general project settings, safe git automation
   settings, and responsive narrow-viewport layout.
 - Browser screenshot checks for desktop and mobile viewports before a tagged
-  release that advertises full browser parity.
+  release declares the inventoried browser slice release-ready.
 - A clear service mode lifecycle for any future non-SSE persistent transport
   beyond the implemented SSE revision/shutdown events, local stop action,
   shutdown state, and bounded request log.

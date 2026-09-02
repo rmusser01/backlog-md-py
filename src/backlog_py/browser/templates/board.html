@@ -18,15 +18,88 @@
       <button class="secondary-button" type="button" id="service-status-open">Service</button>
       <button class="secondary-button" type="button" id="documents-open">Documents</button>
       <button class="secondary-button" type="button" id="decisions-open">Decisions</button>
+      <button class="secondary-button" type="button" id="milestones-open">Milestones</button>
       <button class="secondary-button" type="button" id="config-settings-open">Project settings</button>
       <button class="secondary-button" type="button" id="dod-defaults-open">Definition of Done</button>
       <button class="primary-button" type="button" id="task-create-open">New task</button>
     </div>
   </header>
-  {queue_filter}
+  {board_filter}
+  <div id="board-status" class="board-status" role="status" aria-live="polite"></div>
   <main class="board" data-board-revision="{board_revision}" data-mermaid-url="{mermaid_url}">
 {column_markup}
   </main>
+  <dialog id="milestones-dialog" aria-labelledby="milestones-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="milestones-title">Milestones</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <p class="milestone-message" id="milestone-message" role="status" aria-live="polite"></p>
+      <div class="milestone-manager">
+        <section aria-labelledby="milestone-create-title">
+          <h3 id="milestone-create-title">New milestone</h3>
+          <form class="task-form" id="milestone-create-form">
+            <label>Title
+              <input name="title" autocomplete="off" required>
+            </label>
+            <label>Due (UTC)
+              <input name="dueDate" type="datetime-local">
+            </label>
+            <label>Description
+              <textarea name="description"></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="primary-button" type="submit">Create milestone</button>
+            </div>
+          </form>
+        </section>
+        <section aria-labelledby="milestone-list-title">
+          <h3 id="milestone-list-title">Active</h3>
+          <ul class="readonly-list milestone-list" id="milestone-active-list"></ul>
+          <details class="milestone-archived">
+            <summary>Archived</summary>
+            <ul class="readonly-list milestone-list" id="milestone-archived-list"></ul>
+          </details>
+          <section class="dialog-section" id="milestone-editor" hidden aria-labelledby="milestone-editor-title">
+            <h3 id="milestone-editor-title">Milestone details</h3>
+            <dl class="dialog-meta">
+              <div><dt>ID</dt><dd id="milestone-editor-id"></dd></div>
+              <div><dt>Format</dt><dd id="milestone-editor-format"></dd></div>
+              <div><dt>File</dt><dd id="milestone-editor-path"></dd></div>
+              <div><dt>Task references</dt><dd id="milestone-editor-references"></dd></div>
+            </dl>
+            <p class="readonly-note" id="milestone-archived-note" hidden>Archived milestones are read only.</p>
+            <form class="task-form" id="milestone-edit-form">
+              <label>Title
+                <input name="title" autocomplete="off" required>
+              </label>
+              <label>Due (UTC)
+                <input name="dueDate" type="datetime-local" aria-describedby="milestone-legacy-due-note">
+              </label>
+              <p class="readonly-note" id="milestone-legacy-due-note" hidden>Legacy milestones do not support due dates.</p>
+              <label>Description
+                <textarea name="description"></textarea>
+              </label>
+              <fieldset class="milestone-remove-options" id="milestone-remove-options" hidden>
+                <legend>Referenced tasks</legend>
+                <p>Removing this milestone will affect tasks that still reference it.</p>
+                <label><input type="radio" name="taskHandling" value="keep"> Keep task references</label>
+                <label><input type="radio" name="taskHandling" value="clear"> Clear task references</label>
+              </fieldset>
+              <div class="form-actions milestone-actions">
+                <button class="secondary-button" type="button" id="milestone-remove">Remove</button>
+                <button class="primary-button" type="button" id="milestone-archive">Archive</button>
+                <button class="primary-button" type="submit" id="milestone-edit-submit">Save</button>
+              </div>
+            </form>
+          </section>
+        </section>
+      </div>
+    </div>
+  </dialog>
   <dialog id="task-create-dialog" aria-labelledby="task-create-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-create-title">New task</h2>
@@ -46,7 +119,7 @@
           <input name="priority" autocomplete="off">
         </label>
         <label>Milestone
-          <input name="milestone" autocomplete="off">
+          <select class="task-form-select" name="milestone">{milestone_options}</select>
         </label>
         <label>Assignees
           <textarea name="assignees"></textarea>
@@ -84,7 +157,7 @@
           <input name="priority" autocomplete="off">
         </label>
         <label>Milestone
-          <input name="milestone" autocomplete="off">
+          <select class="task-form-select" name="milestone">{milestone_options}</select>
         </label>
         <label>Assignees
           <textarea name="assignees"></textarea>
@@ -135,9 +208,8 @@
         <label>Default assignee
           <input name="defaultAssignee" autocomplete="off">
         </label>
-        <label>Default status
-          <input name="defaultStatus" autocomplete="off" required>
-        </label>
+        <label for="config-default-status">Default status</label>
+        <select id="config-default-status" name="defaultStatus" required></select>
         <label>Date format
           <input name="dateFormat" autocomplete="off" required>
         </label>
@@ -150,9 +222,16 @@
         <label>Zero-padded ID width
           <input name="zeroPaddedIds" type="number" min="0" step="1">
         </label>
-        <label>Statuses
-          <textarea name="statuses"></textarea>
-        </label>
+        <fieldset class="status-editor">
+          <legend>Statuses</legend>
+          <div id="config-status-rows"></div>
+          <div class="status-add-row">
+            <label for="config-status-add">Add status</label>
+            <input id="config-status-add" autocomplete="off">
+            <button type="button" id="config-status-add-button">Add</button>
+          </div>
+          <p id="config-status-message" role="status" aria-live="polite"></p>
+        </fieldset>
         <label>
           <input name="includeDatetimeInDates" type="checkbox">
           Include time in dates

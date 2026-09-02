@@ -49,6 +49,7 @@
       padding: 20px 24px 24px;
       align-items: start;
     }
+    .board-filter,
     .queue-filter {
       display: flex;
       flex-wrap: wrap;
@@ -57,16 +58,66 @@
       padding: 12px 24px 0;
       color: var(--muted);
     }
+    .board-filter > label,
     .queue-filter label {
       font-weight: 650;
       color: var(--text);
     }
+    .board-filter select,
     .queue-filter select {
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--panel);
       color: var(--text);
       padding: 5px 8px;
+    }
+    .label-filter {
+      position: relative;
+    }
+    .label-filter summary {
+      cursor: pointer;
+      color: var(--text);
+    }
+    .label-filter-options {
+      position: absolute;
+      z-index: 1;
+      display: grid;
+      gap: 6px;
+      min-inline-size: min(180px, calc(100vw - 48px));
+      max-inline-size: min(360px, calc(100vw - 48px));
+      max-height: min(320px, 50vh);
+      overflow-y: auto;
+      margin-top: 6px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 10px;
+      color: var(--text);
+    }
+    .label-filter-options label {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .secondary-link {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 4px 9px;
+      text-decoration: none;
+    }
+    .filter-count,
+    .column-readonly {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .board-filter :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
     .column {
       min-width: 0;
@@ -79,6 +130,39 @@
       font-size: 14px;
       letter-spacing: 0;
     }
+    .column-sort {
+      margin: -2px 0 10px;
+    }
+    .column-sort summary {
+      color: var(--muted);
+      cursor: pointer;
+      width: fit-content;
+    }
+    .column-sort-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .column-sort-actions button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      cursor: pointer;
+      padding: 3px 8px;
+    }
+    .column-sort-actions button:hover {
+      border-color: var(--accent);
+    }
+    .column-sort-actions button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+    .column-sort summary:focus-visible,
+    .column-sort-actions button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     .count {
       color: var(--muted);
       font-weight: 500;
@@ -90,6 +174,9 @@
       padding: 12px;
       margin-bottom: 10px;
       cursor: grab;
+    }
+    .task[draggable="false"] {
+      cursor: default;
     }
     .column.drag-over .empty,
     .column.drag-over .task {
@@ -122,6 +209,9 @@
     .queue-badge {
       border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
       color: var(--accent);
+    }
+    .milestone-badge {
+      color: var(--text);
     }
     .task-actions {
       display: flex;
@@ -165,12 +255,14 @@
     }
     dialog {
       max-width: min(720px, calc(100vw - 32px));
+      max-height: calc(100dvh - 32px);
       width: 720px;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--panel);
       color: var(--text);
       padding: 0;
+      overflow: hidden;
     }
     dialog::backdrop {
       background: rgb(0 0 0 / 0.35);
@@ -190,6 +282,8 @@
     }
     .dialog-body {
       padding: 16px;
+      max-height: calc(100dvh - 98px);
+      overflow-y: auto;
     }
     .dialog-meta {
       display: grid;
@@ -252,6 +346,75 @@
       color: var(--muted);
       font-size: 12px;
       margin-top: 2px;
+    }
+    .milestone-selected-marker:not([hidden]) {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .milestone-manager {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .milestone-manager h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+    .milestone-manager :focus-visible,
+    .milestone-manager .milestone-list button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .milestone-list button[aria-pressed="true"] {
+      border-color: var(--accent);
+    }
+    .milestone-archived {
+      margin-top: 12px;
+    }
+    .milestone-archived summary {
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .milestone-archived .readonly-list {
+      margin-top: 8px;
+    }
+    .milestone-message {
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+    .milestone-message:empty {
+      margin: 0;
+    }
+    .readonly-note {
+      color: var(--muted);
+    }
+    .milestone-remove-options {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .milestone-remove-options[hidden] {
+      display: none;
+    }
+    .milestone-remove-options p {
+      margin: 0 0 2px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .milestone-remove-options label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 400;
+    }
+    .task-form .milestone-remove-options input[type="radio"] {
+      width: auto;
     }
     .run-history-list li {
       border: 1px solid var(--border);
@@ -337,6 +500,7 @@
       font-weight: 650;
     }
     .task-form input,
+    .task-form select,
     .task-form .task-form-select,
     .task-form textarea {
       width: 100%;
@@ -426,6 +590,91 @@
       width: auto;
       justify-self: start;
     }
+    .status-editor {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .status-editor legend {
+      font-weight: 650;
+      padding: 0 4px;
+    }
+    #config-status-rows {
+      display: grid;
+      gap: 7px;
+    }
+    .status-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 8px;
+    }
+    .status-row-summary {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .status-row-name {
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+    .status-row-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .status-row-state {
+      font-weight: 650;
+    }
+    .status-row-actions {
+      display: flex;
+      gap: 5px;
+    }
+    .status-row-actions button,
+    .status-add-row button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      padding: 5px 8px;
+    }
+    .status-row-actions button:hover,
+    .status-add-row button:hover {
+      border-color: var(--accent);
+    }
+    .status-row-actions button:disabled,
+    .status-add-row button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    .status-add-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 6px;
+    }
+    .status-add-row label {
+      grid-column: 1 / -1;
+    }
+    .status-editor :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    #config-status-message {
+      margin: 0;
+      color: var(--muted);
+      min-height: 1.25em;
+    }
     .form-actions {
       display: flex;
       justify-content: flex-end;
@@ -437,18 +686,44 @@
       flex-wrap: wrap;
       justify-content: flex-end;
     }
+    .board-status {
+      margin: 0 24px 20px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 8px 10px;
+    }
+    .board-status:empty {
+      margin: 0;
+      border: 0;
+      padding: 0;
+    }
     @media (max-width: 720px) {
       header { flex-direction: column; align-items: stretch; padding: 16px; }
       h1 { font-size: 20px; }
       .subtitle { font-size: 13px; }
       .header-actions { width: 100%; justify-content: flex-start; }
       .header-actions button { flex: 1 1 180px; }
+      .board-filter,
+      .queue-filter { padding-inline: 14px; }
+      .label-filter-options {
+        position: static;
+        min-inline-size: 0;
+        max-inline-size: calc(100vw - 28px);
+      }
       .board { grid-template-columns: 1fr; padding: 14px; gap: 14px; }
+      .column-sort-actions button { flex: 1 1 80px; }
       .task-actions { justify-content: flex-start; }
       .task-actions button { flex: 1 1 120px; }
-      dialog { max-height: calc(100dvh - 24px); overflow: auto; }
+      dialog { max-height: calc(100dvh - 24px); overflow: hidden; }
       .dialog-header { gap: 10px; padding: 14px; }
       .dialog-body { padding: 14px; }
+      .milestone-manager { grid-template-columns: 1fr; }
+      .status-row,
+      .status-add-row { grid-template-columns: 1fr; }
+      .status-row-actions button { flex: 1; }
+      .status-add-row button { width: 100%; }
       .form-actions { flex-direction: column-reverse; }
       .form-actions button { width: 100%; }
+      .board-status { margin: 0 14px 14px; }
     }

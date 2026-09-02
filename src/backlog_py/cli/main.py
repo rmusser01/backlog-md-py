@@ -1692,6 +1692,9 @@ def compat_status_command(as_json: bool, release_evidence: Path | None) -> None:
         "upstreamBaseline: "
         f"{baseline['package']} {baseline['version']} audited {baseline['audit_date']}"
     )
+    coverage_scope = report["coverage_scope"]
+    click.echo(f"coverageScope: {coverage_scope['kind']}")
+    click.echo(f"coverageNote: {coverage_scope['note']}")
     evidence = report["release_evidence"]
     click.echo(f"releaseEvidence: {evidence['status']}")
     if evidence["generated_at"] is not None:

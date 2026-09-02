@@ -13,10 +13,10 @@ push is the final maintainer-controlled gate.
 - Keep the package stable only when `pyproject.toml`,
   `docs/stability-policy.md`, and the changelog intentionally describe the 1.x
   support contract.
-- Full browser parity claims require a fresh browser release-evidence manifest.
-  A package or agent-cutover release can proceed without that claim when
-  `agent_cutover_ready` is true and release notes avoid advertising full browser
-  readiness.
+- Declaring the inventoried browser release scope ready requires a fresh browser
+  release-evidence manifest. A package or agent-cutover release can proceed
+  without that claim when `agent_cutover_ready` is true and release notes avoid
+  that scoped browser-readiness declaration.
 
 ## Release-Prep PR
 
@@ -85,10 +85,14 @@ uv run --extra dev backlog-py compat status --json
 ```
 
 Require `agent_cutover_ready: true`. If `full_browser_release_ready` is false,
-release notes must avoid claiming full browser parity.
+release notes must avoid declaring the inventoried browser release scope ready.
+The legacy `full_browser_release_ready` field covers only the explicit
+compatibility inventory and its release gates, not exhaustive upstream WebUI
+parity; confirm the adjacent `coverage_scope` metadata in machine-readable
+reports.
 
-For a release that advertises full browser parity, generate and attach fresh
-browser evidence:
+For a release that declares the inventoried browser release scope ready,
+generate and attach fresh browser evidence:
 
 ```bash
 uv run --extra dev backlog-py compat evidence-template \
@@ -101,7 +105,7 @@ uv run --extra dev backlog-py compat status --release-evidence release-evidence/
 uv run --extra dev backlog-py compat status --json --release-evidence release-evidence/browser-release-evidence.json
 ```
 
-Require `full_browser_release_ready: true` before making a full browser parity
+Require `full_browser_release_ready: true` before making that scoped readiness
 claim.
 
 ## Tag And Publish
