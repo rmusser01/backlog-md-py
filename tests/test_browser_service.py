@@ -2985,6 +2985,7 @@ def test_browser_structured_status_editor_is_responsive_and_keyboard_visible(tmp
     assert ".status-row," in responsive
     assert ".status-add-row" in responsive
     assert "grid-template-columns: 1fr;" in responsive
+    assert ".status-add-row button:disabled" in html
 
 
 def test_browser_structured_status_state_adds_reorders_and_safely_removes():
@@ -3313,6 +3314,59 @@ return {
     }
 
 
+def test_browser_status_add_refocuses_after_duplicate_and_lookup_errors():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [{name: "Ready", taskCount: 0}];
+statusKeyByName.set("Ready", "ready");
+
+let enterPrevented = false;
+fakeConfigStatusAddInput.value = "READY";
+fakeConfigStatusAddInput.focused = true;
+globalThis.fetch = async () => ({ok: true, json: async () => ({key: "ready"})});
+await fakeConfigStatusAddInput.listeners.keydown({
+  key: "Enter",
+  preventDefault() { enterPrevented = true; },
+});
+const duplicate = {
+  focused: Boolean(fakeConfigStatusAddInput.focused),
+  input: fakeConfigStatusAddInput.value,
+  message: configStatus.textContent,
+};
+
+fakeConfigStatusAddInput.value = "HTTP error";
+globalThis.fetch = async () => ({ok: false, json: async () => ({error: "Lookup failed"})});
+await fakeConfigStatusAddInput.listeners.keydown({key: "Enter", preventDefault() {}});
+const httpError = {
+  focused: Boolean(fakeConfigStatusAddInput.focused),
+  input: fakeConfigStatusAddInput.value,
+  message: configStatus.textContent,
+};
+
+fakeConfigStatusAddInput.value = "Network error";
+globalThis.fetch = async () => { throw new Error("Network failed"); };
+await fakeConfigStatusAddButton.listeners.click();
+const networkError = {
+  focused: Boolean(fakeConfigStatusAddInput.focused),
+  input: fakeConfigStatusAddInput.value,
+  message: configStatus.textContent,
+};
+return {enterPrevented, duplicate, httpError, networkError};
+"""
+    )
+
+    assert result == {
+        "enterPrevented": True,
+        "duplicate": {
+            "focused": True,
+            "input": "READY",
+            "message": "A status named “READY” already exists.",
+        },
+        "httpError": {"focused": True, "input": "HTTP error", "message": "Lookup failed"},
+        "networkError": {"focused": True, "input": "Network error", "message": "Network failed"},
+    }
+
+
 def test_browser_status_add_keeps_lookup_error_and_ignores_stale_reopen():
     result = _run_board_javascript_harness(
         """
@@ -3321,6 +3375,7 @@ fakeConfigStatusAddInput.value = "Broken";
 globalThis.fetch = async () => ({ok: false, json: async () => ({error: "Lookup failed"})});
 await fakeConfigStatusAddButton.listeners.click();
 const afterError = {
+  focused: Boolean(fakeConfigStatusAddInput.focused),
   input: fakeConfigStatusAddInput.value,
   message: configStatus.textContent,
   names: statusRows.map((row) => row.name),
@@ -3351,12 +3406,31 @@ globalThis.fetch = async () => {
 fakeConfigStatusAddInput.value = "Stale";
 const staleAdd = fakeConfigStatusAddButton.listeners.click();
 await lookupStarted;
+fakeConfigStatusAddInput.focused = false;
 await openConfigSettings();
 releaseLookup({ok: true, json: async () => ({key: "stale"})});
 await staleAdd;
+const staleFocused = Boolean(fakeConfigStatusAddInput.focused);
+
+let releaseClosedLookup;
+let markClosedLookupStarted;
+const closedLookupStarted = new Promise((resolve) => { markClosedLookupStarted = resolve; });
+globalThis.fetch = async () => {
+  markClosedLookupStarted();
+  return new Promise((resolve) => { releaseClosedLookup = resolve; });
+};
+fakeConfigStatusAddInput.value = "Closed";
+fakeConfigStatusAddInput.focused = true;
+const closedAdd = fakeConfigStatusAddButton.listeners.click();
+await closedLookupStarted;
+fakeConfigSettingsDialog.close();
+releaseClosedLookup({ok: true, json: async () => ({key: "closed"})});
+await closedAdd;
 return {
   afterError,
   defaultStatus: configDefaultStatus,
+  focused: Boolean(fakeConfigStatusAddInput.focused),
+  staleFocused,
   names: statusRows.map((row) => row.name),
   message: configStatus.textContent,
 };
@@ -3364,9 +3438,16 @@ return {
     )
 
     assert result == {
-        "afterError": {"input": "Broken", "message": "Lookup failed", "names": ["Ready"]},
+        "afterError": {
+            "focused": True,
+            "input": "Broken",
+            "message": "Lookup failed",
+            "names": ["Ready"],
+        },
         "defaultStatus": "Fresh",
-        "names": ["Fresh"],
+        "focused": False,
+        "staleFocused": False,
+        "names": ["Fresh", "Closed"],
         "message": "",
     }
 
@@ -5569,8 +5650,14 @@ const payload = JSON.parse(fs.readFileSync(0, "utf8"));
 const milestoneStatus = {textContent: ""};
 const configStatus = {textContent: ""};
 const fakeConfigStatusAddInput = {
+  _disabled: false,
   value: "",
   listeners: {},
+  get disabled() { return this._disabled; },
+  set disabled(value) {
+    this._disabled = Boolean(value);
+    if (this._disabled) this.focused = false;
+  },
   addEventListener(type, listener) { this.listeners[type] = listener; },
   focus() { if (!this.disabled) this.focused = true; },
 };
@@ -5578,12 +5665,19 @@ const fakeConfigStatusAddButton = {
   listeners: {},
   addEventListener(type, listener) { this.listeners[type] = listener; },
 };
+const fakeConfigSettingsDialog = {
+  open: true,
+  close() { this.open = false; },
+  showModal() { this.open = true; },
+  setAttribute(name) { if (name === "open") this.open = true; },
+};
 const document = {
   getElementById: (id) => ({
     "milestone-message": milestoneStatus,
     "config-status-message": configStatus,
     "config-status-add": fakeConfigStatusAddInput,
     "config-status-add-button": fakeConfigStatusAddButton,
+    "config-settings-dialog": fakeConfigSettingsDialog,
   })[id] || null,
   querySelector: (selector) => selector === "[data-board-revision]"
     ? {dataset: {boardRevision: "", mermaidUrl: "", mermaidSri: ""}}
@@ -5605,6 +5699,7 @@ const context = vm.createContext({
   configStatus,
   fakeConfigStatusAddInput,
   fakeConfigStatusAddButton,
+  fakeConfigSettingsDialog,
   HTMLSelectElement: class {},
   HTMLTextAreaElement: class {},
   FormData: class {

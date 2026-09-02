@@ -646,7 +646,8 @@
     .status-add-row button:hover {
       border-color: var(--accent);
     }
-    .status-row-actions button:disabled {
+    .status-row-actions button:disabled,
+    .status-add-row button:disabled {
       cursor: not-allowed;
       opacity: 0.55;
     }

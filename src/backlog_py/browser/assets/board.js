@@ -274,6 +274,7 @@
 
     async function addStatusFromInput() {
       if (!configStatusAddInput || statusAddInFlight) return;
+      const generation = configSettingsLoadGeneration;
       statusAddInFlight = true;
       configStatusAddInput.disabled = true;
       if (configStatusAddButton) configStatusAddButton.disabled = true;
@@ -287,7 +288,9 @@
         configStatusAddInput.disabled = false;
         if (configStatusAddButton) configStatusAddButton.disabled = false;
       }
-      if (added) configStatusAddInput.focus();
+      if (generation === configSettingsLoadGeneration && configSettingsDialog?.open) {
+        configStatusAddInput.focus();
+      }
     }
 
     function setMilestoneBusy(control, busy) {
