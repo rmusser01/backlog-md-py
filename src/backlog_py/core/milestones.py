@@ -64,7 +64,9 @@ class MilestoneService:
     ) -> MilestoneRecord:
         title = _required_title(name)
         milestone_id = self._next_milestone_id()
-        normalized_due_date = _normalize_due_date(due_date) if due_date else None
+        normalized_due_date = (
+            None if due_date is None or due_date == "" else _normalize_due_date(due_date)
+        )
         frontmatter = {"id": milestone_id, "title": title}
         if normalized_due_date is not None:
             frontmatter["due_date"] = normalized_due_date
@@ -195,13 +197,10 @@ class MilestoneService:
                 except (OSError, ValueError):
                     continue
                 raw_id = frontmatter.get("id")
-                raw_title = frontmatter.get("title")
                 if (
                     "name" not in frontmatter
                     and isinstance(raw_id, str)
                     and _CURRENT_ID_RE.fullmatch(raw_id)
-                    and isinstance(raw_title, str)
-                    and raw_title.strip()
                 ):
                     reserved.add(int(raw_id[2:]))
         return f"m-{max(reserved, default=0) + 1}"
@@ -389,7 +388,7 @@ def _safe_current_filename_title(title: str) -> str:
     return safe_title or "milestone"
 
 
-def _normalize_due_date(due_date: str) -> str:
+def _normalize_due_date(due_date: object) -> str:
     if not isinstance(due_date, str):
         raise MilestoneMutationError("Milestone due date must be a date and time")
     value = due_date.strip()

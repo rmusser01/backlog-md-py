@@ -112,6 +112,22 @@ def test_id_allocator_scans_active_archive_frontmatter_and_filename_fallbacks(tm
     assert added.path.name == "m-12 - next.md"
 
 
+def test_id_allocator_reserves_current_intent_id_without_a_valid_title(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_dir = repo / "backlog" / "milestones"
+    active_dir.mkdir(parents=True)
+    (active_dir / "noncanonical.md").write_text(
+        "---\nid: m-37\n---\n\nIncomplete current milestone.\n", encoding="utf-8"
+    )
+    (active_dir / "legacy.md").write_text(
+        "---\nname: Legacy\nid: m-99\n---\n\nLegacy milestone.\n", encoding="utf-8"
+    )
+
+    added = _service(repo).add_milestone("Next")
+
+    assert added.id == "m-38"
+
+
 def test_id_allocator_never_reuses_archived_id(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -145,6 +161,33 @@ def test_add_milestone_rejects_invalid_due_date_before_writing(tmp_path, due_dat
         _service(repo).add_milestone("Release", due_date=due_date)
 
     assert not (repo / "backlog" / "milestones").exists()
+
+
+@pytest.mark.parametrize(
+    "due_date",
+    [
+        0,
+        False,
+        [],
+        {},
+        b"2026-09-30 17:00",
+        object(),
+        "9999-12-31T23:59-23:59",
+        "0001-01-01T00:00+23:59",
+    ],
+)
+def test_add_milestone_rejects_nonempty_invalid_due_dates_without_mutating_directory(tmp_path, due_date):
+    repo = _copy_fixture(tmp_path)
+    milestones_dir = repo / "backlog" / "milestones"
+    milestones_dir.mkdir(parents=True)
+    sentinel = milestones_dir / "sentinel.md"
+    sentinel.write_bytes(b"unchanged\n")
+    before = {path.name: path.read_bytes() for path in milestones_dir.iterdir()}
+
+    with pytest.raises(MilestoneMutationError):
+        _service(repo).add_milestone("Release", due_date=due_date)
+
+    assert {path.name: path.read_bytes() for path in milestones_dir.iterdir()} == before
 
 
 def test_add_milestone_omits_empty_due_date(tmp_path):
