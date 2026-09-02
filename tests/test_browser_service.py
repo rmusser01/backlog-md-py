@@ -1,6 +1,7 @@
 import http.client
 import json
 import shutil
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -4262,6 +4263,25 @@ def test_browser_milestone_dialog_exposes_metadata_and_readonly_archive_contract
     assert 'dueDate.disabled = readOnly || record.format === "legacy"' in selector
 
 
+def test_browser_milestone_dialog_explains_disabled_legacy_due_date_visibly(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    dialog = html.split('id="milestones-dialog"', maxsplit=1)[1].split("</dialog>", maxsplit=1)[0]
+    selector = html.split("function selectMilestone", maxsplit=1)[1].split(
+        "async function submitMilestoneCreate", maxsplit=1
+    )[0]
+
+    assert 'aria-describedby="milestone-legacy-due-note"' in dialog
+    assert 'id="milestone-legacy-due-note"' in dialog
+    assert "Legacy milestones do not support due dates." in dialog
+    assert 'legacyDueNote.hidden = record.format !== "legacy"' in selector
+    assert "dueDate.title" not in selector
+
+
 def test_browser_milestone_dialog_uses_unique_selection_key_and_route_key(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -4284,6 +4304,85 @@ def test_browser_milestone_dialog_uses_unique_selection_key_and_route_key(tmp_pa
     assert "encodeURIComponent(selected.selectionKey)" not in actions
     assert ".innerHTML" not in lists
     assert ".textContent" in lists
+
+
+def test_browser_milestone_loads_apply_only_latest_response():
+    result = _run_board_javascript_harness(
+        """
+        const pending = [];
+        const applied = [];
+        fetch = () => new Promise((resolve) => pending.push(resolve));
+        selectedMilestoneKey = "new";
+        renderMilestoneLists = () => applied.push(milestones.map((record) => record.selectionKey));
+        selectMilestone = () => {};
+        const older = loadMilestones();
+        const newer = loadMilestones();
+        pending[1]({
+          ok: true,
+          json: async () => ({milestones: [{selectionKey: "new"}]}),
+        });
+        await newer;
+        pending[0]({
+          ok: true,
+          json: async () => ({milestones: [{selectionKey: "old"}]}),
+        });
+        await older;
+        return {
+          applied,
+          finalKeys: milestones.map((record) => record.selectionKey),
+          selectedMilestoneKey,
+        };
+        """
+    )
+
+    assert result == {
+        "applied": [["new"]],
+        "finalKeys": ["new"],
+        "selectedMilestoneKey": "new",
+    }
+
+
+def test_stale_milestone_load_error_does_not_replace_newer_state_or_message():
+    result = _run_board_javascript_harness(
+        """
+        const pending = [];
+        fetch = () => new Promise((resolve) => pending.push(resolve));
+        renderMilestoneLists = () => {};
+        selectMilestone = () => {};
+        milestoneStatus.textContent = "Newest result";
+        const older = loadMilestones();
+        const newer = loadMilestones();
+        pending[1]({ok: true, json: async () => ({milestones: []})});
+        await newer;
+        pending[0]({ok: false, json: async () => ({error: "Old failure"})});
+        await older;
+        return {message: milestoneStatus.textContent};
+        """
+    )
+
+    assert result == {"message": "Newest result"}
+
+
+@pytest.mark.parametrize(
+    "completed_action",
+    ["Created Alpha", "Saved Alpha", "Archived Alpha", "Removed Alpha"],
+)
+def test_milestone_completed_mutation_reports_failed_list_refresh(completed_action):
+    result = _run_board_javascript_harness(
+        f"""
+        fetch = async () => ({{
+          ok: false,
+          json: async () => ({{error: "Reload failed"}}),
+        }});
+        const loaded = await loadMilestones({json.dumps(completed_action)});
+        return {{loaded, message: milestoneStatus.textContent}};
+        """
+    )
+
+    assert result == {
+        "loaded": False,
+        "message": f"{completed_action}, but the list could not be refreshed: Reload failed",
+    }
 
 
 def test_browser_milestone_dialog_handles_mutation_policies_and_inline_errors(tmp_path):
@@ -4309,6 +4408,8 @@ def test_browser_milestone_dialog_handles_mutation_policies_and_inline_errors(tm
     assert "setMilestoneBusy(control, true)" in actions
     assert "setMilestoneBusy(control, false)" in actions
     assert "querySelectorAll" not in actions
+    assert actions.count("const completedAction =") == 4
+    assert actions.count("await loadMilestones(completedAction)") == 4
 
 
 def test_browser_milestone_dialog_has_focus_scroll_and_responsive_contract(tmp_path):
@@ -4439,6 +4540,64 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
     return repo
+
+
+def _run_board_javascript_harness(test_source: str) -> object:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for executable browser JavaScript contracts")
+    payload = json.dumps(
+        {
+            "boardSource": Path("src/backlog_py/browser/assets/board.js").read_text(encoding="utf-8"),
+            "testSource": test_source,
+        }
+    )
+    harness = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+const milestoneStatus = {textContent: ""};
+const document = {
+  getElementById: (id) => id === "milestone-message" ? milestoneStatus : null,
+  querySelector: (selector) => selector === "[data-board-revision]"
+    ? {dataset: {boardRevision: "", mermaidUrl: "", mermaidSri: ""}}
+    : null,
+  querySelectorAll: () => [],
+  addEventListener: () => {},
+};
+const window = {
+  document,
+  setInterval: () => 1,
+  clearInterval: () => {},
+};
+const context = vm.createContext({
+  console,
+  document,
+  window,
+  milestoneStatus,
+  HTMLSelectElement: class {},
+  HTMLTextAreaElement: class {},
+  FormData: class {},
+  Event: class {},
+  Node: {TEXT_NODE: 3, ELEMENT_NODE: 1},
+});
+vm.runInContext(payload.boardSource, context, {filename: "board.js"});
+vm.runInContext(`(async () => {${payload.testSource}})()`, context)
+  .then((result) => process.stdout.write(JSON.stringify(result)))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+"""
+    result = subprocess.run(
+        [node, "-e", harness],
+        input=payload,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
 
 
 def _configure_statuses(repo: Path, statuses: list[str] | None, *, default: str):

@@ -77,8 +77,9 @@
                 <input name="title" autocomplete="off" required>
               </label>
               <label>Due (UTC)
-                <input name="dueDate" type="datetime-local">
+                <input name="dueDate" type="datetime-local" aria-describedby="milestone-legacy-due-note">
               </label>
+              <p class="readonly-note" id="milestone-legacy-due-note" hidden>Legacy milestones do not support due dates.</p>
               <label>Description
                 <textarea name="description"></textarea>
               </label>

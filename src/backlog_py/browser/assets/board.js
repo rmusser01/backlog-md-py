@@ -29,6 +29,7 @@
     let pendingBoardRevision = "";
     let milestones = [];
     let selectedMilestoneKey = "";
+    let milestoneLoadGeneration = 0;
 
     function setText(id, value) {
       const element = document.getElementById(id);
@@ -186,7 +187,8 @@
       const dueDate = milestoneEditForm.elements.dueDate;
       dueDate.value = dueDateInputValue(record.dueDate);
       dueDate.disabled = readOnly || record.format === "legacy";
-      dueDate.title = record.format === "legacy" ? "Legacy milestones do not support due dates" : "";
+      const legacyDueNote = document.getElementById("milestone-legacy-due-note");
+      if (legacyDueNote) legacyDueNote.hidden = record.format !== "legacy";
       const archiveButton = milestoneArchiveButton;
       const removeButton = milestoneRemoveButton;
       const editSubmit = document.getElementById("milestone-edit-submit");
@@ -202,7 +204,8 @@
       });
     }
 
-    async function loadMilestones() {
+    async function loadMilestones(completedAction = "") {
+      const generation = ++milestoneLoadGeneration;
       try {
         const response = await fetch("/api/milestones", {
           headers: {"Accept": "application/json"},
@@ -212,6 +215,7 @@
           throw new Error(await responseErrorMessage(response, "Unable to load milestones"));
         }
         const payload = await response.json();
+        if (generation !== milestoneLoadGeneration) return false;
         milestones = Array.isArray(payload.milestones) ? payload.milestones : [];
         if (!milestones.some((record) => selectedMilestoneKey === record.selectionKey)) {
           selectedMilestoneKey = "";
@@ -220,7 +224,13 @@
         selectMilestone(selectedMilestoneKey);
         return true;
       } catch (error) {
-        showMilestoneMessage(error instanceof Error ? error.message : "Unable to load milestones");
+        if (generation !== milestoneLoadGeneration) return false;
+        const message = error instanceof Error ? error.message : "Unable to load milestones";
+        showMilestoneMessage(
+          completedAction
+            ? `${completedAction}, but the list could not be refreshed: ${message}`
+            : message,
+        );
         return false;
       }
     }
@@ -1170,7 +1180,8 @@
         const created = (await response.json()).milestone;
         selectedMilestoneKey = created.selectionKey;
         form.reset();
-        if (await loadMilestones()) showMilestoneMessage(`Created ${created.title}.`);
+        const completedAction = `Created ${created.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
       } catch (error) {
         showMilestoneMessage(error instanceof Error ? error.message : "Unable to create milestone");
       } finally {
@@ -1205,7 +1216,8 @@
         }
         const updated = (await response.json()).milestone;
         selectedMilestoneKey = updated.selectionKey;
-        if (await loadMilestones()) showMilestoneMessage(`Saved ${updated.title}.`);
+        const completedAction = `Saved ${updated.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
       } catch (error) {
         showMilestoneMessage(error instanceof Error ? error.message : "Unable to update milestone");
       } finally {
@@ -1230,7 +1242,8 @@
         }
         const archived = (await response.json()).milestone;
         selectedMilestoneKey = archived.selectionKey;
-        if (await loadMilestones()) showMilestoneMessage(`Archived ${archived.title}.`);
+        const completedAction = `Archived ${archived.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
       } catch (error) {
         showMilestoneMessage(error instanceof Error ? error.message : "Unable to archive milestone");
       } finally {
@@ -1262,7 +1275,8 @@
         }
         const removed = (await response.json()).milestone;
         selectedMilestoneKey = "";
-        if (await loadMilestones()) showMilestoneMessage(`Removed ${removed.title}.`);
+        const completedAction = `Removed ${removed.title}`;
+        if (await loadMilestones(completedAction)) showMilestoneMessage(`${completedAction}.`);
       } catch (error) {
         showMilestoneMessage(error instanceof Error ? error.message : "Unable to remove milestone");
       } finally {
