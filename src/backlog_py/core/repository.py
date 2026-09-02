@@ -840,6 +840,73 @@ class MutableRepository(ReadOnlyRepository):
         source = _replace_frontmatter_values(task.raw_source, task.parsed, updates)
         return self.replace_task_source(task.id, source)
 
+    def status_assignment_options(self) -> tuple[str, ...]:
+        config = load_config(self.project.config_path)
+        return tuple(
+            dict.fromkeys(
+                [
+                    *(config.statuses or ()),
+                    config.default_status,
+                    *(task.status for task in self.list_tasks()),
+                ]
+            )
+        )
+
+    def move_task_to_status(self, task_id: str, status: str) -> TaskRecord:
+        task = self.get_task(task_id)
+        if task.status == status:
+            return task
+
+        local_tasks = self.list_tasks()
+        if not status.strip() or status not in self.status_assignment_options():
+            raise TaskMutationError(f"Unknown status: {status}")
+        targets = [
+            candidate
+            for candidate in local_tasks
+            if candidate.status == status and candidate.id != task.id
+        ]
+        base = max((_task_ordinal(candidate) or 0 for candidate in targets), default=0)
+        updates: list[_TaskSourceUpdate] = []
+        for target in targets:
+            if _task_ordinal(target) is not None:
+                continue
+            base = _next_task_ordinal(base)
+            updates.append(
+                _TaskSourceUpdate(
+                    task_id=target.id,
+                    path=target.path,
+                    original_source=target.raw_source,
+                    updated_source=_replace_frontmatter_values(
+                        target.raw_source, target.parsed, {"ordinal": base}
+                    ),
+                )
+            )
+
+        base = _next_task_ordinal(base)
+        config = load_config(self.project.config_path)
+        updates.append(
+            _TaskSourceUpdate(
+                task_id=task.id,
+                path=task.path,
+                original_source=task.raw_source,
+                updated_source=_replace_frontmatter_values(
+                    task.raw_source,
+                    task.parsed,
+                    {
+                        "status": status,
+                        "ordinal": base,
+                        "updated_date": _current_task_timestamp(
+                            config.include_datetime_in_dates
+                        ),
+                    },
+                ),
+            )
+        )
+        _write_task_source_batch(self, updates)
+        moved = self.get_task(task.id)
+        _run_status_change_callback(self.project, moved, task.status, moved.status)
+        return moved
+
     def sort_tasks(self, status: str, *, sort: str, direction: str | None = None) -> TaskSortResult:
         if sort == "priority":
             if direction is not None:
@@ -1681,7 +1748,7 @@ def normalize_ordinal_value(value: int | float | str | None) -> int | float | No
             raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.") from exc
     else:
         raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
-    if not isfinite(float(number)) or number < 0:
+    if (isinstance(number, float) and not isfinite(number)) or number < 0:
         raise TaskMutationError(f"Invalid ordinal: {value}. Must be a non-negative number.")
     return number
 
@@ -1964,11 +2031,13 @@ def _task_sort_key(task_id: str) -> tuple[str, tuple[tuple[int, int | str], ...]
     return prefix, tuple(_sort_segment(segment) for segment in suffix.replace(".", "-").split("-"))
 
 
-def _task_record_sort_key(task: TaskRecord) -> tuple[int, float, tuple[str, tuple[tuple[int, int | str], ...]], str]:
+def _task_record_sort_key(
+    task: TaskRecord,
+) -> tuple[int, int | float, tuple[str, tuple[tuple[int, int | str], ...]], str]:
     ordinal = _task_ordinal(task)
     if ordinal is None:
         return 1, 0.0, _task_sort_key(task.id), task.title
-    return 0, float(ordinal), _task_sort_key(task.id), task.title
+    return 0, ordinal, _task_sort_key(task.id), task.title
 
 
 def _task_ordinal(task: TaskRecord) -> int | float | None:
@@ -1976,6 +2045,13 @@ def _task_ordinal(task: TaskRecord) -> int | float | None:
         return normalize_ordinal_value(task.parsed.frontmatter.get("ordinal"))
     except TaskMutationError:
         return None
+
+
+def _next_task_ordinal(ordinal: int | float) -> int | float:
+    candidate = ordinal + 1000
+    if candidate > ordinal and (isinstance(candidate, int) or isfinite(candidate)):
+        return candidate
+    return int(ordinal) + 1000
 
 
 def _sort_segment(segment: str) -> tuple[int, int | str]:

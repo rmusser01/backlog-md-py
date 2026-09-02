@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+from sys import float_info
 
 import pytest
 import yaml
@@ -11,6 +12,8 @@ from backlog_py.core import repository as repository_module
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.runtime import locks as locks_module
+from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.storage.project import discover_project
 
 
@@ -34,7 +37,7 @@ def _write_task(
     priority: str | None = None,
     created_date: object | None = None,
     updated_date: object | None = None,
-    ordinal: int | None = None,
+    ordinal: int | float | str | None = None,
 ) -> None:
     frontmatter: dict[str, object] = {
         "id": task_id,
@@ -58,6 +61,14 @@ def _ordinals(project: BacklogProject, status: str) -> dict[str, object]:
         task.id: task.parsed.frontmatter.get("ordinal")
         for task in MutableRepository(project).list_tasks(status=status)
     }
+
+
+def _rendered_ids(project: BacklogProject, status: str) -> list[str]:
+    return [task.id for task in MutableRepository(project).list_tasks(status=status)]
+
+
+def _frontmatter(project: BacklogProject, task_id: str) -> dict[str, object]:
+    return dict(MutableRepository(project).get_task(task_id).parsed.frontmatter)
 
 
 def _task_sources(project: BacklogProject) -> dict[str, str]:
@@ -92,6 +103,24 @@ def _fail_the_second_forward_write_once(monkeypatch: pytest.MonkeyPatch) -> None
         atomic_write(path, content, base=base)
 
     monkeypatch.setattr(repository_module, "_atomic_write_text", fail_once)
+
+
+def _write_config(
+    project: BacklogProject,
+    *,
+    statuses: list[str] | None,
+    default_status: str = "To Do",
+    on_status_change: str | None = None,
+) -> None:
+    config = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    if statuses is None:
+        config.pop("statuses", None)
+    else:
+        config["statuses"] = statuses
+    config["defaultStatus"] = default_status
+    if on_status_change is not None:
+        config["onStatusChange"] = on_status_change
+    project.config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
 def _set_priorities(project: BacklogProject, priorities: list[str]) -> None:
@@ -384,3 +413,261 @@ def test_sort_tasks_accepts_status_used_by_a_local_task_outside_config(project: 
 
     assert result.task_ids == ("TASK-1",)
     assert _ordinals(project, "Waiting") == {"TASK-1": 1000}
+
+
+def test_move_task_to_status_appends_after_ordinal_and_ordinal_less_tasks(
+    project: BacklogProject,
+) -> None:
+    _write_config(project, statuses=["To Do", "Doing"])
+    _write_task(project, task_id="TASK-1", ordinal=1000)
+    _write_task(project, task_id="TASK-2", status="Doing", ordinal=4000)
+    _write_task(project, task_id="TASK-3", status="Doing")
+
+    moved = MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    assert moved.status == "Doing"
+    assert _rendered_ids(project, "Doing") == ["TASK-2", "TASK-3", "TASK-1"]
+    assert _frontmatter(project, "TASK-2")["ordinal"] == 4000
+    assert _frontmatter(project, "TASK-3")["ordinal"] == 5000
+    assert _frontmatter(project, "TASK-1")["ordinal"] == 6000
+
+
+def test_move_task_to_status_appends_after_decimal_max_and_invalid_ordinal(
+    project: BacklogProject,
+) -> None:
+    _write_config(project, statuses=["To Do", "Doing"])
+    _write_task(project, task_id="TASK-1")
+    _write_task(project, task_id="TASK-2", status="Doing", ordinal=4500.5)
+    _write_task(project, task_id="TASK-3", status="Doing", ordinal="later")
+
+    MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    assert _frontmatter(project, "TASK-2")["ordinal"] == 4500.5
+    assert _frontmatter(project, "TASK-3")["ordinal"] == 5500.5
+    assert _frontmatter(project, "TASK-1")["ordinal"] == 6500.5
+
+
+@pytest.mark.parametrize("large_ordinal", [1e20, 10**20, float_info.max])
+def test_move_task_to_status_appends_after_large_number_and_invalid_ordinal(
+    project: BacklogProject, large_ordinal: int | float
+) -> None:
+    _write_config(project, statuses=["To Do", "Doing"])
+    _write_task(project, task_id="TASK-1")
+    _write_task(project, task_id="TASK-2", status="Doing", ordinal=large_ordinal)
+    _write_task(project, task_id="TASK-3", status="Doing", ordinal="later")
+
+    MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    target_ordinal = _frontmatter(project, "TASK-2")["ordinal"]
+    materialized_ordinal = _frontmatter(project, "TASK-3")["ordinal"]
+    moved_ordinal = _frontmatter(project, "TASK-1")["ordinal"]
+    assert target_ordinal == large_ordinal
+    assert materialized_ordinal > target_ordinal
+    assert moved_ordinal > materialized_ordinal
+    assert _rendered_ids(project, "Doing") == ["TASK-2", "TASK-3", "TASK-1"]
+
+
+def test_same_status_move_is_a_byte_identical_noop(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_task(project, task_id="TASK-1", ordinal=1000)
+    repository = MutableRepository(project)
+    before = _task_sources(project)
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("same-status move performed validation, a write, or a callback")
+
+    monkeypatch.setattr(repository_module, "load_config", fail_if_called)
+    monkeypatch.setattr(repository_module, "_atomic_write_text", fail_if_called)
+    monkeypatch.setattr(repository_module, "execute_status_callback", fail_if_called)
+
+    moved = repository.move_task_to_status("TASK-1", "To Do")
+
+    assert moved.status == "To Do"
+    assert _task_sources(project) == before
+
+
+def test_move_preserves_target_dates_but_updates_moved_task_date(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(project, statuses=["To Do", "Doing"])
+    _write_task(project, task_id="TASK-1", priority="high", updated_date="old-source-date")
+    _write_task(
+        project,
+        task_id="TASK-2",
+        status="Doing",
+        priority="low",
+        updated_date="existing-target-date",
+    )
+    target_before = _frontmatter(project, "TASK-2")
+    moved_before = _frontmatter(project, "TASK-1")
+    monkeypatch.setattr(
+        repository_module, "_current_task_timestamp", lambda _: "2026-09-01 12:00"
+    )
+
+    MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    target_after = _frontmatter(project, "TASK-2")
+    moved_after = _frontmatter(project, "TASK-1")
+    assert target_after["updated_date"] == "existing-target-date"
+    assert _without(target_after, "ordinal") == _without(target_before, "ordinal")
+    assert moved_after["updated_date"] == "2026-09-01 12:00"
+    assert {
+        key: value
+        for key, value in moved_after.items()
+        if key not in {"status", "ordinal", "updated_date"}
+    } == {
+        key: value
+        for key, value in moved_before.items()
+        if key not in {"status", "ordinal", "updated_date"}
+    }
+
+
+def test_move_runs_best_effort_status_hook_and_keeps_change_on_failure(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(
+        project,
+        statuses=["To Do", "Doing"],
+        on_status_change="echo status changed",
+    )
+    _write_task(project, task_id="TASK-1")
+    received: dict[str, object] = {}
+
+    def fail_callback(**kwargs: object) -> None:
+        received.update(kwargs)
+        raise RuntimeError("callback failure")
+
+    monkeypatch.setattr(repository_module, "execute_status_callback", fail_callback)
+
+    moved = MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    assert moved.status == "Doing"
+    assert received == {
+        "command": "echo status changed",
+        "task_id": "TASK-1",
+        "old_status": "To Do",
+        "new_status": "Doing",
+        "task_title": "TASK-1",
+        "cwd": project.root,
+    }
+
+
+@pytest.mark.parametrize("configured_statuses", [None, []])
+def test_move_accepts_task_derived_target_when_statuses_absent_or_empty(
+    project: BacklogProject, configured_statuses: list[str] | None
+) -> None:
+    _write_config(project, statuses=configured_statuses)
+    _write_task(project, task_id="TASK-1")
+    _write_task(project, task_id="TASK-2", status="Doing")
+
+    moved = MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    assert moved.status == "Doing"
+
+
+def test_move_accepts_default_only_empty_column(project: BacklogProject) -> None:
+    _write_config(project, statuses=[], default_status="Ready")
+    _write_task(project, task_id="TASK-1")
+
+    moved = MutableRepository(project).move_task_to_status("TASK-1", "Ready")
+
+    assert moved.status == "Ready"
+
+
+def test_move_rolls_back_materialized_target_and_source_after_second_write_failure(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(project, statuses=["To Do", "Doing"])
+    _write_task(project, task_id="TASK-1")
+    _write_task(project, task_id="TASK-2", status="Doing")
+    before = _task_sources(project)
+    _fail_the_second_forward_write_once(monkeypatch)
+
+    with pytest.raises(OSError, match="simulated write failure"):
+        MutableRepository(project).move_task_to_status("TASK-1", "Doing")
+
+    assert _task_sources(project) == before
+
+
+@pytest.mark.parametrize("status", ["", "   ", "Invented"])
+def test_move_rejects_blank_or_invented_target_without_writes(
+    project: BacklogProject, status: str
+) -> None:
+    _write_task(project, task_id="TASK-1")
+    before = _task_sources(project)
+
+    with pytest.raises(TaskMutationError, match="Unknown status"):
+        MutableRepository(project).move_task_to_status("TASK-1", status)
+
+    assert _task_sources(project) == before
+
+
+def test_move_accepts_local_legacy_status_omitted_from_non_empty_config(
+    project: BacklogProject,
+) -> None:
+    _write_config(project, statuses=["To Do", "Doing"])
+    _write_task(project, task_id="TASK-1")
+    _write_task(project, task_id="TASK-2", status="Legacy")
+
+    moved = MutableRepository(project).move_task_to_status("TASK-1", "Legacy")
+
+    assert moved.status == "Legacy"
+
+
+def test_locked_status_move_callback_failure_still_reaches_auto_commit(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(
+        project,
+        statuses=["To Do", "Doing"],
+        on_status_change="echo status changed",
+    )
+    _write_task(project, task_id="TASK-1")
+    auto_commits: list[tuple[object, ...]] = []
+
+    def raise_callback(**kwargs: object) -> None:
+        raise RuntimeError("callback failure")
+
+    def record_auto_commit(*args: object) -> None:
+        auto_commits.append(args)
+
+    monkeypatch.setattr(repository_module, "execute_status_callback", raise_callback)
+    monkeypatch.setattr(locks_module, "maybe_auto_commit", record_auto_commit)
+
+    moved = with_project_write_lock(
+        project,
+        "browser_task_status",
+        lambda: MutableRepository(project).move_task_to_status("TASK-1", "Doing"),
+    )
+
+    assert moved.status == "Doing"
+    assert len(auto_commits) == 1
+    assert auto_commits[0][1] == "browser_task_status"
+
+
+def test_move_status_assignment_options_preserve_exact_order_and_use_only_local_tasks(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(project, statuses=["Doing", "To Do", "Doing"], default_status="Ready")
+    config = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    config["checkActiveBranches"] = True
+    project.config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    _write_task(project, task_id="TASK-1", status="Legacy A", ordinal=3000)
+    _write_task(project, task_id="TASK-2", status="Legacy B", ordinal=1000)
+    _write_task(project, task_id="TASK-3", status="doing", ordinal=2000)
+    _write_task(project, task_id="TASK-4", status="Legacy B")
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("MutableRepository loaded active-branch snapshots")
+
+    monkeypatch.setattr(repository_module, "list_active_branch_task_snapshots", fail_if_called)
+
+    assert MutableRepository(project).status_assignment_options() == (
+        "Doing",
+        "To Do",
+        "Ready",
+        "Legacy B",
+        "doing",
+        "Legacy A",
+    )
