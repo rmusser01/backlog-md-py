@@ -10,8 +10,9 @@ import json
 import os
 import re
 import threading
+import unicodedata
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html import escape
 from http import HTTPStatus
 from importlib.resources import files
@@ -493,9 +494,10 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/settings/config":
             config = load_config(self.server.project.config_path)
+            project = replace(self.server.project, config=config)
             self._send_json(
                 HTTPStatus.OK,
-                {"settings": _config_settings_payload(config, project=self.server.project)},
+                {"settings": _config_settings_payload(config, project=project)},
             )
             return
         if path == "/api/settings/dod-defaults":
@@ -634,17 +636,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
                 def update_project() -> BacklogProject:
                     project = self.server.project
-                    current = load_config(project.config_path)
-                    validated_settings = _validate_status_settings(project, current, settings)
+                    project = replace(project, config=load_config(project.config_path))
+                    validated_settings = _validate_status_settings(project, project.config, settings)
                     config = set_config_values(project, validated_settings)
-                    return BacklogProject(
-                        root=project.root,
-                        backlog_dir=project.backlog_dir,
-                        config_path=project.config_path,
-                        config=config,
-                    )
+                    updated_project = replace(project, config=config)
+                    self.server.project = updated_project
+                    return updated_project
 
-                self.server.project = with_project_write_lock(
+                updated_project = with_project_write_lock(
                     self.server.project,
                     "browser_config_settings_update",
                     update_project,
@@ -657,7 +656,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"settings": _config_settings_payload(self.server.project.config, project=self.server.project)},
+                {"settings": _config_settings_payload(updated_project.config, project=updated_project)},
             )
             return
 
@@ -2523,6 +2522,10 @@ def _config_settings_payload(config: BacklogConfig, *, project: BacklogProject) 
     }
 
 
+def _status_key(status: str) -> str:
+    return unicodedata.normalize("NFC", status).casefold()
+
+
 def _status_rows(project: BacklogProject, config: BacklogConfig) -> list[dict[str, object]]:
     tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
     statuses = list(config.statuses or [])
@@ -2530,20 +2533,20 @@ def _status_rows(project: BacklogProject, config: BacklogConfig) -> list[dict[st
         statuses = []
         seen_statuses: set[str] = set()
         for task in tasks:
-            key = task.status.casefold()
+            key = _status_key(task.status)
             if key not in seen_statuses:
                 seen_statuses.add(key)
                 statuses.append(task.status)
 
-    default_key = config.default_status.casefold()
-    if default_key not in {status.casefold() for status in statuses}:
+    default_key = _status_key(config.default_status)
+    if default_key not in {_status_key(status) for status in statuses}:
         statuses.append(config.default_status)
 
     counts: dict[str, int] = {}
     for task in tasks:
-        key = task.status.casefold()
+        key = _status_key(task.status)
         counts[key] = counts.get(key, 0) + 1
-    return [{"name": status, "taskCount": counts.get(status.casefold(), 0)} for status in statuses]
+    return [{"name": status, "taskCount": counts.get(_status_key(status), 0)} for status in statuses]
 
 
 def _validate_status_settings(
@@ -2562,27 +2565,27 @@ def _validate_status_settings(
             raise ValueError("Request body setting statuses must be a list of strings")
         status_by_key: dict[str, str] = {}
         for status in statuses:
-            key = status.casefold()
+            key = _status_key(status)
             if key in status_by_key:
                 raise ValueError("Request body setting statuses must be case-insensitively unique")
             status_by_key[key] = status
 
-        canonical_default = status_by_key.get(default.casefold())
+        canonical_default = status_by_key.get(_status_key(default))
         if canonical_default is None:
             raise _BrowserConflictError(f'Default status "{default}" must be included in statuses')
         if "defaultStatus" in updates or canonical_default != current.default_status:
             validated["defaultStatus"] = canonical_default
 
         for task in MutableRepository(project, refresh_remote_refs=False).list_tasks():
-            if task.status.casefold() not in status_by_key:
+            if _status_key(task.status) not in status_by_key:
                 raise _BrowserConflictError(f'Status "{task.status}" is still used by active task {task.id}')
         return validated
 
     configured_by_key: dict[str, str] = {}
     for status in current.statuses or []:
-        configured_by_key.setdefault(status.casefold(), status)
+        configured_by_key.setdefault(_status_key(status), status)
     if configured_by_key:
-        canonical_default = configured_by_key.get(default.casefold())
+        canonical_default = configured_by_key.get(_status_key(default))
         if canonical_default is None:
             raise _BrowserConflictError(f'Default status "{default}" must be included in statuses')
         validated["defaultStatus"] = canonical_default

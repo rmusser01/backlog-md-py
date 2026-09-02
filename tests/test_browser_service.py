@@ -2,9 +2,11 @@ import http.client
 import json
 import shutil
 import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -2286,6 +2288,26 @@ def test_browser_config_status_rows_append_default_case_insensitively(tmp_path):
     assert rows == [{"name": "In Progress", "taskCount": 1}]
 
 
+def test_browser_config_status_rows_deduplicate_and_count_unicode_equivalents(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, None, default="Ready")
+    _replace_browser_fixture_task_status(repo, "Café")
+    MutableRepository(project).create_task(title="Equivalent status", status="Cafe\u0301")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        rows = _get_json(f"{service.root_url}/api/settings/config")["settings"]["statusRows"]
+    finally:
+        service.shutdown()
+
+    assert rows == [
+        {"name": "Café", "taskCount": 2},
+        {"name": "Ready", "taskCount": 0},
+    ]
+
+
 def test_browser_config_status_rows_contain_default_when_project_has_no_active_tasks(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = _configure_statuses(repo, None, default="Ready")
@@ -2300,6 +2322,31 @@ def test_browser_config_status_rows_contain_default_when_project_has_no_active_t
         service.shutdown()
 
     assert rows == [{"name": "Ready", "taskCount": 0}]
+
+
+def test_browser_config_status_rows_use_fresh_config_project_snapshot(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+
+    observed_defaults = []
+    original_repository = browser_service.MutableRepository
+
+    def recording_repository(project, **kwargs):
+        observed_defaults.append(project.config.default_status)
+        return original_repository(project, **kwargs)
+
+    monkeypatch.setattr(browser_service, "MutableRepository", recording_repository)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    set_config_value(project, "defaultStatus", "Ready")
+    try:
+        settings = _get_json(f"{service.root_url}/api/settings/config")["settings"]
+    finally:
+        service.shutdown()
+
+    assert settings["defaultStatus"] == "Ready"
+    assert observed_defaults == ["Ready"]
 
 
 def test_browser_config_settings_update_endpoint_writes_safe_values_under_project_lock(tmp_path, monkeypatch):
@@ -2406,6 +2453,7 @@ def test_browser_config_status_pair_trims_and_canonicalizes_submitted_values(tmp
         [],
         ["", " "],
         ["To Do", "to do", "In Progress"],
+        ["Café", "Cafe\u0301", "In Progress"],
     ],
 )
 def test_browser_config_status_pair_rejects_empty_or_duplicate_statuses_without_writing(
@@ -2439,6 +2487,27 @@ def test_browser_config_status_pair_rejects_empty_or_duplicate_statuses_without_
     assert exc.value.code == 400
     assert config_path.read_bytes() == before
     assert writes == []
+
+
+def test_browser_config_status_pair_accepts_unicode_equivalent_in_use_status(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, ["Café"], default="Café")
+    _replace_browser_fixture_task_status(repo, "Café")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"statuses": ["Cafe\u0301"], "defaultStatus": "Cafe\u0301"}},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["settings"]["statuses"] == ["Cafe\u0301"]
+    assert response["settings"]["defaultStatus"] == "Cafe\u0301"
+    assert response["settings"]["statusRows"] == [{"name": "Cafe\u0301", "taskCount": 1}]
 
 
 @pytest.mark.parametrize(
@@ -2571,6 +2640,35 @@ def test_browser_config_status_pair_validation_skips_unrelated_updates(tmp_path)
     assert response["settings"]["defaultStatus"] == "Missing"
 
 
+def test_browser_config_status_pair_validation_uses_fresh_config_project_snapshot(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+
+    observed_defaults = []
+    original_repository = browser_service.MutableRepository
+
+    def recording_repository(project, **kwargs):
+        observed_defaults.append(project.config.default_status)
+        return original_repository(project, **kwargs)
+
+    monkeypatch.setattr(browser_service, "MutableRepository", recording_repository)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    set_config_value(project, "statuses", json.dumps(["Ready", "In Progress"]))
+    set_config_value(project, "defaultStatus", "Ready")
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {"settings": {"statuses": ["Ready", "In Progress"], "defaultStatus": "Ready"}},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["settings"]["defaultStatus"] == "Ready"
+    assert observed_defaults == ["Ready", "Ready"]
+
+
 def test_browser_config_settings_update_calls_atomic_writer_once_and_refreshes_project(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -2614,6 +2712,58 @@ def test_browser_config_settings_update_calls_atomic_writer_once_and_refreshes_p
     assert response["settings"]["defaultStatus"] == "Ready"
     assert board["project"]["name"] == "Atomic browser update"
     assert board["statuses"][:3] == ["Ready", "In Progress", "Done"]
+
+
+def test_browser_config_settings_concurrent_responses_keep_request_snapshot_and_latest_project(
+    tmp_path, monkeypatch
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+
+    first_write_released = threading.Event()
+    release_first_response = threading.Event()
+    original_lock = browser_service.with_project_write_lock
+
+    def interleaving_lock(project, operation, fn):
+        result = original_lock(project, operation, fn)
+        if operation == "browser_config_settings_update" and result.config.project_name == "First request":
+            first_write_released.set()
+            assert release_first_response.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", interleaving_lock)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    first_response = None
+    second_response = None
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(
+                _post_json,
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"projectName": "First request"}},
+            )
+            try:
+                assert first_write_released.wait(timeout=5)
+                second = executor.submit(
+                    _post_json,
+                    f"{service.root_url}/api/settings/config",
+                    {"settings": {"projectName": "Second request"}},
+                )
+                second_response = second.result(timeout=5)
+            finally:
+                release_first_response.set()
+            first_response = first.result(timeout=5)
+    finally:
+        service.shutdown()
+
+    assert first_response["settings"]["projectName"] == "First request"
+    assert second_response["settings"]["projectName"] == "Second request"
+    assert service.server.project.config.project_name == "Second request"
+    assert yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))["projectName"] == (
+        "Second request"
+    )
 
 
 @pytest.mark.parametrize(
