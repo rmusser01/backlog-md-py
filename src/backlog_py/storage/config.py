@@ -89,6 +89,7 @@ def load_config(path: Path) -> BacklogConfig:
         task_frontmatter_status_callbacks=_bool_value(raw, "task_frontmatter_status_callbacks", False),
         active_branch_days=_int_value(raw, "active_branch_days", 30),
         definition_of_done=_optional_definition_of_done_defaults(_get(raw, "definition_of_done", None)),
+        priorities=_optional_string_list(raw.get("priorities")),
     )
 
 
