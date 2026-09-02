@@ -2189,8 +2189,12 @@ def _matches_board_filters(
         elif task_milestone != milestone:
             return False
     if labels:
-        selected_labels = {label.casefold() for label in labels}
-        task_labels = {label.casefold() for label in _metadata_list(task.get("labels"))}
+        selected_labels = {label.strip().casefold() for label in labels if label.strip()}
+        task_labels = {
+            label.strip().casefold()
+            for label in _metadata_list(task.get("labels"))
+            if label.strip()
+        }
         if selected_labels.isdisjoint(task_labels):
             return False
     return True

@@ -4911,6 +4911,33 @@ def test_board_combines_queue_milestone_and_any_match_repeated_labels(tmp_path):
     assert ReadOnlyRepository(project).list_tasks(labels=["frontend", "urgent"]) == []
 
 
+def test_browser_label_filter_trims_task_and_selected_values_without_changing_cli_all_match(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    task_path = _task_file(repo)
+    source = task_path.read_text(encoding="utf-8")
+    source = source.replace("labels:\n  - parser", "labels:\n  - ' Parser '\n  - '   '")
+    task_path.write_text(source, encoding="utf-8")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import build_board_payload
+
+    payload = build_board_payload(project, label_filters=[" Parser ", "   ", "missing"])
+    visible_ids = {task["id"] for tasks in payload["columns"].values() for task in tasks}
+
+    assert payload["availableLabels"] == ["Parser"]
+    assert payload["labelFilters"] == ["Parser", "missing"]
+    assert visible_ids == {"TASK-1"}
+    assert ReadOnlyRepository(project).list_tasks(labels=["parser", "missing"]) == []
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(repo), "task", "list", "--plain", "--label", "parser", "--label", "missing"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "TASK-1" not in result.output
+
+
 def test_filter_choices_come_from_unfiltered_board(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
