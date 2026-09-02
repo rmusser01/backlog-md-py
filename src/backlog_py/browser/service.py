@@ -22,7 +22,13 @@ from loguru import logger
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.models import BacklogConfig, BacklogProject
-from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskMutationError, TaskRecord
+from backlog_py.core.repository import (
+    MutableRepository,
+    ReadOnlyRepository,
+    TaskMutationError,
+    TaskRecord,
+    normalize_ordinal_value,
+)
 from backlog_py.orchestration import (
     OrchestrationQueueItem,
     OrchestrationService,
@@ -472,9 +478,16 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:
-        if not self._host_allowed():
-            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
-            return
+        try:
+            if not self._host_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            self._handle_post()
+        except Exception:
+            logger.exception("Unhandled error serving POST {}", self.path)
+            self._safe_send_error()
+
+    def _handle_post(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/markdown/preview":
             if not self._origin_allowed():
@@ -550,6 +563,36 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
             self._send_json(HTTPStatus.OK, {"items": config.definition_of_done or []})
+            return
+
+        if path == "/api/tasks/sort":
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                status, sort, direction = _sort_request_from_payload(self._read_json_body())
+                result = with_project_write_lock(
+                    self.server.project,
+                    "browser_task_sort",
+                    lambda: MutableRepository(self.server.project).sort_tasks(
+                        status,
+                        sort=sort,
+                        direction=direction,
+                    ),
+                )
+            except (json.JSONDecodeError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "status": status,
+                    "sort": sort,
+                    "direction": direction,
+                    "taskIds": list(result.task_ids),
+                    "changedCount": len(result.changed_task_ids),
+                },
+            )
             return
 
         if path in {"/api/tasks", "/api/tasks/"}:
@@ -644,7 +687,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             task = with_project_write_lock(
                 self.server.project,
                 "browser_task_status",
-                lambda: MutableRepository(self.server.project).edit_task(task_id, status=status),
+                lambda: MutableRepository(self.server.project).move_task_to_status(task_id, status),
             )
         except KeyError:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
@@ -827,8 +870,11 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
     columns = columns_obj if isinstance(columns_obj, dict) else {}
+    mutable_statuses = set(
+        MutableRepository(project, refresh_remote_refs=False).status_assignment_options()
+    )
     column_markup = "\n".join(
-        _render_column(str(status), tasks)
+        _render_column(str(status), tasks, mutable=str(status) in mutable_statuses)
         for status, tasks in columns.items()
     )
     task_create_description_editor = _render_markdown_editor(
@@ -1054,14 +1100,25 @@ def _render_markdown_editor(*, field_id: str, name: str, label: str, data_field:
         </div>"""
 
 
-def _render_column(status: str, raw_tasks: object) -> str:
+def _render_column(status: str, raw_tasks: object, *, mutable: bool = False) -> str:
     tasks = raw_tasks if isinstance(raw_tasks, list) else []
+    sort_controls = ""
+    if mutable and len(tasks) >= 2:
+        sort_controls = """      <details class="column-sort">
+        <summary>Sort</summary>
+        <div class="column-sort-actions">
+          <button type="button" data-sort="priority">Priority</button>
+          <button type="button" data-sort="created" data-direction="asc">Oldest</button>
+          <button type="button" data-sort="created" data-direction="desc">Newest</button>
+        </div>
+      </details>
+"""
     task_markup = "\n".join(_render_task(task) for task in tasks)
     if not task_markup:
         task_markup = '      <div class="empty">No tasks</div>'
     return f"""    <section class="column" data-status="{escape(status)}">
       <h2><span>{escape(status)}</span><span class="count">{len(tasks)}</span></h2>
-{task_markup}
+{sort_controls}{task_markup}
     </section>"""
 
 
@@ -1203,6 +1260,10 @@ def _task_payload(
     queue_item: OrchestrationQueueItem | None = None,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
+    try:
+        ordinal = normalize_ordinal_value(frontmatter.get("ordinal"))
+    except TaskMutationError:
+        ordinal = None
     payload: dict[str, object] = {
         "id": task.id,
         "title": task.title,
@@ -1214,6 +1275,7 @@ def _task_payload(
         "milestone": _metadata_string(frontmatter.get("milestone")),
         "createdDate": _metadata_string(frontmatter.get("created_date")),
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
+        "ordinal": ordinal,
     }
     if queue_item is None:
         queue_item = _queue_item_for_task(project, task.id)
@@ -1584,6 +1646,25 @@ def _status_from_payload(payload: object) -> str:
     if not isinstance(status, str) or not status.strip():
         raise ValueError("Request body field status must be a non-empty string")
     return status
+
+
+def _sort_request_from_payload(payload: object) -> tuple[str, str, str | None]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    status = payload.get("status")
+    if not isinstance(status, str) or not status.strip():
+        raise ValueError("Request body field status must be a non-empty string")
+    sort = payload.get("sort")
+    if not isinstance(sort, str) or sort not in {"priority", "created"}:
+        raise ValueError("Request body field sort must be priority or created")
+    direction = payload.get("direction")
+    if sort == "priority":
+        if direction is not None:
+            raise ValueError("Priority sorting does not support a direction")
+        return status, sort, None
+    if direction not in {"asc", "desc"}:
+        raise ValueError("Created-date sorting requires an asc or desc direction")
+    return status, sort, direction
 
 
 def _task_create_kwargs_from_payload(payload: object) -> dict[str, object]:

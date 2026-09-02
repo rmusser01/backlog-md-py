@@ -15,6 +15,7 @@
     const documentsDialog = document.getElementById("documents-dialog");
     const decisionsDialog = document.getElementById("decisions-dialog");
     const boardElement = document.querySelector("[data-board-revision]");
+    const boardStatus = document.getElementById("board-status");
     const boardRefreshIntervalMs = 5000;
     let currentBoardRevision = boardElement?.dataset.boardRevision || "";
     let boardRefreshInFlight = false;
@@ -29,6 +30,43 @@
     function setHtml(id, value) {
       const element = document.getElementById(id);
       if (element) element.innerHTML = value || '<p class="markdown-empty">No content</p>';
+    }
+
+    function showBoardMessage(message) {
+      if (boardStatus) boardStatus.textContent = message || "";
+    }
+
+    async function responseErrorMessage(response, fallback) {
+      try {
+        const payload = await response.json();
+        return payload.error || fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    async function sortColumn(button) {
+      const column = button.closest("[data-status]");
+      const status = column ? column.dataset.status : null;
+      const sort = button.dataset.sort;
+      const direction = button.dataset.direction || null;
+      if (!status || !sort) return;
+      button.disabled = true;
+      showBoardMessage("");
+      try {
+        const response = await fetch("/api/tasks/sort", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({status, sort, direction}),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to sort tasks"));
+        }
+        window.location.reload();
+      } catch (error) {
+        showBoardMessage(error instanceof Error ? error.message : "Unable to sort tasks");
+        button.disabled = false;
+      }
     }
 
     function readonlyListItem(title, meta, onClick) {
@@ -1120,6 +1158,9 @@
         openTaskArchive(button.dataset.taskArchive);
       });
     });
+    document.querySelectorAll("[data-sort]").forEach((button) => {
+      button.addEventListener("click", () => sortColumn(button));
+    });
 
     document.querySelectorAll("[data-task-id]").forEach((task) => {
       task.addEventListener("dragstart", (event) => {
@@ -1139,16 +1180,20 @@
         const taskId = event.dataTransfer.getData("text/plain") || draggedTaskId;
         const status = column.dataset.status;
         if (!taskId || !status) return;
-        const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/status`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({status}),
-        });
-        if (!response.ok) {
-          console.error(await response.text());
-          return;
+        showBoardMessage("");
+        try {
+          const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/status`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({status}),
+          });
+          if (!response.ok) {
+            throw new Error(await responseErrorMessage(response, "Unable to move task"));
+          }
+          window.location.reload();
+        } catch (error) {
+          showBoardMessage(error instanceof Error ? error.message : "Unable to move task");
         }
-        window.location.reload();
       });
     });
     if (!connectBoardRevisionEvents()) startBoardRevisionPolling();

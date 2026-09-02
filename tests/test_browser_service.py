@@ -2182,6 +2182,365 @@ def test_browser_board_html_exposes_general_settings_dialog(tmp_path):
     assert "/api/settings/config" in html
 
 
+def test_browser_task_payload_includes_ordinal(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before = _get_json(f"{service.root_url}/api/board")
+        repository.replace_task_frontmatter_values("TASK-1", {"ordinal": 4200})
+        after = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert before["columns"]["In Progress"][0]["ordinal"] is None
+    assert after["columns"]["In Progress"][0]["ordinal"] == 4200
+
+
+def test_browser_sort_endpoint_persists_full_column_under_project_lock(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    older = repository.create_task(title="Older task", task_id="TASK-2", status="In Progress")
+    repository.replace_task_frontmatter_values(older.id, {"created_date": "2026-01-01"})
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append((project.root, operation))
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/tasks/sort",
+            {"status": "In Progress", "sort": "created", "direction": "asc"},
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert response == {
+        "status": "In Progress",
+        "sort": "created",
+        "direction": "asc",
+        "taskIds": ["TASK-2", "TASK-1"],
+        "changedCount": 2,
+    }
+    assert lock_operations == [(repo, "browser_task_sort")]
+    assert [task["id"] for task in board["columns"]["In Progress"]] == ["TASK-2", "TASK-1"]
+    assert [task["ordinal"] for task in board["columns"]["In Progress"]] == [1000, 2000]
+    stored = {task.id: task.parsed.frontmatter.get("ordinal") for task in MutableRepository(project).list_tasks()}
+    assert stored["TASK-2"] == 1000
+    assert stored["TASK-1"] == 2000
+
+
+def test_browser_sort_endpoint_ignores_current_board_filters(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.create_task(
+        title="Only matching label",
+        task_id="TASK-2",
+        status="To Do",
+        labels=["only-one-task"],
+        ordinal=9000,
+    )
+    repository.create_task(
+        title="Other label",
+        task_id="TASK-3",
+        status="To Do",
+        labels=["different"],
+        ordinal=8000,
+    )
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/tasks/sort?labels=only-one-task",
+            {"status": "To Do", "sort": "priority", "direction": None},
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert response["taskIds"] == ["TASK-2", "TASK-3"]
+    assert response["changedCount"] == 2
+    assert [task["id"] for task in board["columns"]["To Do"]] == ["TASK-2", "TASK-3"]
+    assert [task["ordinal"] for task in board["columns"]["To Do"]] == [1000, 2000]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {},
+        {"sort": "priority", "direction": None},
+        {"status": 7, "sort": "priority", "direction": None},
+        {"status": "   ", "sort": "priority", "direction": None},
+        {"status": "To Do", "direction": None},
+        {"status": "To Do", "sort": 7, "direction": None},
+        {"status": "To Do", "sort": "title", "direction": None},
+        {"status": "To Do", "sort": "created"},
+        {"status": "To Do", "sort": "created", "direction": None},
+        {"status": "To Do", "sort": "created", "direction": "sideways"},
+        {"status": "To Do", "sort": "created", "direction": 7},
+        {"status": "To Do", "sort": "priority", "direction": "asc"},
+        {"status": "To Do", "sort": "priority", "direction": False},
+    ],
+)
+def test_browser_sort_endpoint_rejects_invalid_requests_before_lock(tmp_path, monkeypatch, payload):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_sources(repo)
+    lock_operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    def tracking_lock(project, operation, fn):
+        lock_operations.append(operation)
+        return fn()
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/tasks/sort", payload)
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert lock_operations == []
+    assert _task_sources(repo) == before
+
+
+def test_browser_sort_endpoint_rejects_cross_origin_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    before = _task_sources(repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        for url, payload in (
+            ("/api/tasks/sort", {"status": "In Progress", "sort": "priority", "direction": None}),
+            ("/api/tasks/TASK-1/status", {"status": "Done"}),
+        ):
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                _post_json(f"{service.root_url}{url}", payload, origin="https://example.com")
+            assert exc.value.code == 403
+    finally:
+        service.shutdown()
+
+    assert _task_sources(repo) == before
+
+
+def test_browser_sort_endpoint_hides_unexpected_repository_error(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+
+    def fail_sort(self, status, *, sort, direction=None):
+        raise OSError("private detail")
+
+    monkeypatch.setattr(browser_service.MutableRepository, "sort_tasks", fail_sort)
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/tasks/sort",
+                {"status": "In Progress", "sort": "priority", "direction": None},
+            )
+        body = json.loads(exc.value.read().decode("utf-8"))
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 500
+    assert body == {"error": "Internal server error"}
+    assert "private detail" not in json.dumps(body)
+
+
+def test_browser_status_move_uses_ordinal_aware_append(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.create_task(title="First target", task_id="TASK-2", status="To Do")
+    repository.create_task(title="Second target", task_id="TASK-3", status="To Do")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/tasks/TASK-1/status",
+            {"status": "To Do"},
+        )
+        board = _get_json(f"{service.root_url}/api/board")
+    finally:
+        service.shutdown()
+
+    assert set(response) == {"task"}
+    assert response["task"]["id"] == "TASK-1"
+    assert [task["id"] for task in board["columns"]["To Do"]] == ["TASK-2", "TASK-3", "TASK-1"]
+    assert [task["ordinal"] for task in board["columns"]["To Do"]] == [1000, 2000, 3000]
+    stored = {task.id: task.parsed.frontmatter.get("ordinal") for task in MutableRepository(project).list_tasks()}
+    assert stored == {"TASK-2": 1000, "TASK-3": 2000, "TASK-1": 3000}
+
+
+def test_active_branch_only_column_omits_sort_controls(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+    from backlog_py.core import repository as repository_module
+    from backlog_py.runtime.git import GitTaskSnapshot
+
+    def branch_task(task_id, title):
+        return GitTaskSnapshot(
+            ref="refs/heads/feature",
+            relative_path=f"backlog/tasks/{task_id.lower()} - {title}.md",
+            source=f"---\nid: {task_id}\ntitle: {title}\nstatus: Branch Only\n---\n",
+            committed_at=1.0,
+        )
+
+    monkeypatch.setattr(
+        repository_module,
+        "list_active_branch_task_snapshots",
+        lambda project: [branch_task("TASK-20", "Branch one"), branch_task("TASK-21", "Branch two")],
+    )
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    branch_column = html.split('data-status="Branch Only"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    assert "TASK-20" in branch_column
+    assert "TASK-21" in branch_column
+    assert "column-sort" not in branch_column
+
+
+def test_browser_board_html_exposes_sort_controls_only_for_multi_task_local_columns(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.create_task(title="First sortable task", task_id="TASK-2", status="To Do")
+    repository.create_task(title="Second sortable task", task_id="TASK-3", status="To Do")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    todo_column = html.split('data-status="To Do"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    one_task_column = html.split('data-status="In Progress"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    assert '<details class="column-sort">' in todo_column
+    assert "<summary>Sort</summary>" in todo_column
+    assert '<button type="button" data-sort="priority">Priority</button>' in todo_column
+    assert (
+        '<button type="button" data-sort="created" data-direction="asc">Oldest</button>'
+        in todo_column
+    )
+    assert (
+        '<button type="button" data-sort="created" data-direction="desc">Newest</button>'
+        in todo_column
+    )
+    assert 'role="menu"' not in todo_column
+    assert "column-sort" not in one_task_column
+
+
+def test_browser_board_status_region_is_live_and_outside_main(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    marker = '<div id="board-status" class="board-status" role="status" aria-live="polite"></div>'
+    assert html.count('role="status"') == 1
+    assert marker in html
+    assert html.index(marker) > html.index("</main>")
+
+
+def test_browser_sort_controls_use_visible_board_status_and_preserve_query_on_success(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    sort_handler = html.split("async function sortColumn", maxsplit=1)[1].split(
+        'document.querySelectorAll("[data-sort]")', maxsplit=1
+    )[0]
+    drop_handler = html.split('column.addEventListener("drop"', maxsplit=1)[1].split(
+        "if (!connectBoardRevisionEvents())", maxsplit=1
+    )[0]
+    assert 'button.closest("[data-status]")' in sort_handler
+    assert "column.dataset.status" in sort_handler
+    assert "button.dataset.sort" in sort_handler
+    assert "button.dataset.direction || null" in sort_handler
+    assert 'fetch("/api/tasks/sort"' in sort_handler
+    assert "body: JSON.stringify({status, sort, direction})" in sort_handler
+    assert "button.disabled = true" in sort_handler
+    assert "button.disabled = false" in sort_handler
+    assert "showBoardMessage" in sort_handler
+    assert "catch (error)" in sort_handler
+    assert "window.location.reload()" in sort_handler
+    assert "showBoardMessage" in drop_handler
+    assert "catch (error)" in drop_handler
+    assert "console.error(await response.text())" not in drop_handler
+
+
+def test_browser_sort_controls_are_responsive_and_keyboard_visible(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert ".column-sort-actions {" in html
+    assert "flex-wrap: wrap;" in html
+    assert ".column-sort summary:focus-visible" in html
+    assert "outline: 2px solid var(--accent);" in html
+    responsive = html.split("@media (max-width: 720px)", maxsplit=1)[1]
+    assert ".queue-filter" in responsive
+    assert ".column-sort-actions button" in responsive
+
+
 def test_browser_status_move_endpoint_updates_task_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -2367,6 +2726,13 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
     return repo
+
+
+def _task_sources(repo: Path) -> dict[str, bytes]:
+    return {
+        path.name: path.read_bytes()
+        for path in sorted((repo / "backlog" / "tasks").glob("*.md"))
+    }
 
 
 def _task_file(repo: Path) -> Path:
