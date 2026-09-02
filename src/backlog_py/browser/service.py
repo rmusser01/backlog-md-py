@@ -355,7 +355,8 @@ def _apply_board_filters(
     normalized_milestone_filter = _normalize_milestone_filter(milestone_filter)
     normalized_label_filters = _normalize_label_filters(label_filters)
     columns = payload.get("columns")
-    assert isinstance(columns, Mapping)
+    if not isinstance(columns, Mapping):
+        raise TypeError("Board payload columns must be a mapping")
     filtered_columns = {
         status: [
             task

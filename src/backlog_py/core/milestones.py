@@ -132,7 +132,10 @@ class MilestoneService:
         if title is None:
             target = existing.path
         elif existing.format == "current":
-            assert existing.id is not None
+            if existing.id is None:
+                raise MilestoneMutationError(
+                    f"Current milestone is missing an id: {existing.path.name}"
+                )
             target = self._current_active_path(existing.id, new_title)
         else:
             target = self._active_path(new_title)
@@ -831,8 +834,7 @@ def _rollback_milestone_edit(
             )
         except Exception as exc:
             logger.warning("Failed to inspect moved milestone {}: {}", target, exc)
-    if target_owned:
-        assert published_identity is not None
+    if target_owned and published_identity is not None:
         try:
             _move_no_clobber(target, safe_original, base=base)
             _atomic_write_text(safe_original, original_source.decode("utf-8"), base=base)
@@ -880,8 +882,7 @@ def _rollback_milestone_move(
             )
         except Exception as exc:
             logger.warning("Failed to inspect moved milestone {}: {}", target, exc)
-    if target_owned:
-        assert published_identity is not None
+    if target_owned and published_identity is not None:
         try:
             _move_no_clobber(target, safe_original, base=base)
             return

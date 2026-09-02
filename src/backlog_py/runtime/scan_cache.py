@@ -50,22 +50,19 @@ class ProjectScanCache:
     def repository(self, project: BacklogProject) -> ReadOnlyRepository:
         """A repository whose scan is current for `project`."""
         with self._lock:
-            self._refresh_locked(project)
-            assert self._repository is not None
-            return self._repository
+            return self._refresh_locked(project)
 
     def board_payload(
         self, project: BacklogProject, build: Callable[[ReadOnlyRepository], _T]
     ) -> _T:
         """The unfiltered board payload, built at most once per project state."""
         with self._lock:
-            self._refresh_locked(project)
-            assert self._repository is not None
+            repository = self._refresh_locked(project)
             if self._board_payload is None:
-                self._board_payload = build(self._repository)
+                self._board_payload = build(repository)
             return cast(_T, self._board_payload)
 
-    def _refresh_locked(self, project: BacklogProject) -> None:
+    def _refresh_locked(self, project: BacklogProject) -> ReadOnlyRepository:
         signature = _project_signature(project)
         if signature != self._signature or self._repository is None:
             self._signature = signature
@@ -77,6 +74,7 @@ class ProjectScanCache:
             # concurrent requests cannot both pay for the same scan. `get_task`
             # consults this set first, so task detail is warmed by it too.
             self._repository.board()
+        return self._repository
 
 
 def _project_signature(project: BacklogProject) -> str:
