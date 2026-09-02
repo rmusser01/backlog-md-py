@@ -33,8 +33,11 @@
     let selectedMilestoneKey = "";
     let milestoneLoadGeneration = 0;
     let statusRows = [];
+    const statusKeyByName = new Map();
     let configDefaultStatus = "";
+    let configDefaultStatusKey = "";
     let configSettingsLoadGeneration = 0;
+    let statusAddInFlight = false;
 
     function setText(id, value) {
       const element = document.getElementById(id);
@@ -123,8 +126,17 @@
       return String(value || "").trim().normalize("NFC").toUpperCase().toLowerCase();
     }
 
-    function canonicalStatusName(value) {
-      const match = statusRows.find((row) => statusKey(row.name) === statusKey(value));
+    function statusRowKey(row) {
+      if (statusKeyByName.has(row.name)) return statusKeyByName.get(row.name);
+      if (typeof row.key === "string") return row.key;
+      return statusKey(row.name);
+    }
+
+    function canonicalStatusName(value, key = statusKey(value)) {
+      const raw = String(value || "");
+      const exact = statusRows.find((row) => row.name === raw);
+      if (exact) return exact.name;
+      const match = statusRows.find((row) => statusRowKey(row) === key);
       return match?.name || String(value || "");
     }
 
@@ -132,7 +144,9 @@
       const container = document.getElementById("config-status-rows");
       const select = configSettingsForm?.elements.defaultStatus;
       if (!container || !select) return;
-      configDefaultStatus = canonicalStatusName(configDefaultStatus);
+      configDefaultStatus = canonicalStatusName(configDefaultStatus, configDefaultStatusKey);
+      const defaultRow = statusRows.find((row) => row.name === configDefaultStatus);
+      if (defaultRow) configDefaultStatusKey = statusRowKey(defaultRow);
       container.replaceChildren();
       select.replaceChildren();
       statusRows.forEach((row, index) => {
@@ -154,7 +168,7 @@
         usage.textContent = row.taskCount === 1 ? "1 task" : `${row.taskCount} tasks`;
         const state = document.createElement("span");
         state.className = "status-row-state";
-        const isDefault = statusKey(row.name) === statusKey(configDefaultStatus);
+        const isDefault = row.name === configDefaultStatus;
         state.textContent = isDefault ? "Default status" : row.taskCount > 0 ? "In use" : "Available";
         details.append(usage, state);
         summary.append(name, details);
@@ -192,17 +206,39 @@
       select.value = configDefaultStatus;
     }
 
-    function addStatus(value) {
+    async function addStatus(value) {
+      const generation = configSettingsLoadGeneration;
       const name = String(value || "").trim();
       if (!name) {
         showConfigStatusMessage("Enter a status name.");
         return false;
       }
-      if (statusRows.some((row) => statusKey(row.name) === statusKey(name))) {
+      let key;
+      try {
+        const response = await fetch(`/api/settings/status-key?value=${encodeURIComponent(name)}`);
+        if (generation !== configSettingsLoadGeneration) return false;
+        if (!response.ok) {
+          const message = await responseErrorMessage(response, "Unable to check the status name");
+          if (generation !== configSettingsLoadGeneration) return false;
+          showConfigStatusMessage(message);
+          return false;
+        }
+        const payload = await response.json();
+        if (generation !== configSettingsLoadGeneration) return false;
+        if (typeof payload.key !== "string") throw new Error("Unable to check the status name");
+        key = payload.key;
+      } catch (error) {
+        if (generation === configSettingsLoadGeneration) {
+          showConfigStatusMessage(error instanceof Error ? error.message : "Unable to check the status name");
+        }
+        return false;
+      }
+      if (statusRows.some((row) => statusRowKey(row) === key)) {
         showConfigStatusMessage(`A status named “${name}” already exists.`);
         return false;
       }
       statusRows.push({name, taskCount: 0});
+      statusKeyByName.set(name, key);
       showConfigStatusMessage("");
       renderStatusRows();
       return true;
@@ -221,7 +257,7 @@
     function removeStatus(index) {
       const row = statusRows[index];
       if (!row) return false;
-      if (statusKey(row.name) === statusKey(configDefaultStatus)) {
+      if (row.name === configDefaultStatus) {
         showConfigStatusMessage("Choose a different default status before removing this one.");
         return false;
       }
@@ -230,15 +266,28 @@
         return false;
       }
       statusRows.splice(index, 1);
+      statusKeyByName.delete(row.name);
       showConfigStatusMessage("");
       renderStatusRows();
       return true;
     }
 
-    function addStatusFromInput() {
-      if (!configStatusAddInput || !addStatus(configStatusAddInput.value)) return;
-      configStatusAddInput.value = "";
-      configStatusAddInput.focus();
+    async function addStatusFromInput() {
+      if (!configStatusAddInput || statusAddInFlight) return;
+      statusAddInFlight = true;
+      configStatusAddInput.disabled = true;
+      if (configStatusAddButton) configStatusAddButton.disabled = true;
+      const submittedName = configStatusAddInput.value;
+      let added = false;
+      try {
+        added = await addStatus(submittedName);
+        if (added && configStatusAddInput.value === submittedName) configStatusAddInput.value = "";
+      } finally {
+        statusAddInFlight = false;
+        configStatusAddInput.disabled = false;
+        if (configStatusAddButton) configStatusAddButton.disabled = false;
+      }
+      if (added) configStatusAddInput.focus();
     }
 
     function setMilestoneBusy(control, busy) {
@@ -1192,7 +1241,15 @@
         statusRows = Array.isArray(settings.statusRows)
           ? settings.statusRows.map((row) => ({name: String(row.name || ""), taskCount: Number(row.taskCount) || 0}))
           : [];
+        statusKeyByName.clear();
+        const statusKeys = Array.isArray(settings.statusKeys) ? settings.statusKeys : [];
+        statusRows.forEach((row, index) => {
+          if (typeof statusKeys[index] === "string") statusKeyByName.set(row.name, statusKeys[index]);
+        });
         configDefaultStatus = String(settings.defaultStatus || "");
+        configDefaultStatusKey = typeof settings.defaultStatusKey === "string"
+          ? settings.defaultStatusKey
+          : statusKey(configDefaultStatus);
         renderStatusRows();
         if (configSettingsDialog && !configSettingsDialog.open && configSettingsDialog.showModal) {
           configSettingsDialog.showModal();
@@ -1548,6 +1605,10 @@
 
     async function submitConfigSettings(event) {
       event.preventDefault();
+      if (statusAddInFlight) {
+        showConfigStatusMessage("Wait for the status name check to finish.");
+        return;
+      }
       const form = event.currentTarget;
       const data = new FormData(form);
       const control = event.submitter;
@@ -1624,14 +1685,16 @@
     configSettingsForm?.addEventListener("submit", submitConfigSettings);
     configSettingsForm?.elements.defaultStatus?.addEventListener("change", (event) => {
       configDefaultStatus = event.currentTarget.value;
+      const row = statusRows.find((item) => item.name === configDefaultStatus);
+      configDefaultStatusKey = row ? statusRowKey(row) : statusKey(configDefaultStatus);
       showConfigStatusMessage("");
       renderStatusRows();
     });
     configStatusAddButton?.addEventListener("click", addStatusFromInput);
-    configStatusAddInput?.addEventListener("keydown", (event) => {
+    configStatusAddInput?.addEventListener("keydown", async (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
-      addStatusFromInput();
+      await addStatusFromInput();
     });
     document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());

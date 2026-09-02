@@ -2210,6 +2210,7 @@ def test_browser_config_settings_endpoint_returns_safe_values(tmp_path):
             "defaultAssignee": "codex",
             "defaultPort": 6543,
             "defaultStatus": "To Do",
+            "defaultStatusKey": "to do",
             "includeDatetimeInDates": True,
             "projectName": "basic-fixture",
             "remoteOperations": True,
@@ -2218,10 +2219,36 @@ def test_browser_config_settings_endpoint_returns_safe_values(tmp_path):
                 {"name": "In Progress", "taskCount": 1},
                 {"name": "Done", "taskCount": 0},
             ],
+            "statusKeys": ["to do", "in progress", "done"],
             "statuses": ["To Do", "In Progress", "Done"],
             "zeroPaddedIds": None,
         }
     }
+
+
+def test_browser_status_key_endpoint_uses_python_casefold_identity(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        values = ["ı", "i", "ẞ", "ß", "SS", "ΟΣ", "οσ", "ſ", "s", "Café", "Cafe\u0301"]
+        keys = {
+            value: _get_json(
+                f"{service.root_url}/api/settings/status-key?value={urllib.parse.quote(value)}"
+            )["key"]
+            for value in values
+        }
+    finally:
+        service.shutdown()
+
+    assert keys["ı"] != keys["i"]
+    assert keys["ẞ"] == keys["ß"] == keys["SS"]
+    assert keys["ΟΣ"] == keys["οσ"]
+    assert keys["ſ"] == keys["s"]
+    assert keys["Café"] == keys["Cafe\u0301"]
 
 
 def test_browser_config_status_rows_count_only_active_local_tasks(tmp_path, monkeypatch):
@@ -2920,6 +2947,9 @@ def test_browser_general_settings_uses_structured_status_editor(tmp_path):
     assert 'textarea name="statuses"' not in settings
 
     assert "let statusRows = [];" in script
+    assert "const statusKeyByName = new Map();" in script
+    assert 'fetch(`/api/settings/status-key?value=${encodeURIComponent(name)}`)' in script
+    assert "const exact = statusRows.find((row) => row.name === raw);" in script
     assert "function renderStatusRows()" in script
     assert "container.replaceChildren();" in script
     assert 'usage.textContent = row.taskCount === 1 ? "1 task" : `${row.taskCount} tasks`;' in script
@@ -2966,12 +2996,16 @@ statusRows = [
   {name: "Done", taskCount: 0},
 ];
 configDefaultStatus = "To Do";
+globalThis.fetch = async (url) => {
+  const value = decodeURIComponent(String(url).split("?value=")[1] || "");
+  return {ok: true, json: async () => ({key: statusKey(value)})};
+};
 fakeConfigStatusAddInput.value = "  Review  ";
-fakeConfigStatusAddButton.listeners.click();
+await fakeConfigStatusAddButton.listeners.click();
 const added = statusRows.some((row) => row.name === "Review");
 fakeConfigStatusAddInput.value = "Cafe\\u0301";
 let enterPrevented = false;
-fakeConfigStatusAddInput.listeners.keydown({
+await fakeConfigStatusAddInput.listeners.keydown({
   key: "Enter",
   preventDefault() { enterPrevented = true; },
 });
@@ -2987,6 +3021,7 @@ return {
   sigmaEquivalent: statusKey("ΟΣ") === statusKey("οσ"),
   longSEquivalent: statusKey("ſ") === statusKey("s"),
   enterPrevented,
+  inputFocused: Boolean(fakeConfigStatusAddInput.focused),
   moved,
   removedDefault,
   removedInUse,
@@ -3004,6 +3039,7 @@ return {
         "sigmaEquivalent": True,
         "longSEquivalent": True,
         "enterPrevented": True,
+        "inputFocused": True,
         "moved": True,
         "removedDefault": False,
         "removedInUse": False,
@@ -3113,12 +3149,60 @@ return {
     }
 
 
+def test_browser_structured_status_submit_preserves_exact_dotless_i_default():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [
+  {name: "Unrelated", taskCount: 0, key: "unrelated"},
+  {name: "ı", taskCount: 0, key: "ı"},
+  {name: "i", taskCount: 0, key: "i"},
+];
+configDefaultStatus = canonicalStatusName("i", "i");
+configDefaultStatusKey = "i";
+const form = {
+  _data: {
+    projectName: "Project",
+    defaultAssignee: "",
+    dateFormat: "yyyy-mm-dd",
+    defaultPort: "6420",
+    activeBranchDays: "30",
+    zeroPaddedIds: "",
+  },
+  elements: {
+    defaultStatus: {value: configDefaultStatus},
+    includeDatetimeInDates: {checked: false},
+    autoOpenBrowser: {checked: false},
+    remoteOperations: {checked: false},
+    checkActiveBranches: {checked: true},
+    autoCommit: {checked: false},
+  },
+};
+let request = null;
+globalThis.fetch = async (url, options) => {
+  request = {url, options};
+  return {ok: false, json: async () => ({error: "Keep open"})};
+};
+await submitConfigSettings({preventDefault() {}, currentTarget: form, submitter: {disabled: false}});
+return {
+  canonicalDefault: configDefaultStatus,
+  submitted: JSON.parse(request.options.body).settings.defaultStatus,
+};
+"""
+    )
+
+    assert result == {"canonicalDefault": "i", "submitted": "i"}
+
+
 def test_browser_structured_status_rejects_sigma_and_long_s_duplicates():
     result = _run_board_javascript_harness(
         """
 statusRows = [{name: "ΟΣ", taskCount: 0}, {name: "ſ", taskCount: 0}];
-const sigmaRejected = !addStatus("οσ");
-const longSRejected = !addStatus("s");
+globalThis.fetch = async (url) => {
+  const value = decodeURIComponent(String(url).split("?value=")[1] || "");
+  return {ok: true, json: async () => ({key: statusKey(value)})};
+};
+const sigmaRejected = !await addStatus("οσ");
+const longSRejected = !await addStatus("s");
 return {sigmaRejected, longSRejected, rows: statusRows};
 """
     )
@@ -3127,6 +3211,163 @@ return {sigmaRejected, longSRejected, rows: statusRows};
         "sigmaRejected": True,
         "longSRejected": True,
         "rows": [{"name": "ΟΣ", "taskCount": 0}, {"name": "ſ", "taskCount": 0}],
+    }
+
+
+def test_browser_structured_status_uses_server_casefold_keys_for_duplicates():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [
+  {name: "ı", taskCount: 0},
+  {name: "ß", taskCount: 0},
+  {name: "ΟΣ", taskCount: 0},
+  {name: "ſ", taskCount: 0},
+  {name: "Straße", taskCount: 0},
+  {name: "Café", taskCount: 0},
+];
+statusKeyByName.set("ı", "ı");
+statusKeyByName.set("ß", "ss");
+statusKeyByName.set("ΟΣ", "οσ");
+statusKeyByName.set("ſ", "s");
+statusKeyByName.set("Straße", "strasse");
+statusKeyByName.set("Café", "café");
+const keys = new Map([
+  ["i", "i"],
+  ["ẞ", "ss"],
+  ["SS", "ss"],
+  ["οσ", "οσ"],
+  ["s", "s"],
+  ["STRASSE", "strasse"],
+  ["Cafe\\u0301", "café"],
+]);
+globalThis.fetch = async (url) => {
+  const value = decodeURIComponent(String(url).split("?value=")[1] || "");
+  return {ok: true, json: async () => ({key: keys.get(value)})};
+};
+const dotlessDistinct = await addStatus("i");
+const sharpSRejected = !await addStatus("ẞ");
+const ssRejected = !await addStatus("SS");
+const sigmaRejected = !await addStatus("οσ");
+const longSRejected = !await addStatus("s");
+const strasseRejected = !await addStatus("STRASSE");
+const accentRejected = !await addStatus("Cafe\\u0301");
+return {
+  dotlessDistinct,
+  sharpSRejected,
+  ssRejected,
+  sigmaRejected,
+  longSRejected,
+  strasseRejected,
+  accentRejected,
+  names: statusRows.map((row) => row.name),
+};
+"""
+    )
+
+    assert result == {
+        "dotlessDistinct": True,
+        "sharpSRejected": True,
+        "ssRejected": True,
+        "sigmaRejected": True,
+        "longSRejected": True,
+        "strasseRejected": True,
+        "accentRejected": True,
+        "names": ["ı", "ß", "ΟΣ", "ſ", "Straße", "Café", "i"],
+    }
+
+
+def test_browser_status_add_serializes_lookup_and_preserves_newer_input():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [{name: "Ready", taskCount: 0}];
+let calls = 0;
+let releaseLookup;
+let markLookupStarted;
+const lookupStarted = new Promise((resolve) => { markLookupStarted = resolve; });
+globalThis.fetch = async () => {
+  calls += 1;
+  markLookupStarted();
+  return new Promise((resolve) => { releaseLookup = resolve; });
+};
+fakeConfigStatusAddInput.value = "Review";
+const pending = fakeConfigStatusAddButton.listeners.click();
+await lookupStarted;
+fakeConfigStatusAddInput.value = "Newer input";
+await fakeConfigStatusAddButton.listeners.click();
+releaseLookup({ok: true, json: async () => ({key: "review"})});
+await pending;
+return {
+  calls,
+  input: fakeConfigStatusAddInput.value,
+  disabled: Boolean(fakeConfigStatusAddInput.disabled || fakeConfigStatusAddButton.disabled),
+  names: statusRows.map((row) => row.name),
+};
+"""
+    )
+
+    assert result == {
+        "calls": 1,
+        "input": "Newer input",
+        "disabled": False,
+        "names": ["Ready", "Review"],
+    }
+
+
+def test_browser_status_add_keeps_lookup_error_and_ignores_stale_reopen():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [{name: "Ready", taskCount: 0}];
+fakeConfigStatusAddInput.value = "Broken";
+globalThis.fetch = async () => ({ok: false, json: async () => ({error: "Lookup failed"})});
+await fakeConfigStatusAddButton.listeners.click();
+const afterError = {
+  input: fakeConfigStatusAddInput.value,
+  message: configStatus.textContent,
+  names: statusRows.map((row) => row.name),
+};
+
+let call = 0;
+let releaseLookup;
+let markLookupStarted;
+const lookupStarted = new Promise((resolve) => { markLookupStarted = resolve; });
+globalThis.fetch = async () => {
+  call += 1;
+  if (call === 1) {
+    markLookupStarted();
+    return new Promise((resolve) => { releaseLookup = resolve; });
+  }
+  return {
+    ok: true,
+    json: async () => ({
+      settings: {
+        defaultStatus: "Fresh",
+        defaultStatusKey: "fresh",
+        statusRows: [{name: "Fresh", taskCount: 0}],
+        statusKeys: ["fresh"],
+      },
+    }),
+  };
+};
+fakeConfigStatusAddInput.value = "Stale";
+const staleAdd = fakeConfigStatusAddButton.listeners.click();
+await lookupStarted;
+await openConfigSettings();
+releaseLookup({ok: true, json: async () => ({key: "stale"})});
+await staleAdd;
+return {
+  afterError,
+  defaultStatus: configDefaultStatus,
+  names: statusRows.map((row) => row.name),
+  message: configStatus.textContent,
+};
+"""
+    )
+
+    assert result == {
+        "afterError": {"input": "Broken", "message": "Lookup failed", "names": ["Ready"]},
+        "defaultStatus": "Fresh",
+        "names": ["Fresh"],
+        "message": "",
     }
 
 
@@ -5331,7 +5572,7 @@ const fakeConfigStatusAddInput = {
   value: "",
   listeners: {},
   addEventListener(type, listener) { this.listeners[type] = listener; },
-  focus() {},
+  focus() { if (!this.disabled) this.focused = true; },
 };
 const fakeConfigStatusAddButton = {
   listeners: {},

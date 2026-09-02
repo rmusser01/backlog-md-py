@@ -500,6 +500,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 {"settings": _config_settings_payload(config, project=project)},
             )
             return
+        if path == "/api/settings/status-key":
+            value = _query_value(parsed_url.query, "value")
+            if value is None:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Query parameter value is required"})
+                return
+            self._send_json(HTTPStatus.OK, {"key": _status_key(value)})
+            return
         if path == "/api/settings/dod-defaults":
             self._send_json(
                 HTTPStatus.OK,
@@ -2504,6 +2511,7 @@ def _dod_defaults_items_from_payload(payload: object) -> list[str]:
 
 
 def _config_settings_payload(config: BacklogConfig, *, project: BacklogProject) -> dict[str, object]:
+    status_rows = _status_rows(project, config)
     return {
         "activeBranchDays": config.active_branch_days,
         "autoCommit": config.auto_commit,
@@ -2513,10 +2521,12 @@ def _config_settings_payload(config: BacklogConfig, *, project: BacklogProject) 
         "defaultAssignee": config.default_assignee,
         "defaultPort": config.default_port,
         "defaultStatus": config.default_status,
+        "defaultStatusKey": _status_key(config.default_status),
         "includeDatetimeInDates": config.include_datetime_in_dates,
         "projectName": config.project_name,
         "remoteOperations": config.remote_operations,
-        "statusRows": _status_rows(project, config),
+        "statusRows": status_rows,
+        "statusKeys": [_status_key(str(row["name"])) for row in status_rows],
         "statuses": list(config.statuses or []),
         "zeroPaddedIds": config.zero_padded_ids,
     }
