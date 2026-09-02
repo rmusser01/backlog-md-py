@@ -10,6 +10,7 @@ from loguru import logger
 
 import backlog_py.core.milestones as milestones_module
 from backlog_py.cli.main import main
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.milestones import MilestoneMutationError, MilestoneService
 from backlog_py.mcp.tools import (
     milestone_add,
@@ -57,7 +58,9 @@ def _task_path(repo: Path, task_id: str = "task-1") -> Path:
 def _set_task_milestone(repo: Path, milestone: str, task_id: str = "task-1") -> None:
     path = _task_path(repo, task_id=task_id)
     source = path.read_text(encoding="utf-8")
-    path.write_text(source.replace("status: In Progress\n", f"status: In Progress\nmilestone: {milestone}\n"), encoding="utf-8")
+    path.write_text(
+        source.replace("status: In Progress\n", f"status: In Progress\nmilestone: {milestone}\n"), encoding="utf-8"
+    )
 
 
 def _create_task_with_milestone(repo: Path, task_id: str, title: str, milestone: str) -> Path:
@@ -67,6 +70,41 @@ def _create_task_with_milestone(repo: Path, task_id: str, title: str, milestone:
     source = source.replace("status: In Progress\n", f"status: In Progress\nmilestone: {milestone}\n")
     path = repo / "backlog" / "tasks" / f"{task_id.lower()} - {title.replace(' ', '-')}.md"
     path.write_text(source, encoding="utf-8")
+    return path
+
+
+def _write_current_milestone(
+    repo: Path,
+    milestone_id: str,
+    title: str,
+    *,
+    filename: str | None = None,
+    extra_frontmatter: str = "",
+    body: str = "## Description\n\nScope.",
+) -> Path:
+    path = repo / "backlog" / "milestones" / (filename or f"{milestone_id} - {title.lower().replace(' ', '-')}.md")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nid: {milestone_id}\ntitle: {title}\n{extra_frontmatter}---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_legacy_milestone(
+    repo: Path,
+    name: str,
+    *,
+    filename: str | None = None,
+    extra_frontmatter: str = "",
+    body: str = "Legacy scope.",
+) -> Path:
+    path = repo / "backlog" / "milestones" / (filename or f"{name}.md")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nname: {name}\n{extra_frontmatter}---\n\n{body}\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -119,9 +157,7 @@ def test_id_allocator_reserves_current_intent_id_without_a_valid_title(tmp_path)
     (active_dir / "noncanonical.md").write_text(
         "---\nid: m-37\n---\n\nIncomplete current milestone.\n", encoding="utf-8"
     )
-    (active_dir / "legacy.md").write_text(
-        "---\nname: Legacy\nid: m-99\n---\n\nLegacy milestone.\n", encoding="utf-8"
-    )
+    (active_dir / "legacy.md").write_text("---\nname: Legacy\nid: m-99\n---\n\nLegacy milestone.\n", encoding="utf-8")
 
     added = _service(repo).add_milestone("Next")
 
@@ -332,7 +368,7 @@ def test_add_list_rename_remove_and_archive_milestones(tmp_path):
     renamed = service.rename_milestone("Alpha", "Beta")
     assert renamed.name == "Beta"
     assert not (repo / "backlog" / "milestones" / "m-1 - alpha.md").exists()
-    assert (repo / "backlog" / "milestones" / "Beta.md").exists()
+    assert (repo / "backlog" / "milestones" / "m-1 - beta.md").exists()
 
     service.remove_milestone("Beta")
     assert service.list_milestones() == []
@@ -351,7 +387,7 @@ def test_rename_and_remove_can_update_task_milestone_references(tmp_path):
     _set_task_milestone(repo, "Alpha")
 
     service.rename_milestone("Alpha", "Beta", update_tasks=True)
-    assert "milestone: Beta" in _task_path(repo).read_text(encoding="utf-8")
+    assert "milestone: m-1" in _task_path(repo).read_text(encoding="utf-8")
 
     service.remove_milestone("Beta", clear_tasks=True)
     source = _task_path(repo).read_text(encoding="utf-8")
@@ -365,7 +401,7 @@ def test_rename_and_remove_update_task_refs_when_lookup_uses_different_case(tmp_
     _set_task_milestone(repo, "Alpha")
 
     service.rename_milestone("alpha", "Beta", update_tasks=True)
-    assert "milestone: Beta" in _task_path(repo).read_text(encoding="utf-8")
+    assert "milestone: m-1" in _task_path(repo).read_text(encoding="utf-8")
 
     service.remove_milestone("beta", clear_tasks=True)
     assert "milestone:" not in _task_path(repo).read_text(encoding="utf-8")
@@ -380,9 +416,9 @@ def test_rename_same_slug_milestone_updates_display_name_and_task_refs(tmp_path)
     renamed = service.rename_milestone("Release 1", "Release-1", update_tasks=True)
 
     assert renamed.name == "Release-1"
-    assert renamed.path == repo / "backlog" / "milestones" / "Release-1.md"
-    assert [path.name for path in sorted((repo / "backlog" / "milestones").glob("*.md"))] == ["Release-1.md"]
-    assert "milestone: Release-1" in _task_path(repo).read_text(encoding="utf-8")
+    assert renamed.path == repo / "backlog" / "milestones" / "m-1 - release-1.md"
+    assert [path.name for path in sorted((repo / "backlog" / "milestones").glob("*.md"))] == ["m-1 - release-1.md"]
+    assert "milestone: m-1" in _task_path(repo).read_text(encoding="utf-8")
 
 
 def test_rename_with_task_reference_symlink_escape_is_rejected_before_milestone_changes(tmp_path):
@@ -408,7 +444,7 @@ def test_rename_with_task_reference_symlink_escape_is_rejected_before_milestone_
     # unchanged and enforced earlier — nothing outside the project is written.
     service.rename_milestone("Alpha", "Beta", update_tasks=True)
 
-    assert (repo / "backlog" / "milestones" / "Beta.md").exists()
+    assert (repo / "backlog" / "milestones" / "m-1 - beta.md").exists()
     assert outside_task.read_text(encoding="utf-8") == original_task_source
 
 
@@ -422,10 +458,10 @@ def test_same_slug_rename_rolls_back_original_milestone_when_task_write_fails(tm
     original_task_source = _task_path(repo).read_text(encoding="utf-8")
     original_writer = milestones_module._atomic_write_text
 
-    def fail_on_task(path: Path, source: str) -> None:
+    def fail_on_task(path: Path, source: str, base: Path | None = None) -> None:
         if path.name.startswith("task-1"):
             raise OSError("simulated task write failure")
-        original_writer(path, source)
+        original_writer(path, source, base=base)
 
     monkeypatch.setattr(milestones_module, "_atomic_write_text", fail_on_task)
 
@@ -575,13 +611,14 @@ def test_list_milestones_can_include_archived_records(tmp_path):
         "---\nid: m-2\ntitle: Active\n---\n\n## Description\n\nActive scope.\n",
         encoding="utf-8",
     )
-    (archive_dir / "Archived.md").write_text(
-        "---\nname: Archived\n---\n\nArchived scope.\n", encoding="utf-8"
-    )
+    (archive_dir / "Archived.md").write_text("---\nname: Archived\n---\n\nArchived scope.\n", encoding="utf-8")
     service = _service(repo)
 
     assert [(record.name, record.archived) for record in service.list_milestones()] == [("Active", False)]
-    assert [(record.name, record.archived, record.path_relative) for record in service.list_milestones(include_archived=True)] == [
+    assert [
+        (record.name, record.archived, record.path_relative)
+        for record in service.list_milestones(include_archived=True)
+    ] == [
         ("Active", False, "milestones/m-2 - active.md"),
         ("Archived", True, "archive/milestones/Archived.md"),
     ]
@@ -597,7 +634,12 @@ def test_readme_is_ignored_case_insensitively_in_active_and_archive(tmp_path):
     archive_dir = repo / "backlog" / "archive" / "milestones"
     active_dir.mkdir(parents=True)
     archive_dir.mkdir(parents=True)
-    for directory, filename in ((active_dir, "readme.md"), (active_dir, "README.md"), (archive_dir, "readme.md"), (archive_dir, "README.md")):
+    for directory, filename in (
+        (active_dir, "readme.md"),
+        (active_dir, "README.md"),
+        (archive_dir, "readme.md"),
+        (archive_dir, "README.md"),
+    ):
         (directory / filename).write_text("---\nnot valid frontmatter", encoding="utf-8")
     (active_dir / "Alpha.md").write_text("---\nname: Alpha\n---\n\nActive\n", encoding="utf-8")
     (archive_dir / "Beta.md").write_text("---\nname: Beta\n---\n\nArchived\n", encoding="utf-8")
@@ -635,9 +677,7 @@ def test_current_milestone_normalizes_uppercase_zero_padded_ascii_id(tmp_path):
     repo = _copy_fixture(tmp_path)
     path = repo / "backlog" / "milestones" / "M-009 - release.md"
     path.parent.mkdir(parents=True)
-    path.write_text(
-        "---\nid: M-009\ntitle: Release\n---\n\n## Description\n\nScope.\n", encoding="utf-8"
-    )
+    path.write_text("---\nid: M-009\ntitle: Release\n---\n\n## Description\n\nScope.\n", encoding="utf-8")
 
     record = _service(repo).list_milestones()[0]
 
@@ -685,6 +725,476 @@ def test_current_and_legacy_milestones_sort_deterministically(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("reference", ["m-9", "9", "m-9 - release", "RELEASE"])
+def test_resolve_current_milestone_by_each_unique_alias(tmp_path, reference):
+    repo = _copy_fixture(tmp_path)
+    path = _write_current_milestone(repo, "m-9", "Release")
+
+    resolved = _service(repo).resolve_milestone(reference)
+
+    assert resolved.id == "m-9"
+    assert resolved.path == path
+
+
+@pytest.mark.parametrize("reference", ["Release name", "legacy-path"])
+def test_resolve_legacy_milestone_by_name_or_path_stem(tmp_path, reference):
+    repo = _copy_fixture(tmp_path)
+    path = _write_legacy_milestone(repo, "Release name", filename="legacy-path.md")
+
+    resolved = _service(repo).resolve_milestone(reference)
+
+    assert resolved.format == "legacy"
+    assert resolved.path == path
+
+
+def test_resolve_deduplicates_aliases_that_hit_the_same_record(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _write_current_milestone(repo, "m-9", "m-9")
+
+    assert _service(repo).resolve_milestone("m-9").id == "m-9"
+
+
+def test_resolve_can_include_archived_but_active_mutations_cannot(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    archive = repo / "backlog" / "archive" / "milestones" / "m-9 - release.md"
+    archive.parent.mkdir(parents=True)
+    archive.write_text(
+        "---\nid: m-9\ntitle: Release\n---\n\n## Description\n\nArchived.\n",
+        encoding="utf-8",
+    )
+    service = _service(repo)
+
+    assert service.resolve_milestone("9").archived is True
+    with pytest.raises(NotFoundError, match="Milestone not found"):
+        service.resolve_milestone("9", include_archived=False)
+    with pytest.raises(NotFoundError, match="Milestone not found"):
+        service.remove_milestone("9")
+
+
+def test_ambiguous_case_insensitive_titles_fail_closed(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _write_current_milestone(repo, "m-1", "Release")
+    _write_current_milestone(repo, "m-2", "release")
+
+    with pytest.raises(MilestoneMutationError, match="ambiguous") as exc_info:
+        _service(repo).resolve_milestone("RELEASE")
+
+    assert type(exc_info.value).__name__ == "MilestoneConflictError"
+
+
+def test_resolve_fails_when_different_alias_kinds_match_different_records(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _write_current_milestone(repo, "m-9", "Current")
+    _write_legacy_milestone(repo, "m-9")
+
+    with pytest.raises(MilestoneMutationError, match="ambiguous"):
+        _service(repo).resolve_milestone("m-9")
+
+
+@pytest.mark.parametrize("alias", ["Release", "m-9", "9", "m-9 - release"])
+def test_add_rejects_aliases_owned_by_another_active_milestone(tmp_path, alias):
+    repo = _copy_fixture(tmp_path)
+    original = _write_current_milestone(repo, "m-9", "Release")
+
+    with pytest.raises(MilestoneMutationError, match="conflict") as exc_info:
+        _service(repo).add_milestone(alias)
+
+    assert type(exc_info.value).__name__ == "MilestoneConflictError"
+    assert sorted((repo / "backlog" / "milestones").iterdir()) == [original]
+
+
+@pytest.mark.parametrize("alias", ["Release", "m-9", "9", "m-9 - release"])
+def test_rename_rejects_aliases_owned_by_another_active_milestone(tmp_path, alias):
+    repo = _copy_fixture(tmp_path)
+    existing = _write_current_milestone(repo, "m-9", "Release")
+    editable = _write_legacy_milestone(repo, "Editable")
+
+    with pytest.raises(MilestoneMutationError, match="conflict") as exc_info:
+        _service(repo).rename_milestone("Editable", alias)
+
+    assert type(exc_info.value).__name__ == "MilestoneConflictError"
+    assert existing.exists()
+    assert editable.exists()
+
+
+def test_current_edit_preserves_id_unknown_frontmatter_and_other_body_sections(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    old_path = _write_current_milestone(
+        repo,
+        "m-9",
+        "Release",
+        extra_frontmatter="custom: preserved\n",
+        body="Preface.\n\n## Description\n\nOld scope.\n\n## Risks\n\nKeep me",
+    )
+
+    edited = _service(repo).edit_milestone("9", title="Release Final", description="Updated", due_date="")
+
+    assert edited.id == "m-9"
+    assert edited.title == "Release Final"
+    assert edited.due_date is None
+    assert edited.frontmatter["custom"] == "preserved"
+    assert edited.path.name == "m-9 - release-final.md"
+    assert edited.description == "Updated"
+    assert edited.content.startswith("Preface.")
+    assert "## Risks\n\nKeep me" in edited.content
+    assert not old_path.exists()
+
+
+def test_legacy_edit_preserves_name_format_filename_and_unknown_frontmatter(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    old_path = _write_legacy_milestone(
+        repo,
+        "Alpha",
+        extra_frontmatter="custom: preserved\n",
+        body="Old legacy body.",
+    )
+
+    edited = _service(repo).edit_milestone("Alpha", title="Release Final", description="Updated legacy body.")
+
+    assert edited.format == "legacy"
+    assert edited.id is None
+    assert edited.name == "Release Final"
+    assert edited.path.name == "Release-Final.md"
+    assert edited.frontmatter == {"name": "Release Final", "custom": "preserved"}
+    assert edited.content == "Updated legacy body."
+    assert not old_path.exists()
+
+
+def test_current_rename_without_task_updates_leaves_reference_unchanged(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Alpha")
+    _set_task_milestone(repo, "Alpha")
+
+    renamed = service.rename_milestone("Alpha", "Beta")
+
+    assert renamed.id == "m-1"
+    assert "milestone: Alpha" in _task_path(repo).read_text(encoding="utf-8")
+
+
+def test_current_rename_canonicalizes_only_unique_mutable_task_aliases(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    title_task = _task_path(repo)
+    stem_task = _create_task_with_milestone(repo, "TASK-2", "Stem ref", added.path.stem)
+    canonical_task = _create_task_with_milestone(repo, "TASK-3", "Canonical ref", "m-1")
+    numeric_task = _create_task_with_milestone(repo, "TASK-4", "Numeric ref", "1")
+    _set_task_milestone(repo, "Alpha")
+    canonical_before = canonical_task.read_bytes()
+    numeric_before = numeric_task.read_bytes()
+
+    renamed = service.rename_milestone("1", "Beta", update_tasks=True)
+
+    assert renamed.id == "m-1"
+    assert renamed.path.name == "m-1 - beta.md"
+    assert "milestone: m-1" in title_task.read_text(encoding="utf-8")
+    assert "milestone: m-1" in stem_task.read_text(encoding="utf-8")
+    assert canonical_task.read_bytes() == canonical_before
+    assert numeric_task.read_bytes() == numeric_before
+
+
+def test_legacy_rename_updates_unique_name_and_path_stem_references(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    _write_legacy_milestone(repo, "Release name", filename="legacy-path.md")
+    stem_task = _create_task_with_milestone(repo, "TASK-2", "Stem ref", "legacy-path")
+    _set_task_milestone(repo, "Release name")
+
+    renamed = service.rename_milestone("legacy-path", "Beta", update_tasks=True)
+
+    assert renamed.format == "legacy"
+    assert renamed.path.name == "Beta.md"
+    assert "milestone: Beta" in _task_path(repo).read_text(encoding="utf-8")
+    assert "milestone: Beta" in stem_task.read_text(encoding="utf-8")
+
+
+def test_current_rename_does_not_rewrite_title_alias_ambiguous_with_archive(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Alpha")
+    archived_source = _write_legacy_milestone(repo, "Alpha", filename="archived-alpha.md")
+    archive_dir = repo / "backlog" / "archive" / "milestones"
+    archive_dir.mkdir(parents=True)
+    archived_source.replace(archive_dir / archived_source.name)
+    canonical_task = _create_task_with_milestone(repo, "TASK-2", "Canonical ref", "m-1")
+    _set_task_milestone(repo, "Alpha")
+    title_before = _task_path(repo).read_bytes()
+    canonical_before = canonical_task.read_bytes()
+
+    service.rename_milestone("m-1", "Beta", update_tasks=True)
+
+    assert _task_path(repo).read_bytes() == title_before
+    assert canonical_task.read_bytes() == canonical_before
+
+
+def test_remove_clear_skips_archived_ambiguity_but_clears_globally_unique_id(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Alpha")
+    archived_source = _write_legacy_milestone(repo, "Alpha", filename="archived-alpha.md")
+    archive_dir = repo / "backlog" / "archive" / "milestones"
+    archive_dir.mkdir(parents=True)
+    archived_source.replace(archive_dir / archived_source.name)
+    canonical_task = _create_task_with_milestone(repo, "TASK-2", "Canonical ref", "m-1")
+    _set_task_milestone(repo, "Alpha")
+    title_before = _task_path(repo).read_bytes()
+
+    service.remove_milestone("m-1", clear_tasks=True)
+
+    assert _task_path(repo).read_bytes() == title_before
+    assert "milestone:" not in canonical_task.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("reference", ["m-1", "1", "m-1 - alpha", "Alpha"])
+def test_remove_with_clear_recognizes_each_unique_current_alias(tmp_path, reference):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    _set_task_milestone(repo, reference)
+
+    removed = service.remove_milestone(reference, clear_tasks=True)
+
+    assert removed.path == added.path
+    assert not added.path.exists()
+    assert "milestone:" not in _task_path(repo).read_text(encoding="utf-8")
+
+
+def test_archive_resolves_alias_preserves_references_and_returns_archived_record(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Alpha")
+    _set_task_milestone(repo, "Alpha")
+    task_before = _task_path(repo).read_bytes()
+
+    archived = service.archive_milestone("1")
+
+    assert archived.archived is True
+    assert archived.id == "m-1"
+    assert archived.path_relative == "archive/milestones/m-1 - alpha.md"
+    assert _task_path(repo).read_bytes() == task_before
+
+
+def test_ambiguous_active_mutation_does_not_change_any_source(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    first = _write_legacy_milestone(repo, "Release", filename="first.md")
+    second = _write_legacy_milestone(repo, "release", filename="second.md")
+    before = {path: path.read_bytes() for path in (first, second)}
+
+    with pytest.raises(MilestoneMutationError, match="ambiguous"):
+        _service(repo).remove_milestone("RELEASE")
+
+    assert {path: path.read_bytes() for path in (first, second)} == before
+
+
+def test_current_edit_rolls_back_a_milestone_write_that_raises_after_writing(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    original_writer = milestones_module._atomic_write_text
+    failed = False
+
+    def fail_after_milestone_write(path: Path, source: str, base: Path | None = None) -> None:
+        nonlocal failed
+        original_writer(path, source, base=base)
+        if path == added.path and not failed:
+            failed = True
+            raise OSError("simulated milestone write failure")
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", fail_after_milestone_write)
+
+    with pytest.raises(OSError, match="simulated milestone write failure"):
+        service.edit_milestone("Alpha", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert not (added.path.parent / "m-1 - beta.md").exists()
+
+
+def test_current_edit_rolls_back_milestone_and_all_task_writes(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    second_task = _create_task_with_milestone(repo, "TASK-2", "Second task", "Alpha")
+    _set_task_milestone(repo, "Alpha")
+    first_task = _task_path(repo)
+    originals = {
+        added.path: added.path.read_bytes(),
+        first_task: first_task.read_bytes(),
+        second_task: second_task.read_bytes(),
+    }
+    original_writer = milestones_module._atomic_write_text
+    failed = False
+    write_bases: list[Path | None] = []
+
+    def fail_after_second_task_write(path: Path, source: str, base: Path | None = None) -> None:
+        nonlocal failed
+        write_bases.append(base)
+        original_writer(path, source, base=base)
+        if path == second_task and not failed:
+            failed = True
+            raise OSError("simulated task write failure")
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", fail_after_second_task_write)
+
+    with pytest.raises(OSError, match="simulated task write failure"):
+        service.edit_milestone("Alpha", title="Beta", update_tasks=True)
+
+    assert {path: path.read_bytes() for path in originals} == originals
+    assert not (added.path.parent / "m-1 - beta.md").exists()
+    assert write_bases
+    assert set(write_bases) == {repo / "backlog"}
+
+
+def test_current_edit_rolls_back_sources_when_final_rename_fails(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    _set_task_milestone(repo, "Alpha")
+    task_path = _task_path(repo)
+    milestone_before = added.path.read_bytes()
+    task_before = task_path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    original_replace = milestones_module.os.replace
+
+    def fail_final_rename(source, destination):
+        if Path(source) == added.path and Path(destination) == target:
+            raise OSError("simulated rename failure")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(milestones_module.os, "replace", fail_final_rename)
+
+    with pytest.raises(OSError, match="simulated rename failure"):
+        service.edit_milestone("Alpha", title="Beta", update_tasks=True)
+
+    assert added.path.read_bytes() == milestone_before
+    assert task_path.read_bytes() == task_before
+    assert not target.exists()
+
+
+def test_current_edit_does_not_overwrite_a_target_created_during_transaction(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    original_writer = milestones_module._atomic_write_text
+    planted = False
+
+    def plant_target_after_milestone_write(path: Path, source: str, base: Path | None = None) -> None:
+        nonlocal planted
+        original_writer(path, source, base=base)
+        if path == added.path and not planted:
+            planted = True
+            target.write_bytes(b"concurrent file\n")
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", plant_target_after_milestone_write)
+
+    with pytest.raises(MilestoneMutationError, match="conflict"):
+        service.edit_milestone("Alpha", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == b"concurrent file\n"
+
+
+def test_current_edit_rolls_back_a_rename_that_raises_after_moving(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    original_replace = milestones_module.os.replace
+    failed = False
+
+    def fail_after_final_rename(source, destination):
+        nonlocal failed
+        original_replace(source, destination)
+        if Path(source) == added.path and Path(destination) == target and not failed:
+            failed = True
+            raise OSError("simulated post-rename failure")
+
+    monkeypatch.setattr(milestones_module.os, "replace", fail_after_final_rename)
+
+    with pytest.raises(OSError, match="simulated post-rename failure"):
+        service.edit_milestone("Alpha", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert not target.exists()
+
+
+def test_remove_rolls_back_task_sources_when_unlink_fails(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    _set_task_milestone(repo, "Alpha")
+    task_path = _task_path(repo)
+    milestone_before = added.path.read_bytes()
+    task_before = task_path.read_bytes()
+    original_unlink = Path.unlink
+
+    def fail_milestone_unlink(path: Path, *args, **kwargs):
+        if path == added.path:
+            raise OSError("simulated unlink failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_milestone_unlink)
+
+    with pytest.raises(OSError, match="simulated unlink failure"):
+        service.remove_milestone("Alpha", clear_tasks=True)
+
+    assert added.path.read_bytes() == milestone_before
+    assert task_path.read_bytes() == task_before
+
+
+def test_remove_restores_a_milestone_when_unlink_raises_after_deleting(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    original_unlink = Path.unlink
+    failed = False
+
+    def fail_after_milestone_unlink(path: Path, *args, **kwargs):
+        nonlocal failed
+        result = original_unlink(path, *args, **kwargs)
+        if path == added.path and not failed:
+            failed = True
+            raise OSError("simulated post-unlink failure")
+        return result
+
+    monkeypatch.setattr(Path, "unlink", fail_after_milestone_unlink)
+
+    with pytest.raises(OSError, match="simulated post-unlink failure"):
+        service.remove_milestone("Alpha")
+
+    assert added.path.read_bytes() == original_source
+
+
+def test_archive_rolls_back_a_move_that_raises_after_moving(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = repo / "backlog" / "archive" / "milestones" / added.path.name
+    original_replace = milestones_module.os.replace
+    failed = False
+
+    def fail_after_archive_move(source, destination):
+        nonlocal failed
+        original_replace(source, destination)
+        if Path(source) == added.path and Path(destination) == target and not failed:
+            failed = True
+            raise OSError("simulated archive failure")
+
+    monkeypatch.setattr(milestones_module.os, "replace", fail_after_archive_move)
+
+    with pytest.raises(OSError, match="simulated archive failure"):
+        service.archive_milestone("Alpha")
+
+    assert added.path.read_bytes() == original_source
+    assert not target.exists()
+
+
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -713,10 +1223,10 @@ def test_rename_rolls_back_milestone_and_task_refs_when_task_write_fails(tmp_pat
     original_second_source = second_task.read_text(encoding="utf-8")
     original_writer = milestones_module._atomic_write_text
 
-    def fail_on_second_task(path: Path, source: str) -> None:
+    def fail_on_second_task(path: Path, source: str, base: Path | None = None) -> None:
         if path.name.startswith("task-2"):
             raise OSError("simulated task write failure")
-        original_writer(path, source)
+        original_writer(path, source, base=base)
 
     monkeypatch.setattr(milestones_module, "_atomic_write_text", fail_on_second_task)
 
@@ -724,7 +1234,7 @@ def test_rename_rolls_back_milestone_and_task_refs_when_task_write_fails(tmp_pat
         service.rename_milestone("Alpha", "Beta", update_tasks=True)
 
     assert (repo / "backlog" / "milestones" / "m-1 - alpha.md").exists()
-    assert not (repo / "backlog" / "milestones" / "Beta.md").exists()
+    assert not (repo / "backlog" / "milestones" / "m-1 - beta.md").exists()
     assert first_task.read_text(encoding="utf-8") == original_first_source
     assert second_task.read_text(encoding="utf-8") == original_second_source
 
@@ -740,10 +1250,10 @@ def test_remove_rolls_back_task_refs_when_task_write_fails(tmp_path, monkeypatch
     original_second_source = second_task.read_text(encoding="utf-8")
     original_writer = milestones_module._atomic_write_text
 
-    def fail_on_second_task(path: Path, source: str) -> None:
+    def fail_on_second_task(path: Path, source: str, base: Path | None = None) -> None:
         if path.name.startswith("task-2"):
             raise OSError("simulated task write failure")
-        original_writer(path, source)
+        original_writer(path, source, base=base)
 
     monkeypatch.setattr(milestones_module, "_atomic_write_text", fail_on_second_task)
 

@@ -88,7 +88,7 @@ def test_rename_milestone_does_not_overwrite_local_with_branch_content(tmp_path)
     after = task_path.read_text(encoding="utf-8")
     assert "FEATURE VERSION" not in after, "local task file was overwritten with feature-branch content"
     assert "MAIN VERSION" in after
-    assert "milestone: M1-renamed" in after
+    assert "milestone: m-1" in after
 
 
 # --- L2: non-ASCII frontmatter stored readably, not as \uXXXX escapes --------
