@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from loguru import logger
 
 from backlog_py.core import repository as repository_module
 from backlog_py.core.models import BacklogProject
@@ -173,6 +174,38 @@ def test_sort_noop_performs_no_file_writes(
     assert result.changed_task_ids == ()
 
 
+def test_sort_semantic_noop_preserves_hand_formatted_source(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_path = project.backlog_dir / "tasks" / "task-1.md"
+    source = "---\nid: TASK-1\ntitle: TASK-1\nstatus: To Do\npriority: high\nordinal: 1000 # keep\n---\n"
+    task_path.write_text(source, encoding="utf-8")
+    repository = MutableRepository(project)
+    atomic_write = repository_module._atomic_write_text
+    invalidate = repository._invalidate_task_cache
+    writes: list[Path] = []
+    invalidations = 0
+
+    def record_write(path: Path, content: str, base: Path | None = None) -> None:
+        writes.append(path)
+        atomic_write(path, content, base=base)
+
+    def record_invalidation() -> None:
+        nonlocal invalidations
+        invalidations += 1
+        invalidate()
+
+    monkeypatch.setattr(repository_module, "_atomic_write_text", record_write)
+    monkeypatch.setattr(repository, "_invalidate_task_cache", record_invalidation)
+
+    result = repository.sort_tasks("To Do", sort="priority")
+
+    assert result.changed_task_ids == ()
+    assert writes == []
+    assert invalidations == 0
+    assert task_path.read_text(encoding="utf-8") == source
+
+
 def test_sort_rolls_back_completed_writes_after_runtime_failure(
     project: BacklogProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -186,6 +219,46 @@ def test_sort_rolls_back_completed_writes_after_runtime_failure(
         MutableRepository(project).sort_tasks("To Do", sort="priority")
 
     assert _task_sources(project) == before
+
+
+def test_sort_continues_rollback_failures_without_hiding_forward_error(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_task(project, task_id="TASK-1", priority="high")
+    _write_task(project, task_id="TASK-2", priority="medium")
+    _write_task(project, task_id="TASK-3", priority="low")
+    before = _task_sources(project)
+    atomic_write = repository_module._atomic_write_text
+    attempts: list[str] = []
+    calls = 0
+
+    def fail_forward_and_rollback(path: Path, content: str, base: Path | None = None) -> None:
+        nonlocal calls
+        calls += 1
+        attempts.append(path.name)
+        if calls == 3:
+            raise OSError("forward failure")
+        if calls == 4:
+            raise OSError("rollback failure")
+        atomic_write(path, content, base=base)
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    monkeypatch.setattr(repository_module, "_atomic_write_text", fail_forward_and_rollback)
+    try:
+        with pytest.raises(OSError, match="forward failure"):
+            MutableRepository(project).sort_tasks("To Do", sort="priority")
+    finally:
+        logger.remove(sink_id)
+
+    after = _task_sources(project)
+    assert attempts == ["task-1.md", "task-2.md", "task-3.md", "task-2.md", "task-1.md"]
+    assert after["task-1.md"] == before["task-1.md"]
+    assert after["task-2.md"] != before["task-2.md"]
+    assert any(
+        "TASK-2" in message and "task-2.md" in message and "rollback failure" in message
+        for message in messages
+    )
 
 
 def test_sort_invalidates_populated_caches_after_success(project: BacklogProject) -> None:

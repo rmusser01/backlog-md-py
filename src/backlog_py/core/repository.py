@@ -881,19 +881,23 @@ class MutableRepository(ReadOnlyRepository):
         )
 
     def _assign_task_ordinals(self, tasks: Sequence[TaskRecord]) -> tuple[str, ...]:
-        updates = [
-            _TaskSourceUpdate(
-                task_id=task.id,
-                path=task.path,
-                original_source=task.raw_source,
-                updated_source=_replace_frontmatter_values(
-                    task.raw_source,
-                    task.parsed,
-                    {"ordinal": index * 1000},
-                ),
+        updates: list[_TaskSourceUpdate] = []
+        for index, task in enumerate(tasks, start=1):
+            ordinal = index * 1000
+            current_ordinal = task.parsed.frontmatter.get("ordinal")
+            updated_source = task.raw_source
+            if type(current_ordinal) is not int or current_ordinal != ordinal:
+                updated_source = _replace_frontmatter_values(
+                    task.raw_source, task.parsed, {"ordinal": ordinal}
+                )
+            updates.append(
+                _TaskSourceUpdate(
+                    task_id=task.id,
+                    path=task.path,
+                    original_source=task.raw_source,
+                    updated_source=updated_source,
+                )
             )
-            for index, task in enumerate(tasks, start=1)
-        ]
         return tuple(_write_task_source_batch(self, updates))
 
     def archive_task(self, task_id: str) -> TaskRecord:
