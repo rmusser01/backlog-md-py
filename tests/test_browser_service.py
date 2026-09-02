@@ -5555,6 +5555,84 @@ def test_browser_milestone_dialog_uses_unique_selection_key_and_route_key(tmp_pa
     assert ".textContent" in lists
 
 
+def test_browser_milestone_selection_uses_a_non_color_dom_marker(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    lists = html.split("function renderMilestoneLists", maxsplit=1)[1].split(
+        "function selectMilestone", maxsplit=1
+    )[0]
+    selector = html.split("function selectMilestone", maxsplit=1)[1].split(
+        "async function loadMilestones", maxsplit=1
+    )[0]
+
+    assert 'selectedMarker.className = "milestone-selected-marker"' in lists
+    assert 'selectedMarker.textContent = "Selected"' in lists
+    assert 'selectedMarker.setAttribute("aria-hidden", "true")' in lists
+    assert 'button.querySelector(".milestone-selected-marker")' in selector
+    assert "selectedMarker.hidden = !isSelected" in selector
+    assert "innerHTML" not in lists
+
+
+def test_browser_milestone_selection_marker_tracks_duplicate_active_and_archived_identities():
+    result = _run_board_javascript_harness(
+        """
+const activeList = fakeElement("ul");
+const archivedList = fakeElement("ul");
+document.getElementById = (id) => ({
+  "milestone-active-list": activeList,
+  "milestone-archived-list": archivedList,
+})[id] || null;
+milestones = [
+  {
+    key: "legacy-U2hhcmVk",
+    selectionKey: "milestones/active.md",
+    title: "Shared",
+    archived: false,
+  },
+  {
+    key: "legacy-U2hhcmVk",
+    selectionKey: "archive/milestones/archived.md",
+    title: "Shared",
+    archived: true,
+  },
+];
+selectedMilestoneKey = "milestones/active.md";
+renderMilestoneLists();
+const buttons = [activeList.children[0].children[0], archivedList.children[0].children[0]];
+document.querySelectorAll = (selector) => selector === ".milestone-list button" ? buttons : [];
+selectMilestone("archive/milestones/archived.md");
+return buttons.map((button) => {
+  const marker = button.querySelector(".milestone-selected-marker");
+  return {
+    selectionKey: button.dataset.milestoneSelectionKey,
+    pressed: button.getAttribute("aria-pressed"),
+    markerText: marker?.textContent || "",
+    markerHidden: marker?.hidden ?? null,
+  };
+});
+"""
+    )
+
+    assert result == [
+        {
+            "selectionKey": "milestones/active.md",
+            "pressed": "false",
+            "markerText": "Selected",
+            "markerHidden": True,
+        },
+        {
+            "selectionKey": "archive/milestones/archived.md",
+            "pressed": "true",
+            "markerText": "Selected",
+            "markerHidden": False,
+        },
+    ]
+
+
 def test_browser_milestone_loads_apply_only_latest_response():
     result = _run_board_javascript_harness(
         """
@@ -5826,6 +5904,8 @@ function fakeElement(tagName) {
     children: [],
     listeners: {},
     attributes: {},
+    dataset: {},
+    hidden: false,
     _disabled: false,
     value: "",
     textContent: "",
@@ -5847,6 +5927,11 @@ function fakeElement(tagName) {
       this.children.forEach((node) => { node.parentNode = null; });
       this.children = [];
       this.append(...nodes);
+    },
+    querySelector(selector) {
+      return this.children.find((node) => (
+        selector === ".milestone-selected-marker" && node.className === "milestone-selected-marker"
+      )) || null;
     },
     setAttribute(name, value) { this.attributes[name] = String(value); },
     getAttribute(name) { return this.attributes[name] ?? null; },
@@ -5912,6 +5997,7 @@ const context = vm.createContext({
   fakeConfigStatusAddButton,
   fakeConfigSettingsDialog,
   fakeConfigStatusRows,
+  fakeElement,
   HTMLSelectElement: class {},
   HTMLTextAreaElement: class {},
   FormData: class {

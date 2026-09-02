@@ -347,7 +347,12 @@
           const meta = document.createElement("span");
           meta.className = "readonly-list-meta";
           meta.textContent = [record.id || "Legacy", record.dueDate].filter(Boolean).join(" · ");
-          button.append(title, meta);
+          const selectedMarker = document.createElement("span");
+          selectedMarker.className = "milestone-selected-marker";
+          selectedMarker.textContent = "Selected";
+          selectedMarker.setAttribute("aria-hidden", "true");
+          selectedMarker.hidden = selectedMilestoneKey !== record.selectionKey;
+          button.append(title, meta, selectedMarker);
           button.addEventListener("click", () => selectMilestone(record.selectionKey));
           item.appendChild(button);
           list.appendChild(item);
@@ -371,10 +376,10 @@
       const editor = document.getElementById("milestone-editor");
       if (editor) editor.hidden = !record;
       document.querySelectorAll(".milestone-list button").forEach((button) => {
-        button.setAttribute(
-          "aria-pressed",
-          button.dataset.milestoneSelectionKey === selectedMilestoneKey ? "true" : "false",
-        );
+        const isSelected = button.dataset.milestoneSelectionKey === selectedMilestoneKey;
+        button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        const selectedMarker = button.querySelector(".milestone-selected-marker");
+        if (selectedMarker) selectedMarker.hidden = !isSelected;
       });
       if (!record || !milestoneEditForm) return;
       setText("milestone-editor-title", record.title || "Milestone details");

@@ -347,6 +347,12 @@
       font-size: 12px;
       margin-top: 2px;
     }
+    .milestone-selected-marker:not([hidden]) {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+      font-weight: 650;
+    }
     .milestone-manager {
       display: grid;
       grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
