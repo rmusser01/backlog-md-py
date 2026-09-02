@@ -2586,8 +2586,12 @@ def _validate_status_settings(
         if "defaultStatus" in updates or canonical_default != current.default_status:
             validated["defaultStatus"] = canonical_default
 
-        for task in MutableRepository(project, refresh_remote_refs=False).list_tasks():
-            if _status_key(task.status) not in status_by_key:
+        tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
+        prior_statuses = current.statuses or [*(task.status for task in tasks), current.default_status]
+        prior_status_keys = {_status_key(status) for status in prior_statuses}
+        for task in tasks:
+            task_status_key = _status_key(task.status)
+            if task_status_key in prior_status_keys and task_status_key not in status_by_key:
                 raise _BrowserConflictError(f'Status "{task.status}" is still used by active task {task.id}')
         return validated
 

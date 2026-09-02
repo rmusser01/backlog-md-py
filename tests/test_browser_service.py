@@ -2577,6 +2577,73 @@ def test_browser_config_status_pair_rejects_removing_in_use_or_default_status_wi
     assert writes == []
 
 
+def test_browser_config_status_pair_full_save_preserves_unconfigured_legacy_task_status(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, ["Ready", "Done"], default="Ready")
+    _replace_browser_fixture_task_status(repo, "Legacy Review")
+    task_path = _task_file(repo)
+    task_before = task_path.read_bytes()
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/settings/config",
+            {
+                "settings": {
+                    "projectName": "Legacy-compatible update",
+                    "statuses": ["Ready", "Done"],
+                    "defaultStatus": "ready",
+                }
+            },
+        )
+    finally:
+        service.shutdown()
+
+    raw_config = yaml.safe_load((repo / "backlog" / "config.yml").read_text(encoding="utf-8"))
+    assert response["settings"]["projectName"] == "Legacy-compatible update"
+    assert response["settings"]["statuses"] == ["Ready", "Done"]
+    assert response["settings"]["defaultStatus"] == "Ready"
+    assert raw_config["statuses"] == ["Ready", "Done"]
+    assert raw_config["defaultStatus"] == "Ready"
+    assert task_path.read_bytes() == task_before
+
+
+@pytest.mark.parametrize("configured_statuses", [None, []])
+def test_browser_config_status_pair_rejects_removing_derived_in_use_status_without_writing(
+    tmp_path, monkeypatch, configured_statuses
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, configured_statuses, default="Ready")
+    config_path = repo / "backlog" / "config.yml"
+    before = config_path.read_bytes()
+
+    from backlog_py.browser import service as browser_service
+
+    writes = []
+    original_set_config_values = browser_service.set_config_values
+
+    def tracking_set_config_values(project, updates):
+        writes.append(dict(updates))
+        return original_set_config_values(project, updates)
+
+    monkeypatch.setattr(browser_service, "set_config_values", tracking_set_config_values)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/settings/config",
+                {"settings": {"statuses": ["Ready", "Done"], "defaultStatus": "Ready"}},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 409
+    assert config_path.read_bytes() == before
+    assert writes == []
+
+
 def test_browser_config_status_pair_canonicalizes_only_default_update(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -5861,7 +5928,7 @@ def _configure_statuses(repo: Path, statuses: list[str] | None, *, default: str)
 def _replace_browser_fixture_task_status(repo: Path, status: str) -> None:
     path = _task_file(repo)
     source = path.read_text(encoding="utf-8")
-    replaced = source.replace("status: In Progress", f"status: {yaml.safe_dump(status).strip()}")
+    replaced = source.replace("status: In Progress", f"status: {json.dumps(status, ensure_ascii=False)}")
     assert replaced != source
     path.write_text(replaced, encoding="utf-8")
 
