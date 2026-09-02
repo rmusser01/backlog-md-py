@@ -70,6 +70,142 @@ def _create_task_with_milestone(repo: Path, task_id: str, title: str, milestone:
     return path
 
 
+def test_add_milestone_writes_current_format_and_description_heading(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    added = _service(repo).add_milestone("Release 2", "Release scope.")
+
+    path = repo / "backlog" / "milestones" / "m-1 - release-2.md"
+    assert added.id == "m-1"
+    assert added.name == added.title == "Release 2"
+    assert added.due_date is None
+    assert added.format == "current"
+    assert added.path == path
+    assert added.frontmatter == {"id": "m-1", "title": "Release 2"}
+    assert added.content == "## Description\n\nRelease scope."
+    assert path.read_text(encoding="utf-8") == (
+        "---\nid: m-1\ntitle: Release 2\n---\n\n## Description\n\nRelease scope.\n"
+    )
+    assert "name:" not in path.read_text(encoding="utf-8")
+
+
+def test_id_allocator_scans_active_archive_frontmatter_and_filename_fallbacks(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_dir = repo / "backlog" / "milestones"
+    archive_dir = repo / "backlog" / "archive" / "milestones"
+    active_dir.mkdir(parents=True)
+    archive_dir.mkdir(parents=True)
+    (active_dir / "m-2 - active.md").write_text(
+        "---\nid: m-2\ntitle: Active\n---\n\n## Description\n\nScope.\n", encoding="utf-8"
+    )
+    (archive_dir / "m-8 - archived.md").write_text(
+        "---\nid: m-8\ntitle: Archived\n---\n\n## Description\n\nScope.\n", encoding="utf-8"
+    )
+    (active_dir / "noncanonical.md").write_text(
+        "---\nid: m-10\ntitle: Reserved\n---\n\n## Description\n\nScope.\n", encoding="utf-8"
+    )
+    (active_dir / "m-11 - reserved.md").write_text("not valid frontmatter", encoding="utf-8")
+
+    added = _service(repo).add_milestone("Next")
+
+    assert added.id == "m-12"
+    assert added.path.name == "m-12 - next.md"
+
+
+def test_id_allocator_never_reuses_archived_id(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    created = service.add_milestone("Highest")
+    service.archive_milestone("Highest")
+
+    next_created = service.add_milestone("Next")
+
+    assert created.id == "m-1"
+    assert next_created.id == "m-2"
+
+
+@pytest.mark.parametrize(
+    "due_date",
+    ["2026-09-30 17:00", "2026-09-30T17:00:45.123Z", "2026-09-30T10:00-07:00"],
+)
+def test_add_milestone_normalizes_due_date_to_utc_minutes(tmp_path, due_date):
+    repo = _copy_fixture(tmp_path)
+
+    added = _service(repo).add_milestone("Release", due_date=due_date)
+
+    assert added.due_date == "2026-09-30 17:00"
+    assert added.frontmatter["due_date"] == "2026-09-30 17:00"
+
+
+@pytest.mark.parametrize("due_date", ["2026-09-01", "not-a-date", "2026-13-01 10:00", "   "])
+def test_add_milestone_rejects_invalid_due_date_before_writing(tmp_path, due_date):
+    repo = _copy_fixture(tmp_path)
+
+    with pytest.raises(MilestoneMutationError):
+        _service(repo).add_milestone("Release", due_date=due_date)
+
+    assert not (repo / "backlog" / "milestones").exists()
+
+
+def test_add_milestone_omits_empty_due_date(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    added = _service(repo).add_milestone("Release", due_date="")
+
+    assert added.due_date is None
+    assert "due_date" not in added.frontmatter
+
+
+def test_current_filename_removes_forbidden_characters_and_truncates_suffix(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    title = '  ReLeAsE <>:"/\\\\|?*   ' + "A" * 55
+
+    added = _service(repo).add_milestone(title)
+
+    assert added.title == title.strip()
+    assert added.path.name == f"m-1 - release-{'a' * 42}.md"
+    assert len(added.path.stem.removeprefix("m-1 - ")) == 50
+
+
+def test_current_filename_uses_milestone_for_all_forbidden_title(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    title = '<>:"/\\\\|?*'
+
+    added = _service(repo).add_milestone(title)
+
+    assert added.title == title
+    assert added.frontmatter["title"] == title
+    assert added.path.name == "m-1 - milestone.md"
+
+
+def test_current_filename_strips_whitespace_exposed_by_removed_characters(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    added = _service(repo).add_milestone("<>   Release   <>")
+
+    assert added.path.name == "m-1 - release.md"
+
+
+def test_add_milestone_rejects_empty_title_before_writing(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    with pytest.raises(MilestoneMutationError):
+        _service(repo).add_milestone("   ")
+
+    assert not (repo / "backlog" / "milestones").exists()
+
+
+def test_id_allocator_ignores_unicode_filename_digits(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    active_dir = repo / "backlog" / "milestones"
+    active_dir.mkdir(parents=True)
+    (active_dir / "m-١١ - unicode.md").write_text("not valid frontmatter", encoding="utf-8")
+
+    added = _service(repo).add_milestone("First")
+
+    assert added.id == "m-1"
+
+
 def test_add_list_rename_remove_and_archive_milestones(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -81,7 +217,7 @@ def test_add_list_rename_remove_and_archive_milestones(tmp_path):
 
     renamed = service.rename_milestone("Alpha", "Beta")
     assert renamed.name == "Beta"
-    assert not (repo / "backlog" / "milestones" / "Alpha.md").exists()
+    assert not (repo / "backlog" / "milestones" / "m-1 - alpha.md").exists()
     assert (repo / "backlog" / "milestones" / "Beta.md").exists()
 
     service.remove_milestone("Beta")
@@ -90,8 +226,8 @@ def test_add_list_rename_remove_and_archive_milestones(tmp_path):
     service.add_milestone("Release 1", description="Ship it")
     archived = service.archive_milestone("Release 1")
     assert archived.archived is True
-    assert not (repo / "backlog" / "milestones" / "Release-1.md").exists()
-    assert (repo / "backlog" / "archive" / "milestones" / "Release-1.md").exists()
+    assert not (repo / "backlog" / "milestones" / "m-1 - release-1.md").exists()
+    assert (repo / "backlog" / "archive" / "milestones" / "m-1 - release-1.md").exists()
 
 
 def test_rename_and_remove_can_update_task_milestone_references(tmp_path):
@@ -167,7 +303,7 @@ def test_same_slug_rename_rolls_back_original_milestone_when_task_write_fails(tm
     service = _service(repo)
     service.add_milestone("Release 1")
     _set_task_milestone(repo, "Release 1")
-    milestone_path = repo / "backlog" / "milestones" / "Release-1.md"
+    milestone_path = repo / "backlog" / "milestones" / "m-1 - release-1.md"
     original_milestone_source = milestone_path.read_text(encoding="utf-8")
     original_task_source = _task_path(repo).read_text(encoding="utf-8")
     original_writer = milestones_module._atomic_write_text
@@ -439,7 +575,7 @@ def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
     service.add_milestone("Alpha")
-    milestone_path = repo / "backlog" / "milestones" / "Alpha.md"
+    milestone_path = repo / "backlog" / "milestones" / "m-1 - alpha.md"
     outside = tmp_path / "outside.md"
     outside.write_text("---\nname: Outside\n---\n\nSecret\n", encoding="utf-8")
     milestone_path.unlink()
@@ -473,7 +609,7 @@ def test_rename_rolls_back_milestone_and_task_refs_when_task_write_fails(tmp_pat
     with pytest.raises(OSError, match="simulated task write failure"):
         service.rename_milestone("Alpha", "Beta", update_tasks=True)
 
-    assert (repo / "backlog" / "milestones" / "Alpha.md").exists()
+    assert (repo / "backlog" / "milestones" / "m-1 - alpha.md").exists()
     assert not (repo / "backlog" / "milestones" / "Beta.md").exists()
     assert first_task.read_text(encoding="utf-8") == original_first_source
     assert second_task.read_text(encoding="utf-8") == original_second_source
@@ -500,7 +636,7 @@ def test_remove_rolls_back_task_refs_when_task_write_fails(tmp_path, monkeypatch
     with pytest.raises(OSError, match="simulated task write failure"):
         service.remove_milestone("Alpha", clear_tasks=True)
 
-    assert (repo / "backlog" / "milestones" / "Alpha.md").exists()
+    assert (repo / "backlog" / "milestones" / "m-1 - alpha.md").exists()
     assert first_task.read_text(encoding="utf-8") == original_first_source
     assert second_task.read_text(encoding="utf-8") == original_second_source
 

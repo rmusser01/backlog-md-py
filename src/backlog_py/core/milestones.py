@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,12 +59,20 @@ class MilestoneService:
             project.root, project.backlog_dir / "archive" / "milestones"
         )
 
-    def add_milestone(self, name: str, description: str = "") -> MilestoneRecord:
-        target = self._active_path(name)
-        if target.exists():
-            raise MilestoneMutationError(f"Milestone already exists: {name}")
-        source = _render_milestone({"name": name}, description)
+    def add_milestone(
+        self, name: str, description: str = "", *, due_date: str | None = None
+    ) -> MilestoneRecord:
+        title = _required_title(name)
+        milestone_id = self._next_milestone_id()
+        normalized_due_date = _normalize_due_date(due_date) if due_date else None
+        frontmatter = {"id": milestone_id, "title": title}
+        if normalized_due_date is not None:
+            frontmatter["due_date"] = normalized_due_date
+        source = _render_milestone(frontmatter, f"## Description\n\n{description.strip()}")
         parse_task_markdown(source)
+        target = self._current_active_path(milestone_id, title)
+        if target.exists():
+            raise MilestoneMutationError(f"Milestone already exists: {title}")
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_text(target, source)
         return _load_milestone(self.project, target, archived=False)
@@ -158,6 +167,44 @@ class MilestoneService:
             return assert_path_within_base(self.active_dir, path)
         except PathContainmentError as exc:
             raise MilestoneMutationError(str(exc)) from exc
+
+    def _current_active_path(self, milestone_id: str, title: str) -> Path:
+        path = self.active_dir / f"{milestone_id} - {_safe_current_filename_title(title)}.md"
+        try:
+            return assert_path_within_base(self.active_dir, path)
+        except PathContainmentError as exc:
+            raise MilestoneMutationError(str(exc)) from exc
+
+    def _next_milestone_id(self) -> str:
+        reserved: set[int] = set()
+        for directory in (self.active_dir, self.archive_dir):
+            if not directory.is_dir():
+                continue
+            for path in directory.glob("*.md"):
+                filename_match = _CURRENT_FILENAME_RE.match(path.stem)
+                if filename_match:
+                    reserved.add(int(filename_match.group(1)))
+                try:
+                    trusted_path = assert_path_within_base(directory, path)
+                except PathContainmentError as exc:
+                    raise MilestoneMutationError(str(exc)) from exc
+                try:
+                    frontmatter = parse_task_markdown(
+                        trusted_path.read_text(encoding="utf-8-sig")
+                    ).frontmatter
+                except (OSError, ValueError):
+                    continue
+                raw_id = frontmatter.get("id")
+                raw_title = frontmatter.get("title")
+                if (
+                    "name" not in frontmatter
+                    and isinstance(raw_id, str)
+                    and _CURRENT_ID_RE.fullmatch(raw_id)
+                    and isinstance(raw_title, str)
+                    and raw_title.strip()
+                ):
+                    reserved.add(int(raw_id[2:]))
+        return f"m-{max(reserved, default=0) + 1}"
 
     def _archive_path(self, filename: str) -> Path:
         path = self.archive_dir / filename
@@ -263,8 +310,9 @@ def _load_milestone(project: BacklogProject, path: Path, *, archived: bool) -> M
     )
 
 
-_CURRENT_FILENAME_RE = re.compile(r"^m-[0-9]+(?:$| - )", re.IGNORECASE)
-_CURRENT_ID_RE = re.compile(r"^m-[0-9]+$", re.IGNORECASE)
+_CURRENT_FILENAME_RE = re.compile(r"^m-([0-9]+)(?:\s+-|$)", re.IGNORECASE | re.ASCII)
+_CURRENT_ID_RE = re.compile(r"^m-[0-9]+$", re.IGNORECASE | re.ASCII)
+_FORBIDDEN_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\\\|?*]')
 
 
 def _description_from_body(content: str) -> str:
@@ -327,6 +375,37 @@ def _slug_name(name: str) -> str:
     if not slug:
         raise MilestoneMutationError("Milestone name is required")
     return slug
+
+
+def _required_title(name: str) -> str:
+    if not isinstance(name, str) or not (title := name.strip()):
+        raise MilestoneMutationError("Milestone title is required")
+    return title
+
+
+def _safe_current_filename_title(title: str) -> str:
+    safe_title = _FORBIDDEN_FILENAME_CHARS_RE.sub("", title).strip()
+    safe_title = re.sub(r"\s+", "-", safe_title).lower()[:50]
+    return safe_title or "milestone"
+
+
+def _normalize_due_date(due_date: str) -> str:
+    if not isinstance(due_date, str):
+        raise MilestoneMutationError("Milestone due date must be a date and time")
+    value = due_date.strip()
+    if not re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}", value):
+        raise MilestoneMutationError("Milestone due date must include a date and time")
+    if value.endswith("Z"):
+        value = f"{value[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise MilestoneMutationError("Milestone due date must be a valid ISO date and time") from exc
+    return parsed.strftime("%Y-%m-%d %H:%M")
 
 
 def _name_from_filename(path: Path) -> str:
