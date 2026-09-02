@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from base64 import b64decode, urlsafe_b64encode
+from binascii import Error as BinasciiError
 from collections import deque
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -14,13 +16,21 @@ from html import escape
 from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Mapping, Sequence
+from pathlib import Path
+from typing import Mapping, Sequence, TypedDict
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
+from backlog_py.core.errors import NotFoundError
+from backlog_py.core.milestones import (
+    MilestoneConflictError,
+    MilestoneMutationError,
+    MilestoneRecord,
+    MilestoneService,
+)
 from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import (
     MutableRepository,
@@ -96,6 +106,18 @@ _BROWSER_CONFIG_SETTING_KEYS = frozenset(
         "zeroPaddedIds",
     )
 )
+
+
+class _MilestoneCreateKwargs(TypedDict):
+    name: str
+    description: str
+    due_date: str | None
+
+
+class _MilestoneEditKwargs(TypedDict, total=False):
+    title: str
+    description: str
+    due_date: str | None
 
 
 @dataclass(frozen=True)
@@ -414,6 +436,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 {"items": get_definition_of_done_defaults(self.server.project)},
             )
             return
+        if path in {"/api/milestones", "/api/milestones/"}:
+            try:
+                milestone_payload = _milestone_list_payload(self.server.project)
+            except Exception as exc:
+                self._send_readonly_listing_error("milestones", exc)
+                return
+            self._send_json(HTTPStatus.OK, milestone_payload)
+            return
         if path in {"/api/docs", "/api/docs/"}:
             try:
                 payload = _document_list_payload(self.server.project)
@@ -563,6 +593,104 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 return
             self._send_json(HTTPStatus.OK, {"items": config.definition_of_done or []})
+            return
+
+        if path in {"/api/milestones", "/api/milestones/"}:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            try:
+                milestone_create_kwargs = _milestone_create_kwargs_from_payload(self._read_json_body())
+
+                def create_milestone() -> tuple[MilestoneRecord, int]:
+                    record = MilestoneService(self.server.project).add_milestone(**milestone_create_kwargs)
+                    return record, _milestone_reference_count(self.server.project, record)
+
+                milestone, reference_count = with_project_write_lock(
+                    self.server.project,
+                    "browser_milestone_create",
+                    create_milestone,
+                )
+            except MilestoneConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
+            except (json.JSONDecodeError, MilestoneMutationError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.CREATED,
+                {"milestone": _milestone_payload(milestone, task_reference_count=reference_count)},
+            )
+            return
+
+        milestone_action = _milestone_action_endpoint(path)
+        if milestone_action is not None:
+            if not self._origin_allowed():
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
+                return
+            raw_key, action = milestone_action
+            try:
+                reference = _milestone_reference_from_key(raw_key)
+                if action == "edit":
+                    milestone_edit_kwargs = _milestone_edit_kwargs_from_payload(self._read_json_body())
+
+                    def edit_milestone() -> tuple[MilestoneRecord, int]:
+                        service = MilestoneService(self.server.project)
+                        _resolve_active_milestone_api_key(service, raw_key, reference)
+                        record = service.edit_milestone(reference, **milestone_edit_kwargs)
+                        return record, _milestone_reference_count(self.server.project, record)
+
+                    milestone, reference_count = with_project_write_lock(
+                        self.server.project,
+                        "browser_milestone_edit",
+                        edit_milestone,
+                    )
+                elif action == "archive":
+                    _require_json_object(self._read_json_body())
+
+                    def archive_milestone() -> tuple[MilestoneRecord, int]:
+                        service = MilestoneService(self.server.project)
+                        _resolve_active_milestone_api_key(service, raw_key, reference)
+                        record = service.archive_milestone(reference)
+                        return record, _milestone_reference_count(self.server.project, record)
+
+                    milestone, reference_count = with_project_write_lock(
+                        self.server.project,
+                        "browser_milestone_archive",
+                        archive_milestone,
+                    )
+                else:
+                    task_handling = _milestone_task_handling_from_payload(self._read_json_body())
+
+                    def remove_milestone() -> tuple[MilestoneRecord, int]:
+                        service = MilestoneService(self.server.project)
+                        record = _resolve_active_milestone_api_key(service, raw_key, reference)
+                        count = _milestone_reference_count(self.server.project, record)
+                        if count and task_handling is None:
+                            raise MilestoneConflictError(
+                                "Referenced milestone removal requires taskHandling to be keep or clear"
+                            )
+                        removed = service.remove_milestone(reference, clear_tasks=task_handling == "clear")
+                        return removed, count
+
+                    milestone, reference_count = with_project_write_lock(
+                        self.server.project,
+                        "browser_milestone_remove",
+                        remove_milestone,
+                    )
+            except MilestoneConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
+            except NotFoundError as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            except (json.JSONDecodeError, MilestoneMutationError, TaskMutationError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"milestone": _milestone_payload(milestone, task_reference_count=reference_count)},
+            )
             return
 
         if path == "/api/tasks/sort":
@@ -1184,6 +1312,61 @@ def _render_queue_category_filter(*, categories: list[object], selected: str | N
     )
 
 
+def _milestone_list_payload(project: BacklogProject) -> dict[str, object]:
+    records = MilestoneService(project).list_milestones(include_archived=True)
+    reference_counts = _milestone_reference_counts(project, records)
+    return {
+        "milestones": [
+            _milestone_payload(record, task_reference_count=reference_counts.get(record.path, 0))
+            for record in records
+        ]
+    }
+
+
+def _milestone_payload(record: MilestoneRecord, *, task_reference_count: int) -> dict[str, object]:
+    return {
+        "key": _milestone_api_key(record),
+        "id": record.id,
+        "title": record.title,
+        "name": record.name,
+        "dueDate": record.due_date,
+        "description": record.description,
+        "format": record.format,
+        "path": record.path_relative,
+        "archived": record.archived,
+        "taskReferenceCount": task_reference_count,
+    }
+
+
+def _milestone_reference_count(project: BacklogProject, record: MilestoneRecord) -> int:
+    records = MilestoneService(project).list_milestones(include_archived=True)
+    return _milestone_reference_counts(project, records).get(record.path, 0)
+
+
+def _milestone_reference_counts(
+    project: BacklogProject,
+    records: list[MilestoneRecord],
+) -> dict[Path, int]:
+    counts = {record.path: 0 for record in records}
+    service = MilestoneService(project)
+    repository = ReadOnlyRepository(
+        project,
+        refresh_remote_refs=False,
+        include_active_branch_snapshots=False,
+    )
+    for task in repository.list_tasks():
+        raw_reference = task.parsed.frontmatter.get("milestone")
+        if isinstance(raw_reference, bool) or not isinstance(raw_reference, (str, int)):
+            continue
+        try:
+            resolved = service.resolve_milestone(str(raw_reference), include_archived=True)
+        except (MilestoneConflictError, NotFoundError):
+            continue
+        if resolved.path in counts:
+            counts[resolved.path] += 1
+    return counts
+
+
 def _document_list_payload(project: BacklogProject) -> list[dict[str, object]]:
     return [_document_summary_payload(document) for document in DocumentService(project).list_documents()]
 
@@ -1612,6 +1795,60 @@ def _endpoint_segment(path: str, prefix: str, suffix: str = "", *, allow_separat
     return identifier
 
 
+def _milestone_action_endpoint(path: str) -> tuple[str, str] | None:
+    for action in ("edit", "archive", "remove"):
+        key = _endpoint_segment(path, "/api/milestones/", f"/{action}")
+        if key is not None:
+            return key, action
+    return None
+
+
+def _legacy_milestone_key(name: str) -> str:
+    token = urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"legacy-{token}"
+
+
+def _legacy_name_from_key(key: str) -> str:
+    token = key.removeprefix("legacy-") if key.startswith("legacy-") else ""
+    if not token or re.fullmatch(r"[A-Za-z0-9_-]+", token, flags=re.ASCII) is None:
+        raise ValueError("Invalid milestone key")
+    try:
+        raw_name = b64decode(token + "=" * (-len(token) % 4), altchars=b"-_", validate=True)
+        name = raw_name.decode("utf-8")
+    except (BinasciiError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Invalid milestone key") from exc
+    if not name or _legacy_milestone_key(name) != key:
+        raise ValueError("Invalid milestone key")
+    return name
+
+
+def _milestone_api_key(record: MilestoneRecord) -> str:
+    return record.id if record.id is not None else _legacy_milestone_key(record.name)
+
+
+def _milestone_reference_from_key(key: str) -> str:
+    if re.fullmatch(r"m-(?:0|[1-9][0-9]*)", key, flags=re.ASCII):
+        return key
+    if key.startswith("legacy-"):
+        return _legacy_name_from_key(key)
+    raise ValueError("Invalid milestone key")
+
+
+def _resolve_active_milestone_api_key(
+    service: MilestoneService,
+    key: str,
+    reference: str,
+) -> MilestoneRecord:
+    record = service.resolve_milestone(reference, include_archived=False)
+    if key.startswith("legacy-"):
+        matches_key = record.format == "legacy" and _legacy_milestone_key(record.name) == key
+    else:
+        matches_key = record.format == "current" and record.id == key
+    if not matches_key:
+        raise NotFoundError(f"Milestone not found: {key}")
+    return record
+
+
 def _status_endpoint_task_id(path: str) -> str | None:
     return _endpoint_segment(path, "/api/tasks/", "/status")
 
@@ -1669,6 +1906,45 @@ def _sort_request_from_payload(payload: object) -> tuple[str, str, str | None]:
     if not isinstance(direction, str) or direction not in {"asc", "desc"}:
         raise ValueError("Created-date sorting requires an asc or desc direction")
     return status, sort, direction
+
+
+def _milestone_create_kwargs_from_payload(payload: object) -> _MilestoneCreateKwargs:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    return {
+        "name": _required_string_field(payload, "title"),
+        "description": _required_text_field(payload, "description") if "description" in payload else "",
+        "due_date": _required_text_field(payload, "dueDate") if "dueDate" in payload else None,
+    }
+
+
+def _milestone_edit_kwargs_from_payload(payload: object) -> _MilestoneEditKwargs:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    edit_kwargs = _MilestoneEditKwargs()
+    if "title" in payload:
+        edit_kwargs["title"] = _required_string_field(payload, "title")
+    if "description" in payload:
+        edit_kwargs["description"] = _required_text_field(payload, "description")
+    if "dueDate" in payload:
+        edit_kwargs["due_date"] = _required_text_field(payload, "dueDate")
+    return edit_kwargs
+
+
+def _milestone_task_handling_from_payload(payload: object) -> str | None:
+    payload = _require_json_object(payload)
+    task_handling = payload.get("taskHandling")
+    if task_handling is None:
+        return None
+    if task_handling not in {"keep", "clear"}:
+        raise ValueError("Request body field taskHandling must be keep or clear")
+    return task_handling
+
+
+def _require_json_object(payload: object) -> dict[object, object]:
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object")
+    return payload
 
 
 def _task_create_kwargs_from_payload(payload: object) -> dict[str, object]:

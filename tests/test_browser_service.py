@@ -1,3 +1,4 @@
+import http.client
 import json
 import shutil
 import urllib.error
@@ -10,6 +11,7 @@ from click.testing import CliRunner
 
 from backlog_py.cli.main import main
 from backlog_py.core.documents import DocumentRecord, DocumentService
+from backlog_py.core.milestones import MilestoneService
 from backlog_py.core.repository import MutableRepository
 from backlog_py.storage.config import get_definition_of_done_defaults, replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
@@ -2690,6 +2692,474 @@ def test_browser_service_rejects_non_loopback_host(tmp_path):
         start_browser_service(project, host="0.0.0.0", port=0)
 
 
+@pytest.mark.parametrize("name", ["Release / Windows", r"Release \\ Windows", "Café % ready"])
+def test_legacy_milestone_api_key_is_one_safe_reversible_segment(name):
+    from backlog_py.browser import service as browser_service
+
+    key = browser_service._legacy_milestone_key(name)
+
+    assert "/" not in key and "\\" not in key and "%" not in key
+    assert browser_service._legacy_name_from_key(key) == name
+
+
+def test_current_milestone_api_key_round_trips_canonically(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    record = MilestoneService(project).add_milestone("Release")
+
+    from backlog_py.browser import service as browser_service
+
+    key = browser_service._milestone_api_key(record)
+
+    assert key == "m-1"
+    assert browser_service._milestone_reference_from_key(key) == "m-1"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "",
+        "1",
+        "M-1",
+        "m-01",
+        "m-١",
+        "legacy-",
+        "legacy-YQ=",
+        "legacy-YQ==",
+        "legacy-%%%%",
+        "legacy-_w",
+    ],
+)
+def test_milestone_key_rejects_malformed_and_noncanonical_tokens(key):
+    from backlog_py.browser import service as browser_service
+
+    with pytest.raises(ValueError, match="milestone key"):
+        browser_service._milestone_reference_from_key(key)
+
+
+def test_browser_milestone_endpoint_lists_active_and_archived_payloads_and_local_reference_counts(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    milestones = MilestoneService(project)
+    current = milestones.add_milestone("Release", "Current scope.", due_date="2026-09-30T17:00Z")
+    MutableRepository(project).edit_task("TASK-1", milestone=current.id)
+    repository = MutableRepository(project)
+    repository.create_task(title="Numeric reference", milestone="1")
+    repository.create_task(title="Title reference", milestone="Release")
+    repository.create_task(title="Stem reference", milestone=current.path.stem)
+    ignored = repository.create_task(title="Completed reference", milestone="m-1")
+    repository.edit_task(ignored.id, status="Done")
+    repository.complete_task(ignored.id)
+    milestones.archive_milestone(current.id or "")
+    _write_browser_legacy_milestone(repo, "Release / Windows", filename="windows.md")
+    MutableRepository(project).create_task(title="Legacy reference", milestone="Release / Windows")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _get_json(f"{service.root_url}/api/milestones")
+    finally:
+        service.shutdown()
+
+    assert isinstance(response, dict)
+    records = {record["title"]: record for record in response["milestones"]}
+    assert set(records) == {"Release", "Release / Windows"}
+    assert records["Release"] == {
+        "key": "m-1",
+        "id": "m-1",
+        "title": "Release",
+        "name": "Release",
+        "dueDate": "2026-09-30 17:00",
+        "description": "Current scope.",
+        "format": "current",
+        "path": "archive/milestones/m-1 - release.md",
+        "archived": True,
+        "taskReferenceCount": 4,
+    }
+    legacy = records["Release / Windows"]
+    assert legacy["key"] == "legacy-UmVsZWFzZSAvIFdpbmRvd3M"
+    assert legacy["id"] is None
+    assert legacy["format"] == "legacy"
+    assert legacy["archived"] is False
+    assert legacy["taskReferenceCount"] == 1
+
+
+def test_browser_milestone_endpoints_use_exact_project_lock_operations(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    operations = []
+
+    from backlog_py.browser import service as browser_service
+
+    original_lock = browser_service.with_project_write_lock
+
+    def tracking_lock(project, operation, fn):
+        operations.append(operation)
+        return original_lock(project, operation, fn)
+
+    monkeypatch.setattr(browser_service, "with_project_write_lock", tracking_lock)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        assert _get_json(f"{service.root_url}/api/milestones") == {"milestones": []}
+        created = _post_json_response(
+            f"{service.root_url}/api/milestones",
+            {"title": "Alpha", "description": "First", "dueDate": "2026-10-01T09:30"},
+        )
+        edited = _post_json_response(
+            f"{service.root_url}/api/milestones/m-1/edit",
+            {"title": "Beta"},
+        )
+        archived = _post_json_response(f"{service.root_url}/api/milestones/m-1/archive", {})
+        disposable = _post_json_response(f"{service.root_url}/api/milestones", {"title": "Disposable"})
+        removed = _post_json_response(f"{service.root_url}/api/milestones/m-2/remove", {})
+    finally:
+        service.shutdown()
+
+    assert created["status"] == 201
+    assert created["body"]["milestone"]["format"] == "current"
+    assert edited["body"]["milestone"]["title"] == "Beta"
+    assert edited["body"]["milestone"]["description"] == "First"
+    assert edited["body"]["milestone"]["dueDate"] == "2026-10-01 09:30"
+    assert archived["body"]["milestone"]["archived"] is True
+    assert disposable["status"] == 201
+    assert removed["body"]["milestone"]["title"] == "Disposable"
+    assert operations == [
+        "browser_milestone_create",
+        "browser_milestone_edit",
+        "browser_milestone_archive",
+        "browser_milestone_create",
+        "browser_milestone_remove",
+    ]
+
+
+def test_browser_milestone_edit_updates_only_present_fields_and_clears_empty_due_date(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone(
+        "Alpha",
+        "Original description.",
+        due_date="2026-10-01 09:30",
+    )
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        title_only = _post_json(
+            f"{service.root_url}/api/milestones/m-1/edit",
+            {"title": "Beta"},
+        )["milestone"]
+        due_date_only = _post_json(
+            f"{service.root_url}/api/milestones/m-1/edit",
+            {"dueDate": ""},
+        )["milestone"]
+    finally:
+        service.shutdown()
+
+    assert title_only["title"] == "Beta"
+    assert title_only["description"] == "Original description."
+    assert title_only["dueDate"] == "2026-10-01 09:30"
+    assert due_date_only["title"] == "Beta"
+    assert due_date_only["description"] == "Original description."
+    assert due_date_only["dueDate"] is None
+
+
+def test_browser_legacy_milestone_key_edits_special_name_without_treating_it_as_a_path(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    path = _write_browser_legacy_milestone(repo, "Release / Windows", filename="windows.md")
+
+    from backlog_py.browser import service as browser_service
+
+    key = browser_service._legacy_milestone_key("Release / Windows")
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/milestones/{key}/edit",
+            {"description": "Updated safely."},
+        )
+    finally:
+        service.shutdown()
+
+    assert response["milestone"]["name"] == "Release / Windows"
+    assert response["milestone"]["description"] == "Updated safely."
+    assert path.exists()
+    assert not (repo / "Release").exists()
+
+
+def test_browser_milestone_remove_without_policy_is_allowed_when_unreferenced(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    added = MilestoneService(project).add_milestone("Unused")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(f"{service.root_url}/api/milestones/m-1/remove", {})
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["milestone"]["taskReferenceCount"] == 0
+    assert not added.path.exists()
+
+
+@pytest.mark.parametrize("task_handling", ["keep", "clear"])
+def test_browser_referenced_milestone_remove_requires_explicit_valid_policy(tmp_path, task_handling):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    added = MilestoneService(project).add_milestone("Used")
+    MutableRepository(project).edit_task("TASK-1", milestone="Used")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json_response(
+            f"{service.root_url}/api/milestones/m-1/remove",
+            {"taskHandling": task_handling},
+        )
+    finally:
+        service.shutdown()
+
+    source = _task_file(repo).read_text(encoding="utf-8")
+    assert response["status"] == 200
+    assert not added.path.exists()
+    if task_handling == "clear":
+        assert "milestone:" not in source
+    else:
+        assert "milestone: Used" in source
+
+
+def test_browser_referenced_milestone_remove_without_policy_returns_409_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone("Used")
+    MutableRepository(project).edit_task("TASK-1", milestone="1")
+    before = _backlog_snapshot(repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/milestones/m-1/remove", {})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 409
+    assert _backlog_snapshot(repo) == before
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "expected_status"),
+    [
+        ("/api/milestones", {"title": "Release", "dueDate": "not-a-date"}, 400),
+        ("/api/milestones/m-1/edit", {"dueDate": "2026-09-01"}, 400),
+        ("/api/milestones/m-999/edit", {"title": "Missing"}, 404),
+        ("/api/milestones/legacy-/edit", {"title": "Invalid"}, 400),
+        ("/api/milestones/m-01/archive", {}, 400),
+        ("/api/milestones/m-1/remove", {"taskHandling": "delete"}, 400),
+    ],
+)
+def test_browser_milestone_endpoint_maps_validation_and_missing_errors_without_mutation(
+    tmp_path,
+    path,
+    payload,
+    expected_status,
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone("Release")
+    before = _backlog_snapshot(repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}{path}", payload)
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == expected_status
+    assert _backlog_snapshot(repo) == before
+
+
+def test_browser_milestone_duplicate_and_ambiguous_references_return_409_without_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone("Release")
+
+    from backlog_py.browser import service as browser_service
+
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before_duplicate = _backlog_snapshot(repo)
+        with pytest.raises(urllib.error.HTTPError) as duplicate:
+            _post_json(f"{service.root_url}/api/milestones", {"title": "Release"})
+        assert duplicate.value.code == 409
+        assert _backlog_snapshot(repo) == before_duplicate
+
+        _write_browser_legacy_milestone(repo, "Ambiguous", filename="first.md")
+        _write_browser_legacy_milestone(repo, "Ambiguous", filename="second.md")
+        before_ambiguous = _backlog_snapshot(repo)
+        key = browser_service._legacy_milestone_key("Ambiguous")
+        with pytest.raises(urllib.error.HTTPError) as ambiguous:
+            _post_json(f"{service.root_url}/api/milestones/{key}/edit", {"description": "No"})
+        assert ambiguous.value.code == 409
+        assert _backlog_snapshot(repo) == before_ambiguous
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.parametrize("key_kind", ["current", "legacy"])
+def test_browser_stale_milestone_key_cannot_mutate_a_different_record_format(tmp_path, key_kind):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser import service as browser_service
+
+    if key_kind == "current":
+        _write_browser_legacy_milestone(repo, "m-1", filename="legacy.md")
+        key = "m-1"
+    else:
+        MilestoneService(project).add_milestone("Former legacy")
+        key = browser_service._legacy_milestone_key("Former legacy")
+    before = _backlog_snapshot(repo)
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(f"{service.root_url}/api/milestones/{key}/edit", {"description": "Wrong target"})
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 404
+    assert _backlog_snapshot(repo) == before
+
+
+def test_browser_milestone_reference_counts_only_uniquely_resolved_aliases(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone("Shared")
+    MutableRepository(project).edit_task("TASK-1", milestone="m-1")
+    MutableRepository(project).create_task(title="Ambiguous reference", milestone="Shared")
+    _write_browser_legacy_milestone(repo, "Shared", filename="legacy.md")
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        milestones = _get_json(f"{service.root_url}/api/milestones")["milestones"]
+    finally:
+        service.shutdown()
+
+    current = next(record for record in milestones if record["format"] == "current")
+    legacy = next(record for record in milestones if record["format"] == "legacy")
+    assert current["taskReferenceCount"] == 1
+    assert legacy["taskReferenceCount"] == 0
+
+
+def test_browser_milestone_archive_rejects_invalid_json_before_mutation(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone("Release")
+    before = _backlog_snapshot(repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    request = urllib.request.Request(
+        f"{service.root_url}/api/milestones/m-1/archive",
+        data=b"not-json",
+        headers={
+            "Content-Type": "application/json",
+            "Origin": service.root_url.rstrip("/"),
+        },
+        method="POST",
+    )
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(request, timeout=2)
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _backlog_snapshot(repo) == before
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/api/milestones", {"title": "Blocked"}),
+        ("/api/milestones/m-1/edit", {"title": "Blocked"}),
+        ("/api/milestones/m-1/archive", {}),
+        ("/api/milestones/m-1/remove", {}),
+    ],
+)
+@pytest.mark.parametrize("rejection", ["origin", "missing_origin", "host"])
+def test_browser_milestone_mutations_reject_cross_origin_and_foreign_host_without_mutation(
+    tmp_path,
+    path,
+    payload,
+    rejection,
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone("Release")
+    before = _backlog_snapshot(repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        if rejection == "origin":
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                _post_json(f"{service.root_url}{path}", payload, origin="https://attacker.example")
+            status = exc.value.code
+        elif rejection == "missing_origin":
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                _post_json(f"{service.root_url}{path}", payload, omit_origin=True)
+            status = exc.value.code
+        else:
+            response = _raw_browser_request(
+                service,
+                "POST",
+                path,
+                host_header=f"attacker.example:{service.port}",
+                origin=f"http://attacker.example:{service.port}",
+                payload=payload,
+            )
+            status = response["status"]
+    finally:
+        service.shutdown()
+
+    assert status == 403
+    assert _backlog_snapshot(repo) == before
+
+
+def test_browser_milestone_get_rejects_foreign_host(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _raw_browser_request(
+            service,
+            "GET",
+            "/api/milestones",
+            host_header=f"attacker.example:{service.port}",
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 403
+
+
 def test_browser_command_uses_config_default_port_and_no_open(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -2740,6 +3210,49 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE_REPO, repo)
     return repo
+
+
+def _write_browser_legacy_milestone(repo: Path, name: str, *, filename: str) -> Path:
+    path = repo / "backlog" / "milestones" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\nname: {name}\n---\n\nLegacy scope.\n", encoding="utf-8")
+    return path
+
+
+def _backlog_snapshot(repo: Path) -> dict[str, bytes]:
+    backlog = repo / "backlog"
+    return {
+        path.relative_to(backlog).as_posix(): path.read_bytes()
+        for path in sorted(backlog.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _raw_browser_request(
+    service,
+    method: str,
+    path: str,
+    *,
+    host_header: str,
+    origin: str | None = None,
+    payload: object | None = None,
+) -> dict[str, object]:
+    connection = http.client.HTTPConnection(service.host, service.port, timeout=5)
+    try:
+        connection.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+        connection.putheader("Host", host_header)
+        if origin is not None:
+            connection.putheader("Origin", origin)
+        body = None
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders(body)
+        with connection.getresponse() as response:
+            return {"status": response.status, "body": response.read().decode("utf-8")}
+    finally:
+        connection.close()
 
 
 def _task_sources(repo: Path) -> dict[str, bytes]:
