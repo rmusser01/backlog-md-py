@@ -1339,6 +1339,32 @@ def test_current_edit_preserves_target_replaced_after_move_before_load(tmp_path,
     assert target.read_bytes() == concurrent_target
 
 
+def test_current_edit_rejects_valid_target_replaced_during_load(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    concurrent_target = b"---\nid: m-1\ntitle: Concurrent\n---\n\n## Description\n\nConcurrent\n"
+    target = added.path.parent / "m-1 - beta.md"
+    original_loader = service._load_milestone
+    replaced = False
+
+    def replace_target_during_load(path: Path, *, archived: bool):
+        nonlocal replaced
+        if path == target and not replaced:
+            replaced = True
+            target.write_bytes(concurrent_target)
+        return original_loader(path, archived=archived)
+
+    monkeypatch.setattr(service, "_load_milestone", replace_target_during_load)
+
+    with pytest.raises(MilestoneMutationError, match="conflict"):
+        service.edit_milestone("m-1", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == concurrent_target
+
+
 def test_current_edit_restores_original_before_inspecting_redirected_target(tmp_path, monkeypatch):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -1543,6 +1569,33 @@ def test_archive_preserves_target_replaced_after_move_before_load(tmp_path, monk
     monkeypatch.setattr(service, "_load_milestone", replace_target_before_load)
 
     with pytest.raises(UnicodeDecodeError):
+        service.archive_milestone("m-1")
+
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == concurrent_target
+
+
+def test_archive_rejects_valid_target_replaced_during_load(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    concurrent_target = b"---\nid: m-1\ntitle: Concurrent\n---\n\n## Description\n\nConcurrent\n"
+    target = repo / "backlog" / "archive" / "milestones" / added.path.name
+    original_loader = service._load_milestone
+    replaced = False
+
+    def replace_target_during_load(path: Path, *, archived: bool):
+        nonlocal replaced
+        if path == target and not replaced:
+            replaced = True
+            target.unlink()
+            target.write_bytes(concurrent_target)
+        return original_loader(path, archived=archived)
+
+    monkeypatch.setattr(service, "_load_milestone", replace_target_during_load)
+
+    with pytest.raises(MilestoneMutationError, match="conflict"):
         service.archive_milestone("m-1")
 
     assert added.path.read_bytes() == original_source
