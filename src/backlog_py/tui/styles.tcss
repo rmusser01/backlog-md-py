@@ -49,6 +49,14 @@ BacklogTuiApp {
     height: 1fr;
 }
 
+#board-loading {
+    /* The strip is width:auto, so an unsized child collapses to 0x0 and the
+       message never draws. Give it the same width a column would take. */
+    width: 28;
+    height: auto;
+    padding: 1 2;
+}
+
 .board-column {
     width: 28;
     min-width: 24;

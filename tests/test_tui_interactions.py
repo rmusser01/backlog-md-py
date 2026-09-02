@@ -1,4 +1,5 @@
 import tempfile
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1222,3 +1223,56 @@ def _preserved_scratch(message: str) -> Path:
     """The path an ``EditorConflictError`` points the user at."""
     assert "preserved at " in message, message
     return Path(message.split("preserved at ")[1].split()[0].rstrip("."))
+
+
+class _BlockingSource(_MutableSource):
+    """A source whose first board load waits, so the loading state is observable."""
+
+    def __init__(self, snapshot: BoardSnapshot):
+        super().__init__(snapshot)
+        self.gate = threading.Event()
+
+    def load_board(self) -> BoardSnapshot:
+        self.gate.wait(timeout=5)
+        return super().load_board()
+
+
+@pytest.mark.asyncio
+async def test_board_shows_a_loading_placeholder_until_the_first_snapshot():
+    """An empty board reads as a hang, and the first scan takes seconds.
+
+    On a 2300-task project the chrome paints at 0.2s and the board at 2.3s, with
+    nothing in between to say work was happening.
+    """
+    source = _BlockingSource(_snapshot())
+    app = BacklogTuiApp(project=_project(), data_source=source)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert len(app.query("#board-loading")) == 1, "nothing tells the user the board is loading"
+
+        source.gate.set()
+        await pilot.pause()
+        await pilot.pause()
+
+        assert len(app.query("#board-loading")) == 0, "the placeholder outlived the load"
+        assert app.query("BoardColumn"), "the board should have replaced it"
+
+
+@pytest.mark.asyncio
+async def test_the_loading_placeholder_is_actually_visible():
+    """It has to occupy space, or it is only a comforting thought.
+
+    The column strip is `width: auto`, so an unsized child collapses to 0x0 and
+    draws nothing at all -- which is exactly what the first two attempts at this
+    did, while passing every test that only checked the widget existed.
+    """
+    app = BacklogTuiApp(project=_project(), data_source=_MutableSource(_snapshot()))
+
+    async with app.run_test(size=(100, 30)):
+        placeholder = app.query("#board-loading").first()
+
+        assert placeholder.visible
+        assert placeholder.size.width > 0 and placeholder.size.height > 0, (
+            f"the placeholder occupies no space: {placeholder.size}"
+        )

@@ -325,3 +325,117 @@ def test_worktree_probe_is_rechecked_after_its_ttl(
     _git_init(parent)
 
     assert git_module._is_git_worktree(child) is True, "worktree probe served a stale cached answer"
+
+
+def _branch_snapshot_repo(tmp_path: Path, task_count: int) -> object:
+    """A project whose `feature` branch carries `task_count` task files."""
+    from backlog_py.storage.project import discover_project
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git_init(repo)
+    project = init_project(repo).project
+    _task(project, "task-1 - seed.md")
+    _commit(repo, "seed")
+
+    _git(repo, "checkout", "-q", "-b", "feature")
+    for index in range(2, task_count + 2):
+        _task(project, f"task-{index} - branch.md")
+    _commit(repo, "branch tasks")
+    _git(repo, "checkout", "-q", "main")
+
+    config = project.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "check_active_branches: false", "check_active_branches: true"
+        ),
+        encoding="utf-8",
+    )
+    return discover_project(Path.cwd(), explicit_cwd=repo)
+
+
+def _count_git_processes(monkeypatch: pytest.MonkeyPatch, project) -> int:
+    calls = 0
+    real_run = subprocess.run
+
+    def counting_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(git_module.subprocess, "run", counting_run)
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+    assert snapshots, "no branch snapshots were loaded, so the count proves nothing"
+    return calls
+
+
+def test_branch_snapshots_do_not_spawn_git_per_task_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard for #168.
+
+    Reading one branch cost two subprocesses per task file (`git log` for the
+    timestamp, `git show` for the content). On a real project that was ~304,000
+    spawns for 67 branches and `overview` never finished.
+    """
+    small = _count_git_processes(monkeypatch, _branch_snapshot_repo(tmp_path / "small", 2))
+    large = _count_git_processes(monkeypatch, _branch_snapshot_repo(tmp_path / "large", 25))
+
+    assert small == large, f"git processes scale with task count ({small} for 2, {large} for 25)"
+
+
+def test_branch_snapshots_still_return_content_and_timestamps(tmp_path: Path) -> None:
+    project = _branch_snapshot_repo(tmp_path, 2)
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert {Path(snapshot.relative_path).name for snapshot in snapshots} >= {
+        "task-2 - branch.md",
+        "task-3 - branch.md",
+    }
+    for snapshot in snapshots:
+        assert snapshot.source.startswith("---\n"), "task markdown was not read back intact"
+        assert snapshot.committed_at > 0, "snapshot carries no commit timestamp"
+
+
+def test_branch_snapshots_read_each_shared_blob_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Branches share task files, so content is fetched per blob id, not per entry.
+
+    On a real project this collapsed 143,080 (ref, path) entries into 2,546
+    unique blobs, and the whole content read into 0.1s.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git_init(repo)
+    project_root = init_project(repo).project
+    _task(project_root, "task-1 - shared.md")
+    _commit(repo, "seed")
+    for name in ("alpha", "beta", "gamma"):
+        _git(repo, "checkout", "-q", "-b", name)
+        _git(repo, "checkout", "-q", "main")
+    config = project_root.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "check_active_branches: false", "check_active_branches: true"
+        ),
+        encoding="utf-8",
+    )
+
+    from backlog_py.storage.project import discover_project
+
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    requested: list[bytes] = []
+    real_bytes = git_module._run_git_bytes
+
+    def recording(work_dir, *args, stdin: bytes):
+        requested.append(stdin)
+        return real_bytes(work_dir, *args, stdin=stdin)
+
+    monkeypatch.setattr(git_module, "_run_git_bytes", recording)
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert len(snapshots) == 3, "each branch should still contribute its own snapshot"
+    assert len(requested) == 1, "content must be read in one cat-file process for the whole scan"
+    assert len(requested[0].split()) == 1, "the shared blob was requested more than once"

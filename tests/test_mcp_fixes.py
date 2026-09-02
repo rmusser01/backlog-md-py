@@ -25,6 +25,11 @@ def _project(tmp_path: Path):
     return init_project(tmp_path, no_git=True).project
 
 
+def _result_text(response) -> str:
+    """The text payload of a tools/call response."""
+    return response["result"]["content"][0]["text"]
+
+
 def _call_tool(project_root: Path, name: str, /, **arguments):
     arguments["project"] = str(project_root)
     return handle_jsonrpc_message(
@@ -443,3 +448,84 @@ def test_orchestration_validation_error_is_reported_as_a_conflict(tmp_path, monk
     payload = tool_registry.orchestration_record_run(project, task_id="TASK-1", actor="codex", result="succeeded")
 
     assert payload["conflict"]["type"] == "OrchestrationValidationError"
+
+
+def test_a_write_is_visible_to_the_next_read_through_the_scan_cache(tmp_path):
+    """The MCP server is long-lived, so a cached scan must never outlive a write.
+
+    Tool calls each re-read every task file -- 1.5s per call on a 2310-task
+    project -- so reads now share one scan. That is only safe if a mutation
+    through the same server is visible to the very next read.
+    """
+    project = _project(tmp_path)
+
+    _call_tool(tmp_path, "task_create", title="First task")
+    before = _call_tool(tmp_path, "task_list")
+    _call_tool(tmp_path, "task_create", title="Second task")
+    after = _call_tool(tmp_path, "task_list")
+
+    titles_before = _result_text(before)
+    titles_after = _result_text(after)
+    assert "Second task" not in titles_before
+    assert "Second task" in titles_after, "a cached scan hid a task this server just created"
+
+    task_id = json.loads(titles_after)[0]["id"]
+    _call_tool(tmp_path, "task_edit", task_id=task_id, title="Renamed by the same server")
+    assert "Renamed by the same server" in _result_text(_call_tool(tmp_path, "task_list")), (
+        "a cached scan hid an edit this server just made"
+    )
+    assert project.root == tmp_path
+
+
+def test_an_edit_made_outside_the_server_is_picked_up(tmp_path):
+    """Files change under the server too -- an editor, another agent, a merge."""
+    _project(tmp_path)
+    _call_tool(tmp_path, "task_create", title="Original title")
+
+    task_file = next((tmp_path / "backlog" / "tasks").glob("*.md"))
+    task_file.write_text(
+        task_file.read_text(encoding="utf-8").replace("Original title", "Changed on disk"),
+        encoding="utf-8",
+    )
+
+    assert "Changed on disk" in _result_text(_call_tool(tmp_path, "task_list"))
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("task_view", {"taskId": "TASK-1"}),
+        ("task_edit", {"taskId": "TASK-1", "title": "Renamed through camelCase"}),
+        ("task_archive", {"taskId": "TASK-1"}),
+    ],
+)
+def test_task_tools_accept_the_camelcase_spelling(tmp_path, tool, arguments):
+    """`taskId` is the spelling a client guesses; it used to be rejected outright."""
+    _project(tmp_path)
+    _call_tool(tmp_path, "task_create", title="First task")
+
+    response = _call_tool(tmp_path, tool, **arguments)
+
+    assert "error" not in response, response.get("error")
+    assert response["result"]["isError"] is False
+
+
+def test_snake_case_still_works_after_aliasing(tmp_path):
+    """Adding an alias must not break the spelling the schema always advertised."""
+    _project(tmp_path)
+    _call_tool(tmp_path, "task_create", title="First task")
+
+    response = _call_tool(tmp_path, "task_view", task_id="TASK-1")
+
+    assert "error" not in response
+    assert "First task" in _result_text(response)
+
+
+def test_omitting_the_id_entirely_still_says_which_argument_is_missing(tmp_path):
+    """Accepting two spellings must not turn a missing id into a confusing error."""
+    _project(tmp_path)
+
+    response = _call_tool(tmp_path, "task_view")
+
+    assert response["error"]["code"] == -32602
+    assert "task_id" in response["error"]["message"]

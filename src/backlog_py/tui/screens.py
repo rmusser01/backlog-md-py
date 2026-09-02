@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, HorizontalScroll
+from textual.widgets import Static
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.tui.models import BoardSnapshot, FilterState, SelectionState, dependency_states
 from backlog_py.tui.widgets import BoardColumn, BoardHeader, FilterBar, TaskInspector
+
+BOARD_LOADING_MESSAGE = "Loading board..."
 
 
 class BoardScreen(Container):
@@ -18,7 +21,12 @@ class BoardScreen(Container):
         yield FilterBar(id="filter-bar")
         with Container(id="board-root"):
             with HorizontalScroll(id="board-columns", classes="board-columns"):
-                yield Horizontal(id="board-column-strip")
+                with Horizontal(id="board-column-strip"):
+                    # The first scan takes seconds on a large project, and an
+                    # empty board reads as a hang. `render_snapshot` clears the
+                    # strip before mounting columns, so this needs no teardown
+                    # of its own and cannot outlive the load it describes.
+                    yield Static(BOARD_LOADING_MESSAGE, id="board-loading")
             yield TaskInspector(id="task-inspector")
 
     async def render_snapshot(

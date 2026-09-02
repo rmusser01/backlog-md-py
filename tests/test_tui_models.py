@@ -434,3 +434,39 @@ def _task_view(
         raw_source=raw_source,
         queue_category=queue_category,
     )
+
+
+def test_board_snapshot_reuses_the_repository_it_was_given(tmp_path, monkeypatch):
+    """The queue lookup must not re-scan a project the caller just scanned.
+
+    `board_snapshot_from_local` built its own OrchestrationService repository,
+    so every TUI board load parsed every task file twice. On a 2300-task project
+    that was 1.61s of a 3.09s board build, and the duplicate-id warnings were
+    printed twice per refresh as a result.
+    """
+    import shutil
+
+    from backlog_py.core import repository as repository_module
+    from backlog_py.core.repository import ReadOnlyRepository
+    from backlog_py.storage.project import discover_project
+    from backlog_py.tui.models import board_snapshot_from_local
+
+    repo = tmp_path / "repo"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "repos" / "basic", repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = ReadOnlyRepository(project)
+    board = repository.board()
+
+    scans = 0
+    real_load = repository_module._load_tasks_from_dir
+
+    def counting(task_dir):
+        nonlocal scans
+        scans += 1
+        return real_load(task_dir)
+
+    monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
+    snapshot = board_snapshot_from_local(project, board, source="local", repository=repository)
+
+    assert scans == 0, f"the snapshot re-read the task files {scans} times"
+    assert any(snapshot.columns.values()), "the snapshot should still carry the board"

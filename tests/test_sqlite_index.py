@@ -41,7 +41,6 @@ def _indexed_source(source: str):
         bucket="tasks",
         relative_path=TASK_RELATIVE_PATH,
         source=source,
-        committed_at=0.0,
     )
 
 

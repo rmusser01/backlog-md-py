@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 
+from backlog_py.runtime.scan_cache import ProjectScanCache
 from backlog_py.core.decisions import DecisionRecord, DecisionService
 from backlog_py.core.documents import DocumentMutationError, DocumentRecord, DocumentService
 from backlog_py.core.errors import NotFoundError
@@ -127,6 +128,12 @@ class _MilestoneEditKwargs(TypedDict, total=False):
 
 
 @dataclass(frozen=True)
+class _CachedBoardPayload:
+    payload: dict[str, object]
+    milestones: tuple[MilestoneRecord, ...]
+
+
+@dataclass(frozen=True)
 class BrowserService:
     """Background browser service used by tests."""
 
@@ -153,6 +160,7 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
     shutdown_in_progress: bool
     shutdown_lock: threading.Lock
     shutdown_requested_at: str | None
+    scan_cache: ProjectScanCache
 
 
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
@@ -167,6 +175,7 @@ def create_browser_server(*, project: BacklogProject, host: str, port: int) -> B
     server.shutdown_in_progress = False
     server.shutdown_requested_at = None
     server.shutdown_lock = threading.Lock()
+    server.scan_cache = ProjectScanCache()
     return server
 
 
@@ -215,21 +224,67 @@ def build_board_payload(
     queue_category_filter: str | None = None,
     milestone_filter: str | None = None,
     label_filters: Sequence[str] | None = None,
+    cache: ProjectScanCache | None = None,
 ) -> dict[str, object]:
-    """Return a JSON-serializable board snapshot for the browser service."""
+    """Return a JSON-serializable board snapshot for the browser service.
+
+    Args:
+        project: The project to render.
+        queue_category_filter: Optional queue category to narrow columns to.
+        milestone_filter: Optional milestone id, name, or title to display.
+        label_filters: Optional labels; a task matching any selected label is displayed.
+        cache: Reuses an unchanged scan and its rendered columns across
+            requests. Without one, every call re-reads and re-renders the whole
+            project, which is what a fresh CLI invocation wants and what an HTTP
+            request emphatically does not.
+
+    Returns:
+        dict: the board payload with the requested view filters applied.
+    """
     project = _refreshed_project(project)
-    repository = ReadOnlyRepository(project, refresh_remote_refs=False)
-    local_repository = MutableRepository(project, refresh_remote_refs=False)
-    local_tasks = local_repository.list_tasks()
-    local_task_signatures = {_task_record_signature(task) for task in local_tasks}
+    if cache is not None:
+        snapshot = cache.board_payload(
+            project,
+            lambda repository: _build_cached_board_payload(project, repository),
+        )
+    else:
+        repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+        snapshot = _build_cached_board_payload(project, repository)
+    return _apply_board_filters(
+        snapshot.payload,
+        queue_category_filter=queue_category_filter,
+        milestone_filter=milestone_filter,
+        label_filters=label_filters,
+        milestones=snapshot.milestones,
+    )
+
+
+def _build_cached_board_payload(
+    project: BacklogProject,
+    repository: ReadOnlyRepository,
+) -> _CachedBoardPayload:
+    milestones = tuple(MilestoneService(project).list_milestones(include_archived=True))
+    return _CachedBoardPayload(
+        payload=_board_payload_body(project, repository, milestones=milestones),
+        milestones=milestones,
+    )
+
+
+def _board_payload_body(
+    project: BacklogProject,
+    repository: ReadOnlyRepository,
+    *,
+    milestones: Sequence[MilestoneRecord],
+) -> dict[str, object]:
+    """Build the unfiltered board payload from one repository scan."""
     board = repository.board()
     board.setdefault(project.config.default_status, [])
-    queue_report = OrchestrationService(project).queue()
+    # Reuse the scan just done: the queue would otherwise build its own
+    # repository and parse every task file a second time, on every request.
+    queue_report = OrchestrationService(project).queue(repository=repository)
     queue_items = {item.task_id.casefold(): item for item in queue_report.items}
-    milestones = MilestoneService(project).list_milestones(include_archived=True)
-    category_filter = _normalize_queue_category_filter(queue_category_filter)
-    normalized_milestone_filter = _normalize_milestone_filter(milestone_filter)
-    normalized_label_filters = _normalize_label_filters(label_filters)
+    local_tasks = repository._task_dir_records_cached(project.backlog_dir / "tasks")
+    local_task_signatures = {_task_record_signature(task) for task in local_tasks}
     unfiltered_columns = {
         status: [
             _task_payload(
@@ -244,7 +299,17 @@ def build_board_payload(
         for status, tasks in board.items()
     }
     unfiltered_tasks = [task for tasks in unfiltered_columns.values() for task in tasks]
-    assignable_statuses = list(local_repository.status_assignment_options(config=project.config))
+    assignable_statuses = list(
+        dict.fromkeys(
+            status
+            for status in [
+                *(project.config.statuses or ()),
+                project.config.default_status,
+                *(task.status for task in local_tasks),
+            ]
+            if status.strip()
+        )
+    )
     milestone_choices = _milestone_filter_choices(milestones, unfiltered_tasks)
     labels_by_key: dict[str, str] = {}
     for task in unfiltered_tasks:
@@ -253,22 +318,7 @@ def build_board_payload(
             if normalized_label:
                 labels_by_key.setdefault(normalized_label.casefold(), normalized_label)
     available_labels = sorted(labels_by_key.values(), key=str.casefold)
-    filtered_columns = {
-        status: [
-            task
-            for task in tasks
-            if _matches_board_filters(
-                task,
-                queue_category=category_filter,
-                milestone=normalized_milestone_filter,
-                labels=normalized_label_filters,
-                milestones=milestones,
-            )
-        ]
-        for status, tasks in unfiltered_columns.items()
-    }
     total_task_count = len(unfiltered_tasks)
-    visible_task_count = sum(len(tasks) for tasks in filtered_columns.values())
     payload: dict[str, object] = {
         "project": {
             "name": project.config.project_name,
@@ -279,26 +329,59 @@ def build_board_payload(
         "statuses": list(board.keys()),
         "assignableStatuses": assignable_statuses,
         "queueCategories": sorted(queue_report.by_category),
+        "queueCategoryFilter": None,
+        "milestoneFilter": None,
+        "labelFilters": [],
+        "availableLabels": available_labels,
+        "milestoneChoices": milestone_choices,
+        "visibleTaskCount": total_task_count,
+        "totalTaskCount": total_task_count,
+        "columns": unfiltered_columns,
+    }
+    payload["revision"] = _board_revision(payload)
+    return payload
+
+
+def _apply_board_filters(
+    payload: Mapping[str, object],
+    *,
+    queue_category_filter: str | None,
+    milestone_filter: str | None,
+    label_filters: Sequence[str] | None,
+    milestones: Sequence[MilestoneRecord],
+) -> dict[str, object]:
+    """Filter a cached board without changing its project-state revision."""
+    category_filter = _normalize_queue_category_filter(queue_category_filter)
+    normalized_milestone_filter = _normalize_milestone_filter(milestone_filter)
+    normalized_label_filters = _normalize_label_filters(label_filters)
+    columns = payload.get("columns")
+    assert isinstance(columns, Mapping)
+    filtered_columns = {
+        status: [
+            task
+            for task in tasks
+            if isinstance(task, Mapping)
+            and _matches_board_filters(
+                task,
+                queue_category=category_filter,
+                milestone=normalized_milestone_filter,
+                labels=normalized_label_filters,
+                milestones=milestones,
+            )
+        ]
+        for status, tasks in columns.items()
+        if isinstance(tasks, list)
+    }
+    total_task_count = sum(len(tasks) for tasks in columns.values() if isinstance(tasks, list))
+    return {
+        **payload,
         "queueCategoryFilter": category_filter,
         "milestoneFilter": normalized_milestone_filter,
         "labelFilters": normalized_label_filters,
-        "availableLabels": available_labels,
-        "milestoneChoices": milestone_choices,
-        "visibleTaskCount": visible_task_count,
+        "visibleTaskCount": sum(len(tasks) for tasks in filtered_columns.values()),
         "totalTaskCount": total_task_count,
         "columns": filtered_columns,
     }
-    payload["revision"] = _board_revision(
-        {
-            **payload,
-            "queueCategoryFilter": None,
-            "milestoneFilter": None,
-            "labelFilters": [],
-            "visibleTaskCount": total_task_count,
-            "columns": unfiltered_columns,
-        }
-    )
-    return payload
 
 
 def _service_status_payload(server: BrowserThreadingHTTPServer) -> dict[str, object]:
@@ -489,6 +572,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
                     milestone_filter=_query_value(parsed_url.query, "milestone"),
                     label_filters=_query_values(parsed_url.query, "labels"),
+                    cache=self.server.scan_cache,
                 ),
             )
             return
@@ -566,17 +650,25 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         task_id = _task_detail_endpoint_task_id(path)
         if task_id is not None:
+            project = _refreshed_project(self.server.project)
+            repository = self.server.scan_cache.repository(project)
             try:
-                project, task, _, mutable = _browser_task_provenance(
-                    self.server.project,
-                    task_id,
-                )
+                task = repository.get_task(task_id)
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {task_id}"})
                 return
+            mutable = _task_record_is_mutable(
+                task,
+                _local_task_signatures(repository, task.path.parent),
+            )
             self._send_json(
                 HTTPStatus.OK,
-                _task_detail_payload(task, project=project, mutable=mutable),
+                _task_detail_payload(
+                    task,
+                    project=project,
+                    mutable=mutable,
+                    repository=repository,
+                ),
             )
             return
         if path in {"", "/", "/index.html"}:
@@ -587,6 +679,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                     queue_category_filter=_query_value(parsed_url.query, "queueCategory"),
                     milestone_filter=_query_value(parsed_url.query, "milestone"),
                     label_filters=_query_values(parsed_url.query, "labels"),
+                    cache=self.server.scan_cache,
                 ),
             )
             return
@@ -1030,7 +1123,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         if shutdown_state["shutdownInProgress"]:
             event = _board_shutdown_sse_event(shutdown_state)
         else:
-            payload = build_board_payload(self.server.project)
+            # The revision poll runs on a timer for every open tab; without the
+            # cache it rebuilt the entire board on each tick.
+            payload = build_board_payload(self.server.project, cache=self.server.scan_cache)
             event = _board_revision_sse_event(str(payload.get("revision", "")))
         data = event.encode("utf-8")
         content_type = "text/event-stream; charset=utf-8"
@@ -1122,6 +1217,7 @@ def render_board_html(
     queue_category_filter: str | None = None,
     milestone_filter: str | None = None,
     label_filters: Sequence[str] | None = None,
+    cache: ProjectScanCache | None = None,
 ) -> str:
     """Render a browser board with basic task creation, editing, and status movement."""
     payload = build_board_payload(
@@ -1129,6 +1225,7 @@ def render_board_html(
         queue_category_filter=queue_category_filter,
         milestone_filter=milestone_filter,
         label_filters=label_filters,
+        cache=cache,
     )
     raw_project = payload.get("project")
     payload_project = raw_project if isinstance(raw_project, dict) else {}
@@ -1747,6 +1844,17 @@ def _task_record_is_mutable(
     return _task_record_signature(task) in local_task_signatures
 
 
+def _local_task_signatures(
+    repository: ReadOnlyRepository,
+    directory: Path,
+) -> set[tuple[str, Path, str]]:
+    """Identify local records in one bucket while reusing parsed task files."""
+    return {
+        _task_record_signature(task)
+        for task in repository._task_dir_records_cached(directory)
+    }
+
+
 def _browser_task_provenance(
     project: BacklogProject,
     task_id: str,
@@ -1783,6 +1891,7 @@ def _task_payload(
     queue_item: OrchestrationQueueItem | None = None,
     milestones: Sequence[MilestoneRecord] | None = None,
     mutable: bool | None = None,
+    repository: ReadOnlyRepository | None = None,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
     try:
@@ -1815,7 +1924,7 @@ def _task_payload(
     if mutable is not None:
         payload["mutable"] = mutable
     if queue_item is None:
-        queue_item = _queue_item_for_task(project, task.id)
+        queue_item = _queue_item_for_task(project, task.id, repository)
     if queue_item is not None:
         payload.update(_queue_item_payload(queue_item))
     return payload
@@ -1826,8 +1935,14 @@ def _task_detail_payload(
     *,
     project: BacklogProject,
     mutable: bool | None = None,
+    repository: ReadOnlyRepository | None = None,
 ) -> dict[str, object]:
-    payload = _task_payload(task, project=project, mutable=mutable)
+    payload = _task_payload(
+        task,
+        project=project,
+        mutable=mutable,
+        repository=repository,
+    )
     description = task.description_or_legacy_body
     implementation_notes = _section_content(task, "IMPLEMENTATION_NOTES")
     final_summary = _section_content(task, "FINAL_SUMMARY")
@@ -2046,9 +2161,20 @@ def _render_task_meta(
     return f'        <div class="task-meta">{"".join(badges)}</div>'
 
 
-def _queue_item_for_task(project: BacklogProject, task_id: str) -> OrchestrationQueueItem | None:
+def _queue_item_for_task(
+    project: BacklogProject,
+    task_id: str,
+    repository: ReadOnlyRepository | None = None,
+) -> OrchestrationQueueItem | None:
+    """One task's queue item, reusing the caller's scan when it has one.
+
+    Answering this still needs the whole queue report, so a caller that has
+    already read the project should hand its repository over rather than pay for
+    a second full scan of every task file.
+    """
     normalized = task_id.casefold()
-    for item in OrchestrationService(project).queue(include_completed=True).items:
+    report = OrchestrationService(project).queue(include_completed=True, repository=repository)
+    for item in report.items:
         if item.task_id.casefold() == normalized:
             return item
     return None

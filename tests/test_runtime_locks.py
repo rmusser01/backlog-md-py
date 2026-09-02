@@ -15,6 +15,7 @@ from backlog_py.runtime.locks import (
     LockTimeoutError,
     ProjectWriteLock,
     init_lock_key,
+    list_runtime_locks,
     project_lock_key,
     prune_stale_locks,
     with_init_lock,
@@ -423,3 +424,59 @@ def _attempt_lock(state_dir: Path, script: str, *args: str) -> str:
         env=env,
     )
     return result.stdout.strip()
+
+
+def test_prune_removes_a_lock_whose_project_directory_is_gone(tmp_path, monkeypatch):
+    """A deleted worktree or a test's temp directory should not linger for a week.
+
+    The age gate protects a lock that something may be about to reacquire. A
+    lock naming a directory that no longer exists has no such future, and until
+    it aged out it kept vanished projects listed in `daemon status`.
+    """
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    gone = tmp_path / "deleted-worktree"
+    gone.mkdir()
+    with ProjectWriteLock(gone, operation="test").acquire():
+        pass
+    gone.rmdir()
+
+    removed = prune_stale_locks(min_age_seconds=7 * 24 * 60 * 60)
+
+    assert removed, "a lock for a directory that no longer exists was kept"
+    assert all(lock.get("project_root") != str(gone) for lock in list_runtime_locks())
+
+
+def test_prune_keeps_a_recent_lock_whose_project_still_exists(tmp_path, monkeypatch):
+    """The age gate still applies to every project that is actually there."""
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    live = tmp_path / "live-project"
+    live.mkdir()
+    with ProjectWriteLock(live, operation="test").acquire():
+        pass
+
+    assert prune_stale_locks(min_age_seconds=7 * 24 * 60 * 60) == []
+
+
+def test_status_omits_a_project_directory_that_no_longer_exists(tmp_path, monkeypatch):
+    """Between prunes a project can vanish; status must not claim otherwise."""
+    from backlog_py.runtime.state import RuntimeRecord, runtime_status
+
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    live = tmp_path / "still-here"
+    gone = tmp_path / "not-anymore"
+    live.mkdir()
+    gone.mkdir()
+    for root in (live, gone):
+        with ProjectWriteLock(root, operation="test").acquire():
+            pass
+    gone.rmdir()
+
+    status = runtime_status(
+        RuntimeRecord(
+            pid=1, host="127.0.0.1", port=1, endpoint="http://127.0.0.1:1/mcp",
+            token="t", started_at="now", version="0", log_path=tmp_path / "log",
+        )
+    )
+
+    assert str(live) in status["known_projects"]
+    assert str(gone) not in status["known_projects"]

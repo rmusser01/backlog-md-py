@@ -327,7 +327,6 @@ class ReadOnlyRepository:
                         bucket=bucket,
                         relative_path=relative_path,
                         source=candidate.task.raw_source,
-                        committed_at=candidate.committed_at,
                     )
                 )
         return sources

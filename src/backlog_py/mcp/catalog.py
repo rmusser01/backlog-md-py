@@ -86,6 +86,26 @@ def _project_schema(
     }
 
 
+def _aliased_schema(
+    properties: dict[str, Any],
+    *,
+    required: tuple[str, ...] = (),
+    either: tuple[tuple[str, str], ...] = (),
+) -> dict[str, Any]:
+    """A project schema where each `(snake, camel)` pair is accepted either way.
+
+    The orchestration tools already advertise both spellings via `anyOf`; this
+    applies the same shape to the rest, so a client that learned `parentTaskId`
+    from one tool is not rejected for sending `taskId` to the next.
+    """
+    schema = _project_schema(properties, required=required)
+    for snake, camel in either:
+        schema.setdefault("allOf", []).append(
+            {"anyOf": [{"required": [snake]}, {"required": [camel]}]}
+        )
+    return schema
+
+
 def _string_or_string_array_schema(description: str) -> dict[str, Any]:
     return {
         "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
@@ -307,7 +327,10 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "task_view",
         "Return one task from a Backlog.md project.",
-        _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
+        _aliased_schema(
+            {"task_id": {"type": "string"}, "taskId": {"type": "string", "description": "Alias for task_id."}},
+            either=(("task_id", "taskId"),),
+        ),
         tool_registry.task_view,
     ),
     ToolDefinition(
@@ -371,9 +394,10 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "task_edit",
         "Edit supported task fields in a Backlog.md project.",
-        _project_schema(
+        _aliased_schema(
             {
                 "task_id": {"type": "string"},
+                "taskId": {"type": "string", "description": "Alias for task_id."},
                 "title": {"type": "string", "description": "Replacement task title."},
                 "description": {"type": "string", "description": "Replacement task description section."},
                 "implementationPlan": {"type": "string", "description": "Replacement implementation plan section."},
@@ -452,20 +476,26 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                     "description": "Alias for onStatusChange.",
                 },
             },
-            required=("project", "task_id"),
+            either=(("task_id", "taskId"),),
         ),
         tool_registry.task_edit,
     ),
     ToolDefinition(
         "task_archive",
         "Move one active task to the project archive.",
-        _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
+        _aliased_schema(
+            {"task_id": {"type": "string"}, "taskId": {"type": "string", "description": "Alias for task_id."}},
+            either=(("task_id", "taskId"),),
+        ),
         tool_registry.task_archive,
     ),
     ToolDefinition(
         "task_complete",
         "Move one Done task to completed storage.",
-        _project_schema({"task_id": {"type": "string"}}, required=("project", "task_id")),
+        _aliased_schema(
+            {"task_id": {"type": "string"}, "taskId": {"type": "string", "description": "Alias for task_id."}},
+            either=(("task_id", "taskId"),),
+        ),
         tool_registry.task_complete,
     ),
     ToolDefinition(
@@ -542,7 +572,13 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "document_view",
         "Return one document by path or id.",
-        _project_schema({"path_or_id": {"type": "string"}}, required=("project", "path_or_id")),
+        _aliased_schema(
+            {
+                "path_or_id": {"type": "string"},
+                "pathOrId": {"type": "string", "description": "Alias for path_or_id."},
+            },
+            either=(("path_or_id", "pathOrId"),),
+        ),
         tool_registry.document_view,
     ),
     ToolDefinition(
@@ -562,9 +598,10 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "document_update",
         "Update a project document.",
-        _project_schema(
+        _aliased_schema(
             {
                 "path_or_id": {"type": "string"},
+                "pathOrId": {"type": "string", "description": "Alias for path_or_id."},
                 "title": {"type": "string", "description": "Replacement document title."},
                 "content": {"type": "string", "description": "Replacement document content."},
                 "directory": {"type": "string", "description": "Docs-relative directory to move the document into."},
@@ -577,7 +614,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                     "Replacement document tags metadata, as an array or comma-separated string.",
                 ),
             },
-            required=("project", "path_or_id"),
+            either=(("path_or_id", "pathOrId"),),
         ),
         tool_registry.document_update,
     ),
@@ -597,13 +634,16 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "milestone_rename",
         "Rename a milestone.",
-        _project_schema(
+        _aliased_schema(
             {
                 "old_name": {"type": "string"},
+                "oldName": {"type": "string", "description": "Alias for old_name."},
                 "new_name": {"type": "string"},
+                "newName": {"type": "string", "description": "Alias for new_name."},
                 "update_tasks": {"type": "boolean", "description": "Update matching task milestone references."},
+                "updateTasks": {"type": "boolean", "description": "Alias for update_tasks."},
             },
-            required=("project", "old_name", "new_name"),
+            either=(("old_name", "oldName"), ("new_name", "newName")),
         ),
         tool_registry.milestone_rename,
     ),
@@ -614,6 +654,7 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             {
                 "name": {"type": "string"},
                 "clear_tasks": {"type": "boolean", "description": "Clear matching task milestone references."},
+                "clearTasks": {"type": "boolean", "description": "Alias for clear_tasks."},
             },
             required=("project", "name"),
         ),
