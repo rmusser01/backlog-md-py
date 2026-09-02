@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from backlog_py.cli.main import main
@@ -37,6 +38,17 @@ def _task_file(repo: Path, task_id: str = "task-1") -> Path:
     matches = sorted((repo / "backlog" / "tasks").glob(f"{task_id} -*.md"))
     assert len(matches) == 1
     return matches[0]
+
+
+def _replace_fixture_task_status(repo: Path, status: str) -> None:
+    path = _task_file(repo)
+    source = re.sub(
+        r"^status: .*?$",
+        f"status: {yaml.safe_dump(status).strip()}",
+        path.read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    path.write_text(source, encoding="utf-8")
 
 
 def _snapshot_tasks(repo: Path) -> dict[Path, str]:
@@ -1481,6 +1493,57 @@ def test_absent_and_empty_status_config_keep_open_core_assignment_compatibility(
         repository.create_task(title="Blank", task_id="TASK-3", status="   ")
     with pytest.raises(TaskMutationError, match="Unknown status"):
         repository.edit_task("TASK-1", status="")
+
+
+@pytest.mark.parametrize("source_kind", ["configured", "default", "local"])
+def test_status_assignment_options_hide_whitespace_only_values_from_each_source(tmp_path, source_kind):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["statuses"] = ["Configured"]
+    raw["defaultStatus"] = "Ready"
+    if source_kind == "configured":
+        raw["statuses"].insert(0, "   ")
+    elif source_kind == "default":
+        raw["defaultStatus"] = "   "
+    else:
+        _replace_fixture_task_status(repo, "   ")
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    repository = MutableRepository(_project(repo))
+
+    options = repository.status_assignment_options()
+
+    assert "   " not in options
+    assert all(option.strip() and repository._status_is_assignable(option) for option in options)
+    assert not repository._status_is_assignable("   ")
+    with pytest.raises(TaskMutationError, match="Unknown status"):
+        repository.create_task(title="Blank", task_id="TASK-2", status=" \t ")
+    with pytest.raises(TaskMutationError, match="Unknown status"):
+        repository.edit_task("TASK-1", status="\t")
+
+
+@pytest.mark.parametrize("source_kind", ["configured", "default", "local"])
+def test_status_assignment_options_preserve_exact_nonblank_spelling_from_each_source(tmp_path, source_kind):
+    repo = _copy_fixture(tmp_path)
+    config_path = repo / "backlog" / "config.yml"
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    exact_status = " Intentional "
+    raw["statuses"] = ["Configured"]
+    raw["defaultStatus"] = "Ready"
+    if source_kind == "configured":
+        raw["statuses"].insert(0, exact_status)
+    elif source_kind == "default":
+        raw["defaultStatus"] = exact_status
+    else:
+        _replace_fixture_task_status(repo, exact_status)
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    repository = MutableRepository(_project(repo))
+
+    assert exact_status in repository.status_assignment_options()
+    assert repository._status_is_assignable(exact_status)
+    created = repository.create_task(title="Exact", task_id="TASK-2", status=exact_status)
+    assert created.status == exact_status
+    assert repository.edit_task("TASK-1", status=exact_status).status == exact_status
 
 
 def test_mcp_bool_string_values_are_parsed_explicitly(tmp_path):

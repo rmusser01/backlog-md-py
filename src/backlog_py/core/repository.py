@@ -846,11 +846,13 @@ class MutableRepository(ReadOnlyRepository):
         current_config = config or load_config(self.project.config_path)
         return tuple(
             dict.fromkeys(
-                [
+                status
+                for status in [
                     *(current_config.statuses or ()),
                     current_config.default_status,
                     *(task.status for task in self.list_tasks()),
                 ]
+                if status.strip()
             )
         )
 

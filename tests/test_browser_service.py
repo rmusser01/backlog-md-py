@@ -3619,6 +3619,66 @@ def test_browser_status_options_separate_rendered_and_assignable_columns(tmp_pat
     assert '<option value="Ready" selected>Ready</option>' in html
 
 
+@pytest.mark.parametrize("source_kind", ["configured", "default", "local"])
+def test_browser_hides_whitespace_only_status_options_from_each_source(tmp_path, source_kind):
+    repo = _copy_fixture_repo(tmp_path)
+    statuses = ["Configured"]
+    default = "Ready"
+    if source_kind == "configured":
+        statuses.insert(0, "   ")
+    elif source_kind == "default":
+        default = "   "
+    else:
+        _replace_browser_fixture_task_status(repo, "   ")
+    project = _configure_statuses(repo, statuses, default=default)
+
+    from backlog_py.browser.service import build_board_payload, render_board_html
+
+    payload = build_board_payload(project)
+    html = render_board_html(project)
+
+    assert "   " in payload["statuses"]
+    assert "   " not in payload["assignableStatuses"]
+    assert all(str(status).strip() for status in payload["assignableStatuses"])
+    blank_column = html.split('data-status="   "', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    assert 'data-assignable="false"' in blank_column.split(">", maxsplit=1)[0]
+    assert "Read only" in blank_column
+    create_form = html.split('id="task-create-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    edit_form = html.split('id="task-edit-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    assert '<option value="   ">' not in create_form
+    assert '<option value="   ">' not in edit_form
+
+
+@pytest.mark.parametrize("source_kind", ["configured", "default", "local"])
+def test_browser_preserves_exact_nonblank_status_spelling_from_each_source(tmp_path, source_kind):
+    repo = _copy_fixture_repo(tmp_path)
+    exact_status = " Intentional "
+    statuses = ["Configured"]
+    default = "Ready"
+    if source_kind == "configured":
+        statuses.insert(0, exact_status)
+    elif source_kind == "default":
+        default = exact_status
+    else:
+        _replace_browser_fixture_task_status(repo, exact_status)
+    project = _configure_statuses(repo, statuses, default=default)
+
+    from backlog_py.browser.service import build_board_payload, render_board_html
+
+    payload = build_board_payload(project)
+    html = render_board_html(project)
+    repository = MutableRepository(project)
+
+    assert exact_status in payload["assignableStatuses"]
+    assert all(repository._status_is_assignable(str(status)) for status in payload["assignableStatuses"])
+    exact_column = html.split(f'data-status="{exact_status}"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    assert 'data-assignable="true"' in exact_column.split(">", maxsplit=1)[0]
+    create_form = html.split('id="task-create-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    edit_form = html.split('id="task-edit-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    assert f'<option value="{exact_status}"' in create_form
+    assert f'<option value="{exact_status}"' in edit_form
+
+
 def test_default_only_column_accepts_browser_drop(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = _configure_statuses(repo, [], default="Ready")
@@ -3787,6 +3847,14 @@ def _configure_statuses(repo: Path, statuses: list[str] | None, *, default: str)
     raw["defaultStatus"] = default
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return discover_project(Path.cwd(), explicit_cwd=repo)
+
+
+def _replace_browser_fixture_task_status(repo: Path, status: str) -> None:
+    path = _task_file(repo)
+    source = path.read_text(encoding="utf-8")
+    replaced = source.replace("status: In Progress", f"status: {yaml.safe_dump(status).strip()}")
+    assert replaced != source
+    path.write_text(replaced, encoding="utf-8")
 
 
 def _write_browser_legacy_milestone(repo: Path, name: str, *, filename: str) -> Path:
