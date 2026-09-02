@@ -172,7 +172,7 @@ Add a second repository helper for browser status movement. Because the current 
 
 This ensures “append” really means the bottom of a column. Writing an ordinal only to the moved task would incorrectly place it above every ordinal-less target task because ordinal-bearing tasks currently sort first.
 
-Pure ordinal materialization on existing target tasks preserves their `updated_date`. The moved task receives the new status and ordinal through the batch, and its `updated_date` changes exactly as it does in the existing status endpoint. After all writes succeed and caches are invalidated, load the moved task and run the existing `onStatusChange` callback. Preserve the current failure semantics: if that callback fails, the written status/ordinal changes remain, the error propagates, and optional auto-commit does not run. Do not roll back a successful file mutation solely because its post-write callback failed.
+Pure ordinal materialization on existing target tasks preserves their `updated_date`. The moved task receives the new status and ordinal through the batch, and its `updated_date` changes exactly as it does in the existing status endpoint. After all writes succeed and caches are invalidated, load the moved task and run the existing `onStatusChange` callback. Preserve the current best-effort semantics: a command failure or callback exception does not fail the status change, does not roll back successful file mutations, and does not prevent optional auto-commit from proceeding.
 
 ### 2. Milestones use stable optional identity without breaking legacy callers
 
@@ -385,7 +385,7 @@ Write a failing test before each behavior change.
 - Priority sorting with default and configured priority order.
 - Created-date ascending/descending, invalid/missing dates, and deterministic task-ID ties.
 - Ordinal assignment, no-op cases, rollback after injected write failure, cache invalidation, and `updated_date` preservation.
-- Cross-column append ordinal, target-task timestamp preservation, moved-task timestamp update, and existing status-callback success/failure semantics.
+- Cross-column append ordinal, target-task timestamp preservation, moved-task timestamp update, and best-effort status-callback failure semantics that still permit auto-commit.
 - Current, legacy, BOM, readme, malformed, duplicate, and archived milestone reads.
 - ID allocation across active/archive and filename fallback collision reservation.
 - Current/legacy rename behavior, title/ID alias collisions, ambiguous lookup, due-date normalization, reference updates, and rollback.
