@@ -18,6 +18,7 @@
       <button class="secondary-button" type="button" id="service-status-open">Service</button>
       <button class="secondary-button" type="button" id="documents-open">Documents</button>
       <button class="secondary-button" type="button" id="decisions-open">Decisions</button>
+      <button class="secondary-button" type="button" id="milestones-open">Milestones</button>
       <button class="secondary-button" type="button" id="config-settings-open">Project settings</button>
       <button class="secondary-button" type="button" id="dod-defaults-open">Definition of Done</button>
       <button class="primary-button" type="button" id="task-create-open">New task</button>
@@ -28,6 +29,76 @@
   <main class="board" data-board-revision="{board_revision}" data-mermaid-url="{mermaid_url}">
 {column_markup}
   </main>
+  <dialog id="milestones-dialog" aria-labelledby="milestones-title">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="milestones-title">Milestones</h2>
+      <form method="dialog">
+        <button class="dialog-close" type="submit">Close</button>
+      </form>
+    </div>
+    <div class="dialog-body">
+      <p class="milestone-message" id="milestone-message" role="status" aria-live="polite"></p>
+      <div class="milestone-manager">
+        <section aria-labelledby="milestone-create-title">
+          <h3 id="milestone-create-title">New milestone</h3>
+          <form class="task-form" id="milestone-create-form">
+            <label>Title
+              <input name="title" autocomplete="off" required>
+            </label>
+            <label>Due (UTC)
+              <input name="dueDate" type="datetime-local">
+            </label>
+            <label>Description
+              <textarea name="description"></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="primary-button" type="submit">Create milestone</button>
+            </div>
+          </form>
+        </section>
+        <section aria-labelledby="milestone-list-title">
+          <h3 id="milestone-list-title">Active</h3>
+          <ul class="readonly-list milestone-list" id="milestone-active-list"></ul>
+          <details class="milestone-archived">
+            <summary>Archived</summary>
+            <ul class="readonly-list milestone-list" id="milestone-archived-list"></ul>
+          </details>
+          <section class="dialog-section" id="milestone-editor" hidden aria-labelledby="milestone-editor-title">
+            <h3 id="milestone-editor-title">Milestone details</h3>
+            <dl class="dialog-meta">
+              <div><dt>ID</dt><dd id="milestone-editor-id"></dd></div>
+              <div><dt>Format</dt><dd id="milestone-editor-format"></dd></div>
+              <div><dt>File</dt><dd id="milestone-editor-path"></dd></div>
+              <div><dt>Task references</dt><dd id="milestone-editor-references"></dd></div>
+            </dl>
+            <p class="readonly-note" id="milestone-archived-note" hidden>Archived milestones are read only.</p>
+            <form class="task-form" id="milestone-edit-form">
+              <label>Title
+                <input name="title" autocomplete="off" required>
+              </label>
+              <label>Due (UTC)
+                <input name="dueDate" type="datetime-local">
+              </label>
+              <label>Description
+                <textarea name="description"></textarea>
+              </label>
+              <fieldset class="milestone-remove-options" id="milestone-remove-options" hidden>
+                <legend>Referenced tasks</legend>
+                <p>Removing this milestone will affect tasks that still reference it.</p>
+                <label><input type="radio" name="taskHandling" value="keep"> Keep task references</label>
+                <label><input type="radio" name="taskHandling" value="clear"> Clear task references</label>
+              </fieldset>
+              <div class="form-actions milestone-actions">
+                <button class="secondary-button" type="button" id="milestone-remove">Remove</button>
+                <button class="primary-button" type="button" id="milestone-archive">Archive</button>
+                <button class="primary-button" type="submit" id="milestone-edit-submit">Save</button>
+              </div>
+            </form>
+          </section>
+        </section>
+      </div>
+    </div>
+  </dialog>
   <dialog id="task-create-dialog" aria-labelledby="task-create-title">
     <div class="dialog-header">
       <h2 class="dialog-title" id="task-create-title">New task</h2>

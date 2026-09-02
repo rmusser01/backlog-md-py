@@ -14,6 +14,11 @@
     const serviceShutdownConfirm = document.getElementById("service-shutdown-confirm");
     const documentsDialog = document.getElementById("documents-dialog");
     const decisionsDialog = document.getElementById("decisions-dialog");
+    const milestonesDialog = document.getElementById("milestones-dialog");
+    const milestoneCreateForm = document.getElementById("milestone-create-form");
+    const milestoneEditForm = document.getElementById("milestone-edit-form");
+    const milestoneArchiveButton = document.getElementById("milestone-archive");
+    const milestoneRemoveButton = document.getElementById("milestone-remove");
     const boardElement = document.querySelector("[data-board-revision]");
     const boardStatus = document.getElementById("board-status");
     const boardRefreshIntervalMs = 5000;
@@ -21,6 +26,9 @@
     let boardRefreshInFlight = false;
     let boardRefreshTimer = null;
     let boardRevisionEvents = null;
+    let pendingBoardRevision = "";
+    let milestones = [];
+    let selectedMilestoneKey = "";
 
     function setText(id, value) {
       const element = document.getElementById(id);
@@ -93,6 +101,136 @@
       } catch (error) {
         return fallback;
       }
+    }
+
+    function showMilestoneMessage(message) {
+      const status = document.getElementById("milestone-message");
+      if (status) status.textContent = message || "";
+    }
+
+    function setMilestoneBusy(control, busy) {
+      if (control) control.disabled = busy;
+    }
+
+    function dueDateInputValue(value) {
+      return value ? String(value).replace(" ", "T").slice(0, 16) : "";
+    }
+
+    function selectedMilestone() {
+      return milestones.find((record) => selectedMilestoneKey === record.selectionKey);
+    }
+
+    function renderMilestoneLists() {
+      const activeList = document.getElementById("milestone-active-list");
+      const archivedList = document.getElementById("milestone-archived-list");
+      if (!activeList || !archivedList) return;
+      activeList.replaceChildren();
+      archivedList.replaceChildren();
+      const appendRecords = (list, records, emptyMessage) => {
+        if (records.length === 0) {
+          renderEmptyReadonlyList(list, emptyMessage);
+          return;
+        }
+        records.forEach((record) => {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.milestoneSelectionKey = record.selectionKey;
+          button.setAttribute("aria-pressed", selectedMilestoneKey === record.selectionKey ? "true" : "false");
+          const title = document.createElement("span");
+          title.className = "readonly-list-title";
+          title.textContent = record.title || "Untitled";
+          const meta = document.createElement("span");
+          meta.className = "readonly-list-meta";
+          meta.textContent = [record.id || "Legacy", record.dueDate].filter(Boolean).join(" · ");
+          button.append(title, meta);
+          button.addEventListener("click", () => selectMilestone(record.selectionKey));
+          item.appendChild(button);
+          list.appendChild(item);
+        });
+      };
+      appendRecords(
+        activeList,
+        milestones.filter((record) => !record.archived),
+        "No active milestones. Create one with the form.",
+      );
+      appendRecords(
+        archivedList,
+        milestones.filter((record) => record.archived),
+        "No archived milestones",
+      );
+    }
+
+    function selectMilestone(key) {
+      selectedMilestoneKey = key || "";
+      const record = milestones.find((record) => selectedMilestoneKey === record.selectionKey);
+      const editor = document.getElementById("milestone-editor");
+      if (editor) editor.hidden = !record;
+      document.querySelectorAll(".milestone-list button").forEach((button) => {
+        button.setAttribute(
+          "aria-pressed",
+          button.dataset.milestoneSelectionKey === selectedMilestoneKey ? "true" : "false",
+        );
+      });
+      if (!record || !milestoneEditForm) return;
+      setText("milestone-editor-title", record.title || "Milestone details");
+      setText("milestone-editor-id", record.id);
+      setText("milestone-editor-format", record.format);
+      setText("milestone-editor-path", record.path);
+      setText("milestone-editor-references", String(record.taskReferenceCount ?? 0));
+      const readOnly = Boolean(record.archived);
+      milestoneEditForm.elements.title.value = record.title || "";
+      milestoneEditForm.elements.title.readOnly = readOnly;
+      milestoneEditForm.elements.description.value = record.description || "";
+      milestoneEditForm.elements.description.readOnly = readOnly;
+      const dueDate = milestoneEditForm.elements.dueDate;
+      dueDate.value = dueDateInputValue(record.dueDate);
+      dueDate.disabled = readOnly || record.format === "legacy";
+      dueDate.title = record.format === "legacy" ? "Legacy milestones do not support due dates" : "";
+      const archiveButton = milestoneArchiveButton;
+      const removeButton = milestoneRemoveButton;
+      const editSubmit = document.getElementById("milestone-edit-submit");
+      if (archiveButton) archiveButton.hidden = readOnly;
+      if (removeButton) removeButton.hidden = readOnly;
+      if (editSubmit) editSubmit.hidden = readOnly;
+      const archivedNote = document.getElementById("milestone-archived-note");
+      if (archivedNote) archivedNote.hidden = !readOnly;
+      const removeOptions = document.getElementById("milestone-remove-options");
+      if (removeOptions) removeOptions.hidden = readOnly || !(record.taskReferenceCount > 0);
+      milestoneEditForm.querySelectorAll('input[name="taskHandling"]').forEach((input) => {
+        input.checked = false;
+      });
+    }
+
+    async function loadMilestones() {
+      try {
+        const response = await fetch("/api/milestones", {
+          headers: {"Accept": "application/json"},
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to load milestones"));
+        }
+        const payload = await response.json();
+        milestones = Array.isArray(payload.milestones) ? payload.milestones : [];
+        if (!milestones.some((record) => selectedMilestoneKey === record.selectionKey)) {
+          selectedMilestoneKey = "";
+        }
+        renderMilestoneLists();
+        selectMilestone(selectedMilestoneKey);
+        return true;
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to load milestones");
+        return false;
+      }
+    }
+
+    async function openMilestones() {
+      showMilestoneMessage("");
+      if (milestonesDialog?.showModal) milestonesDialog.showModal();
+      else milestonesDialog?.setAttribute("open", "open");
+      const loaded = await loadMilestones();
+      if (loaded && !selectedMilestoneKey) milestoneCreateForm?.elements.title.focus();
     }
 
     async function sortColumn(button) {
@@ -200,9 +338,12 @@
     }
 
     function handleBoardRevision(nextRevision) {
-      if (nextRevision && nextRevision !== currentBoardRevision && !hasOpenDialog()) {
-        window.location.reload();
+      if (!nextRevision || nextRevision === currentBoardRevision) return;
+      if (hasOpenDialog()) {
+        pendingBoardRevision = nextRevision;
+        return;
       }
+      window.location.reload();
     }
 
     async function pollBoardRevision() {
@@ -1006,6 +1147,129 @@
       setText("service-status-message", payload.message || "Server is stopping.");
     }
 
+    async function submitMilestoneCreate(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const control = event.submitter;
+      const data = new FormData(form);
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch("/api/milestones", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            title: String(data.get("title") || ""),
+            description: String(data.get("description") || ""),
+            dueDate: String(data.get("dueDate") || ""),
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to create milestone"));
+        }
+        const created = (await response.json()).milestone;
+        selectedMilestoneKey = created.selectionKey;
+        form.reset();
+        if (await loadMilestones()) showMilestoneMessage(`Created ${created.title}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to create milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
+    async function submitMilestoneEdit(event) {
+      event.preventDefault();
+      const selected = selectedMilestone();
+      if (!selected || selected.archived) return;
+      const form = event.currentTarget;
+      const control = event.submitter;
+      const data = new FormData(form);
+      const body = {
+        title: String(data.get("title") || ""),
+        description: String(data.get("description") || ""),
+        ...(selected.format === "current"
+          ? {dueDate: String(data.get("dueDate") || "")}
+          : {}),
+      };
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch(`/api/milestones/${encodeURIComponent(selected.key)}/edit`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to update milestone"));
+        }
+        const updated = (await response.json()).milestone;
+        selectedMilestoneKey = updated.selectionKey;
+        if (await loadMilestones()) showMilestoneMessage(`Saved ${updated.title}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to update milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
+    async function archiveSelectedMilestone() {
+      const selected = selectedMilestone();
+      const control = milestoneArchiveButton;
+      if (!selected || selected.archived) return;
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch(`/api/milestones/${encodeURIComponent(selected.key)}/archive`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({}),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to archive milestone"));
+        }
+        const archived = (await response.json()).milestone;
+        selectedMilestoneKey = archived.selectionKey;
+        if (await loadMilestones()) showMilestoneMessage(`Archived ${archived.title}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to archive milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
+    async function removeSelectedMilestone() {
+      const selected = selectedMilestone();
+      const control = milestoneRemoveButton;
+      if (!selected || selected.archived || !milestoneEditForm) return;
+      const policy = milestoneEditForm.querySelector('input[name="taskHandling"]:checked');
+      if (selected.taskReferenceCount > 0 && !policy) {
+        showMilestoneMessage("Choose whether to keep or clear task references before removing.");
+        milestoneEditForm.querySelector('input[name="taskHandling"]')?.focus();
+        return;
+      }
+      const body = selected.taskReferenceCount > 0 ? {taskHandling: policy.value} : {};
+      setMilestoneBusy(control, true);
+      showMilestoneMessage("");
+      try {
+        const response = await fetch(`/api/milestones/${encodeURIComponent(selected.key)}/remove`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response, "Unable to remove milestone"));
+        }
+        const removed = (await response.json()).milestone;
+        selectedMilestoneKey = "";
+        if (await loadMilestones()) showMilestoneMessage(`Removed ${removed.title}.`);
+      } catch (error) {
+        showMilestoneMessage(error instanceof Error ? error.message : "Unable to remove milestone");
+      } finally {
+        setMilestoneBusy(control, false);
+      }
+    }
+
     async function submitTaskCreate(event) {
       event.preventDefault();
       const form = event.currentTarget;
@@ -1174,6 +1438,11 @@
       window.location.reload();
     }
 
+    document.getElementById("milestones-open")?.addEventListener("click", openMilestones);
+    milestoneCreateForm?.addEventListener("submit", submitMilestoneCreate);
+    milestoneEditForm?.addEventListener("submit", submitMilestoneEdit);
+    milestoneArchiveButton?.addEventListener("click", archiveSelectedMilestone);
+    milestoneRemoveButton?.addEventListener("click", removeSelectedMilestone);
     document.getElementById("task-create-open")?.addEventListener("click", openTaskCreate);
     document.getElementById("task-create-cancel")?.addEventListener("click", () => taskCreateDialog?.close());
     taskCreateForm?.addEventListener("submit", submitTaskCreate);
@@ -1269,6 +1538,11 @@
         } catch (error) {
           showBoardMessage(error instanceof Error ? error.message : "Unable to move task");
         }
+      });
+    });
+    document.querySelectorAll("dialog").forEach((dialog) => {
+      dialog.addEventListener("close", () => {
+        if (pendingBoardRevision && !hasOpenDialog()) window.location.reload();
       });
     });
     if (!connectBoardRevisionEvents()) startBoardRevisionPolling();

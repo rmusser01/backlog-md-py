@@ -4206,6 +4206,189 @@ def test_browser_create_submission_sends_visible_metadata_fields(tmp_path):
     assert 'labels: metadataList(data.get("labels"))' in create_submit
 
 
+def test_browser_milestone_dialog_exposes_management_controls_and_accessible_states(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    dialog = html.split('id="milestones-dialog"', maxsplit=1)[1].split("</dialog>", maxsplit=1)[0]
+
+    assert 'id="milestones-open"' in html
+    assert 'aria-labelledby="milestones-title"' in html
+    assert 'id="milestone-create-form"' in dialog
+    assert 'name="title"' in dialog
+    assert 'name="dueDate" type="datetime-local"' in dialog
+    assert 'name="description"' in dialog
+    assert 'id="milestone-active-list"' in dialog
+    assert '<details class="milestone-archived">' in dialog
+    assert '<summary>Archived</summary>' in dialog
+    assert 'id="milestone-archived-list"' in dialog
+    assert 'id="milestone-editor"' in dialog
+    assert 'id="milestone-edit-form"' in dialog
+    assert 'id="milestone-archive"' in dialog
+    assert 'id="milestone-remove"' in dialog
+    assert 'id="milestone-remove-options"' in dialog
+    assert 'name="taskHandling" value="keep"' in dialog
+    assert 'name="taskHandling" value="clear"' in dialog
+    assert 'id="milestone-message"' in dialog
+    assert 'role="status" aria-live="polite"' in dialog
+
+
+def test_browser_milestone_dialog_exposes_metadata_and_readonly_archive_contract(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    dialog = html.split('id="milestones-dialog"', maxsplit=1)[1].split("</dialog>", maxsplit=1)[0]
+    selector = html.split("function selectMilestone", maxsplit=1)[1].split(
+        "async function submitMilestoneCreate", maxsplit=1
+    )[0]
+
+    assert 'id="milestone-editor-id"' in dialog
+    assert 'id="milestone-editor-format"' in dialog
+    assert 'id="milestone-editor-path"' in dialog
+    assert 'id="milestone-editor-references"' in dialog
+    assert 'id="milestone-archived-note"' in dialog
+    assert "record.archived" in selector
+    assert "elements.title.readOnly = readOnly" in selector
+    assert "elements.description.readOnly = readOnly" in selector
+    assert 'archiveButton.hidden = readOnly' in selector
+    assert 'removeButton.hidden = readOnly' in selector
+    assert 'editSubmit.hidden = readOnly' in selector
+    assert 'dueDate.disabled = readOnly || record.format === "legacy"' in selector
+
+
+def test_browser_milestone_dialog_uses_unique_selection_key_and_route_key(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    lists = html.split("function renderMilestoneLists", maxsplit=1)[1].split(
+        "function selectMilestone", maxsplit=1
+    )[0]
+    actions = html.split("async function submitMilestoneEdit", maxsplit=1)[1].split(
+        'document.getElementById("task-create-open")', maxsplit=1
+    )[0]
+
+    assert "record.selectionKey" in lists
+    assert "selectMilestone(record.selectionKey)" in lists
+    assert "record.key" not in lists
+    assert "selectedMilestoneKey === record.selectionKey" in html
+    assert "encodeURIComponent(selected.key)" in actions
+    assert "encodeURIComponent(selected.selectionKey)" not in actions
+    assert ".innerHTML" not in lists
+    assert ".textContent" in lists
+
+
+def test_browser_milestone_dialog_handles_mutation_policies_and_inline_errors(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    actions = html.split("async function submitMilestoneCreate", maxsplit=1)[1].split(
+        'document.getElementById("task-create-open")', maxsplit=1
+    )[0]
+
+    assert 'fetch("/api/milestones"' in actions
+    assert '}/edit`' in actions
+    assert '}/archive`' in actions
+    assert '}/remove`' in actions
+    assert 'taskReferenceCount > 0' in html
+    assert 'taskHandling: policy.value' in actions
+    assert 'const body = selected.taskReferenceCount > 0 ?' in actions
+    assert "showMilestoneMessage" in actions
+    assert "responseErrorMessage" in actions
+    assert "setMilestoneBusy(control, true)" in actions
+    assert "setMilestoneBusy(control, false)" in actions
+    assert "querySelectorAll" not in actions
+
+
+def test_browser_milestone_dialog_has_focus_scroll_and_responsive_contract(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    dialog_rule = html.split("dialog {", maxsplit=1)[1].split("}", maxsplit=1)[0]
+    body_rule = html.split(".dialog-body {", maxsplit=1)[1].split("}", maxsplit=1)[0]
+    responsive = html.split("@media (max-width: 720px)", maxsplit=1)[1]
+
+    assert "max-height:" in dialog_rule
+    assert "overflow: hidden;" in dialog_rule
+    assert "max-height:" in body_rule
+    assert "overflow-y: auto;" in body_rule
+    assert ".milestone-manager :focus-visible" in html
+    assert ".milestone-manager {" in responsive
+    assert "grid-template-columns: 1fr;" in responsive
+    assert "@keyframes" not in html
+    assert "animation:" not in html
+
+
+def test_browser_pending_revision_is_deferred_until_final_dialog_close(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    handler = html.split("function handleBoardRevision", maxsplit=1)[1].split(
+        "async function pollBoardRevision", maxsplit=1
+    )[0]
+    close_handler = html.split('document.querySelectorAll("dialog")', maxsplit=1)[1]
+
+    assert html.count('let pendingBoardRevision = "";') == 1
+    assert "if (!nextRevision || nextRevision === currentBoardRevision) return;" in handler
+    assert "if (hasOpenDialog())" in handler
+    assert "pendingBoardRevision = nextRevision;" in handler
+    assert "window.location.reload();" in handler
+    assert 'dialog.addEventListener("close"' in close_handler
+    assert "if (pendingBoardRevision && !hasOpenDialog()) window.location.reload();" in close_handler
+
+
+def test_milestone_edit_datetime_local_round_trip_is_lossless(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MilestoneService(project).add_milestone(
+        "Release",
+        "Scope.",
+        due_date="2026-09-30 17:00",
+    )
+
+    from backlog_py.browser.service import render_board_html, start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        before = _get_json(f"{service.root_url}/api/milestones")["milestones"][0]
+        control_value = before["dueDate"].replace(" ", "T")[:16]
+        _post_json(
+            f"{service.root_url}/api/milestones/{before['key']}/edit",
+            {
+                "title": before["title"],
+                "description": before["description"],
+                "dueDate": control_value,
+            },
+        )
+        after = _get_json(f"{service.root_url}/api/milestones")["milestones"][0]
+    finally:
+        service.shutdown()
+
+    html = render_board_html(project)
+    assert control_value == "2026-09-30T17:00"
+    assert after["dueDate"] == "2026-09-30 17:00"
+    assert "function dueDateInputValue(value)" in html
+    assert 'String(value).replace(" ", "T").slice(0, 16)' in html
+    assert 'dueDate: String(data.get("dueDate") || "")' in html
+
+
 def test_browser_command_uses_config_default_port_and_no_open(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)

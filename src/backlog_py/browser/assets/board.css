@@ -255,12 +255,14 @@
     }
     dialog {
       max-width: min(720px, calc(100vw - 32px));
+      max-height: calc(100dvh - 32px);
       width: 720px;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--panel);
       color: var(--text);
       padding: 0;
+      overflow: hidden;
     }
     dialog::backdrop {
       background: rgb(0 0 0 / 0.35);
@@ -280,6 +282,8 @@
     }
     .dialog-body {
       padding: 16px;
+      max-height: calc(100dvh - 98px);
+      overflow-y: auto;
     }
     .dialog-meta {
       display: grid;
@@ -342,6 +346,69 @@
       color: var(--muted);
       font-size: 12px;
       margin-top: 2px;
+    }
+    .milestone-manager {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .milestone-manager h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+    .milestone-manager :focus-visible,
+    .milestone-manager .milestone-list button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .milestone-list button[aria-pressed="true"] {
+      border-color: var(--accent);
+    }
+    .milestone-archived {
+      margin-top: 12px;
+    }
+    .milestone-archived summary {
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .milestone-archived .readonly-list {
+      margin-top: 8px;
+    }
+    .milestone-message {
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+    .milestone-message:empty {
+      margin: 0;
+    }
+    .readonly-note {
+      color: var(--muted);
+    }
+    .milestone-remove-options {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .milestone-remove-options[hidden] {
+      display: none;
+    }
+    .milestone-remove-options p {
+      margin: 0 0 2px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .milestone-remove-options label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 400;
+    }
+    .task-form .milestone-remove-options input[type="radio"] {
+      width: auto;
     }
     .run-history-list li {
       border: 1px solid var(--border);
@@ -556,9 +623,10 @@
       .column-sort-actions button { flex: 1 1 80px; }
       .task-actions { justify-content: flex-start; }
       .task-actions button { flex: 1 1 120px; }
-      dialog { max-height: calc(100dvh - 24px); overflow: auto; }
+      dialog { max-height: calc(100dvh - 24px); overflow: hidden; }
       .dialog-header { gap: 10px; padding: 14px; }
       .dialog-body { padding: 14px; }
+      .milestone-manager { grid-template-columns: 1fr; }
       .form-actions { flex-direction: column-reverse; }
       .form-actions button { width: 100%; }
       .board-status { margin: 0 14px 14px; }
