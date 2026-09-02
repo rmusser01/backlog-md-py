@@ -2888,7 +2888,7 @@ def test_browser_board_html_exposes_general_settings_dialog(tmp_path):
     assert 'id="config-settings-form"' in html
     assert 'name="projectName"' in html
     assert 'name="defaultPort"' in html
-    assert 'name="statuses"' in html
+    assert 'id="config-status-rows"' in html
     assert 'name="autoCommit"' in html
     assert 'name="remoteOperations"' in html
     assert 'name="checkActiveBranches"' in html
@@ -2898,6 +2898,239 @@ def test_browser_board_html_exposes_general_settings_dialog(tmp_path):
     assert "openConfigSettings" in html
     assert "submitConfigSettings" in html
     assert "/api/settings/config" in html
+
+
+def test_browser_general_settings_uses_structured_status_editor(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    settings = html.split('id="config-settings-form"', maxsplit=1)[1].split("</form>", maxsplit=1)[0]
+    script = html.split("<script>", maxsplit=1)[1].split("</script>", maxsplit=1)[0]
+
+    assert '<label for="config-default-status">Default status</label>' in settings
+    assert '<select id="config-default-status" name="defaultStatus" required></select>' in settings
+    assert '<fieldset class="status-editor">' in settings
+    assert 'id="config-status-rows"' in settings
+    assert 'id="config-status-add"' in settings
+    assert 'id="config-status-add-button"' in settings
+    assert 'id="config-status-message" role="status" aria-live="polite"' in settings
+    assert 'textarea name="statuses"' not in settings
+
+    assert "let statusRows = [];" in script
+    assert "function renderStatusRows()" in script
+    assert "container.replaceChildren();" in script
+    assert 'usage.textContent = row.taskCount === 1 ? "1 task" : `${row.taskCount} tasks`;' in script
+    assert 'up.setAttribute("aria-label", `Move ${row.name} up`);' in script
+    assert 'down.setAttribute("aria-label", `Move ${row.name} down`);' in script
+    assert 'remove.setAttribute("aria-label", `Remove ${row.name}`);' in script
+    assert 'configStatusAddButton?.addEventListener("click", addStatusFromInput);' in script
+    assert 'configStatusAddInput?.addEventListener("keydown"' in script
+    assert 'if (event.key !== "Enter") return;' in script
+    assert 'statuses: statusRows.map((row) => row.name)' in script
+    assert 'showConfigStatusMessage(await responseErrorMessage(response, "Unable to save project settings"));' in script
+    loader = script.split("async function openConfigSettings", maxsplit=1)[1].split(
+        "async function openDodDefaultsSettings", maxsplit=1
+    )[0]
+    assert loader.index("if (generation !== configSettingsLoadGeneration) return;") < loader.index(
+        "if (!response.ok)"
+    )
+
+
+def test_browser_structured_status_editor_is_responsive_and_keyboard_visible(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    focus = html.split(".status-editor :focus-visible {", maxsplit=1)[1].split("}", maxsplit=1)[0]
+    responsive = html.split("@media (max-width: 720px)", maxsplit=1)[1]
+
+    assert "outline: 2px solid var(--accent);" in focus
+    assert "outline-offset: 2px;" in focus
+    assert ".status-row-state" in html
+    assert ".status-row," in responsive
+    assert ".status-add-row" in responsive
+    assert "grid-template-columns: 1fr;" in responsive
+
+
+def test_browser_structured_status_state_adds_reorders_and_safely_removes():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [
+  {name: "To Do", taskCount: 0},
+  {name: "Café", taskCount: 2},
+  {name: "Done", taskCount: 0},
+];
+configDefaultStatus = "To Do";
+fakeConfigStatusAddInput.value = "  Review  ";
+fakeConfigStatusAddButton.listeners.click();
+const added = statusRows.some((row) => row.name === "Review");
+fakeConfigStatusAddInput.value = "Cafe\\u0301";
+let enterPrevented = false;
+fakeConfigStatusAddInput.listeners.keydown({
+  key: "Enter",
+  preventDefault() { enterPrevented = true; },
+});
+const duplicate = statusRows.filter((row) => statusKey(row.name) === statusKey("Café")).length > 1;
+const moved = moveStatus(3, -2);
+const removedDefault = removeStatus(0);
+const removedInUse = removeStatus(2);
+const removedFree = removeStatus(3);
+return {
+  added,
+  duplicate,
+  germanEquivalent: statusKey("Straße") === statusKey("STRASSE"),
+  enterPrevented,
+  moved,
+  removedDefault,
+  removedInUse,
+  removedFree,
+  rows: statusRows,
+  message: configStatus.textContent,
+};
+"""
+    )
+
+    assert result == {
+        "added": True,
+        "duplicate": False,
+        "germanEquivalent": True,
+        "enterPrevented": True,
+        "moved": True,
+        "removedDefault": False,
+        "removedInUse": False,
+        "removedFree": True,
+        "rows": [
+            {"name": "To Do", "taskCount": 0},
+            {"name": "Review", "taskCount": 0},
+            {"name": "Café", "taskCount": 2},
+        ],
+        "message": "",
+    }
+
+
+def test_browser_structured_status_submit_keeps_state_and_renders_server_error():
+    result = _run_board_javascript_harness(
+        """
+statusRows = [{name: "Done", taskCount: 0}, {name: "Ready", taskCount: 0}];
+const form = {
+  _data: {
+    projectName: "Project",
+    defaultAssignee: "",
+    defaultStatus: "Ready",
+    dateFormat: "yyyy-mm-dd",
+    defaultPort: "6420",
+    activeBranchDays: "30",
+    zeroPaddedIds: "",
+  },
+  elements: {
+    defaultStatus: {value: "Ready"},
+    includeDatetimeInDates: {checked: false},
+    autoOpenBrowser: {checked: false},
+    remoteOperations: {checked: false},
+    checkActiveBranches: {checked: true},
+    autoCommit: {checked: false},
+  },
+};
+const submitter = {disabled: false};
+let request = null;
+globalThis.fetch = async (url, options) => {
+  request = {url, options};
+  return {ok: false, json: async () => ({error: "Status is still in use"})};
+};
+await submitConfigSettings({preventDefault() {}, currentTarget: form, submitter});
+return {
+  url: request.url,
+  body: JSON.parse(request.options.body),
+  disabled: submitter.disabled,
+  message: configStatus.textContent,
+  rows: statusRows,
+};
+"""
+    )
+
+    assert result["url"] == "/api/settings/config"
+    assert result["body"]["settings"]["statuses"] == ["Done", "Ready"]
+    assert result["body"]["settings"]["defaultStatus"] == "Ready"
+    assert result["disabled"] is False
+    assert result["message"] == "Status is still in use"
+    assert result["rows"] == [
+        {"name": "Done", "taskCount": 0},
+        {"name": "Ready", "taskCount": 0},
+    ]
+
+
+def test_browser_settings_open_ignores_stale_delayed_success_and_error_bodies():
+    result = _run_board_javascript_harness(
+        """
+let call = 0;
+let releaseFirstSuccess;
+let markFirstSuccessStarted;
+const firstSuccessStarted = new Promise((resolve) => { markFirstSuccessStarted = resolve; });
+globalThis.fetch = async () => {
+  call += 1;
+  if (call === 1) {
+    return {
+      ok: true,
+      json: () => {
+        markFirstSuccessStarted();
+        return new Promise((resolve) => { releaseFirstSuccess = resolve; });
+      },
+    };
+  }
+  return {
+    ok: true,
+    json: async () => ({settings: {defaultStatus: "New", statusRows: [{name: "New", taskCount: 0}]}}),
+  };
+};
+const staleSuccess = openConfigSettings();
+await firstSuccessStarted;
+await openConfigSettings();
+releaseFirstSuccess({settings: {defaultStatus: "Old", statusRows: [{name: "Old", taskCount: 0}]}});
+await staleSuccess;
+const afterSuccess = {defaultStatus: configDefaultStatus, rows: statusRows};
+
+let releaseFirstError;
+let markFirstErrorStarted;
+const firstErrorStarted = new Promise((resolve) => { markFirstErrorStarted = resolve; });
+globalThis.fetch = async () => {
+  call += 1;
+  if (call === 3) {
+    return {
+      ok: false,
+      json: () => {
+        markFirstErrorStarted();
+        return new Promise((resolve) => { releaseFirstError = resolve; });
+      },
+    };
+  }
+  return {
+    ok: true,
+    json: async () => ({settings: {defaultStatus: "Latest", statusRows: [{name: "Latest", taskCount: 0}]}}),
+  };
+};
+const staleError = openConfigSettings();
+await firstErrorStarted;
+await openConfigSettings();
+releaseFirstError({error: "Stale failure"});
+await staleError;
+return {
+  afterSuccess,
+  afterError: {defaultStatus: configDefaultStatus, rows: statusRows},
+  message: configStatus.textContent,
+};
+"""
+    )
+
+    assert result == {
+        "afterSuccess": {"defaultStatus": "New", "rows": [{"name": "New", "taskCount": 0}]},
+        "afterError": {"defaultStatus": "Latest", "rows": [{"name": "Latest", "taskCount": 0}]},
+        "message": "",
+    }
 
 
 def test_browser_task_payload_includes_ordinal(tmp_path):
@@ -5027,8 +5260,24 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const payload = JSON.parse(fs.readFileSync(0, "utf8"));
 const milestoneStatus = {textContent: ""};
+const configStatus = {textContent: ""};
+const fakeConfigStatusAddInput = {
+  value: "",
+  listeners: {},
+  addEventListener(type, listener) { this.listeners[type] = listener; },
+  focus() {},
+};
+const fakeConfigStatusAddButton = {
+  listeners: {},
+  addEventListener(type, listener) { this.listeners[type] = listener; },
+};
 const document = {
-  getElementById: (id) => id === "milestone-message" ? milestoneStatus : null,
+  getElementById: (id) => ({
+    "milestone-message": milestoneStatus,
+    "config-status-message": configStatus,
+    "config-status-add": fakeConfigStatusAddInput,
+    "config-status-add-button": fakeConfigStatusAddButton,
+  })[id] || null,
   querySelector: (selector) => selector === "[data-board-revision]"
     ? {dataset: {boardRevision: "", mermaidUrl: "", mermaidSri: ""}}
     : null,
@@ -5039,15 +5288,22 @@ const window = {
   document,
   setInterval: () => 1,
   clearInterval: () => {},
+  location: {reload: () => {}},
 };
 const context = vm.createContext({
   console,
   document,
   window,
   milestoneStatus,
+  configStatus,
+  fakeConfigStatusAddInput,
+  fakeConfigStatusAddButton,
   HTMLSelectElement: class {},
   HTMLTextAreaElement: class {},
-  FormData: class {},
+  FormData: class {
+    constructor(form) { this.form = form; }
+    get(name) { return this.form._data[name] ?? null; }
+  },
   Event: class {},
   Node: {TEXT_NODE: 3, ELEMENT_NODE: 1},
 });

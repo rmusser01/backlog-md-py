@@ -8,6 +8,8 @@
     const taskArchiveConfirm = document.getElementById("task-archive-confirm");
     const configSettingsDialog = document.getElementById("config-settings-dialog");
     const configSettingsForm = document.getElementById("config-settings-form");
+    const configStatusAddInput = document.getElementById("config-status-add");
+    const configStatusAddButton = document.getElementById("config-status-add-button");
     const dodDefaultsDialog = document.getElementById("dod-defaults-dialog");
     const dodDefaultsForm = document.getElementById("dod-defaults-form");
     const serviceStatusDialog = document.getElementById("service-status-dialog");
@@ -30,6 +32,9 @@
     let milestones = [];
     let selectedMilestoneKey = "";
     let milestoneLoadGeneration = 0;
+    let statusRows = [];
+    let configDefaultStatus = "";
+    let configSettingsLoadGeneration = 0;
 
     function setText(id, value) {
       const element = document.getElementById(id);
@@ -107,6 +112,124 @@
     function showMilestoneMessage(message) {
       const status = document.getElementById("milestone-message");
       if (status) status.textContent = message || "";
+    }
+
+    function showConfigStatusMessage(message) {
+      const status = document.getElementById("config-status-message");
+      if (status) status.textContent = message || "";
+    }
+
+    function statusKey(value) {
+      return String(value || "").trim().normalize("NFC").toLowerCase().replaceAll("ß", "ss");
+    }
+
+    function renderStatusRows() {
+      const container = document.getElementById("config-status-rows");
+      const select = configSettingsForm?.elements.defaultStatus;
+      if (!container || !select) return;
+      const selectedKey = statusKey(configDefaultStatus);
+      const selectedRow = statusRows.find((row) => statusKey(row.name) === selectedKey) || statusRows[0];
+      configDefaultStatus = selectedRow?.name || "";
+      container.replaceChildren();
+      select.replaceChildren();
+      statusRows.forEach((row, index) => {
+        const option = document.createElement("option");
+        option.value = row.name;
+        option.textContent = row.name;
+        select.appendChild(option);
+
+        const item = document.createElement("div");
+        item.className = "status-row";
+        const summary = document.createElement("div");
+        summary.className = "status-row-summary";
+        const name = document.createElement("span");
+        name.className = "status-row-name";
+        name.textContent = row.name;
+        const details = document.createElement("span");
+        details.className = "status-row-meta";
+        const usage = document.createElement("span");
+        usage.textContent = row.taskCount === 1 ? "1 task" : `${row.taskCount} tasks`;
+        const state = document.createElement("span");
+        state.className = "status-row-state";
+        const isDefault = statusKey(row.name) === statusKey(configDefaultStatus);
+        state.textContent = isDefault ? "Default status" : row.taskCount > 0 ? "In use" : "Available";
+        details.append(usage, state);
+        summary.append(name, details);
+
+        const actions = document.createElement("div");
+        actions.className = "status-row-actions";
+        const up = document.createElement("button");
+        up.type = "button";
+        up.textContent = "Up";
+        up.setAttribute("aria-label", `Move ${row.name} up`);
+        up.disabled = index === 0;
+        up.addEventListener("click", () => moveStatus(index, -1));
+        const down = document.createElement("button");
+        down.type = "button";
+        down.textContent = "Down";
+        down.setAttribute("aria-label", `Move ${row.name} down`);
+        down.disabled = index === statusRows.length - 1;
+        down.addEventListener("click", () => moveStatus(index, 1));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Remove";
+        remove.setAttribute("aria-label", `Remove ${row.name}`);
+        remove.disabled = isDefault || row.taskCount > 0;
+        remove.addEventListener("click", () => removeStatus(index));
+        actions.append(up, down, remove);
+        item.append(summary, actions);
+        container.appendChild(item);
+      });
+      select.value = configDefaultStatus;
+    }
+
+    function addStatus(value) {
+      const name = String(value || "").trim();
+      if (!name) {
+        showConfigStatusMessage("Enter a status name.");
+        return false;
+      }
+      if (statusRows.some((row) => statusKey(row.name) === statusKey(name))) {
+        showConfigStatusMessage(`A status named “${name}” already exists.`);
+        return false;
+      }
+      statusRows.push({name, taskCount: 0});
+      showConfigStatusMessage("");
+      renderStatusRows();
+      return true;
+    }
+
+    function moveStatus(index, offset) {
+      const target = index + offset;
+      if (index < 0 || index >= statusRows.length || target < 0 || target >= statusRows.length) return false;
+      const [row] = statusRows.splice(index, 1);
+      statusRows.splice(target, 0, row);
+      showConfigStatusMessage("");
+      renderStatusRows();
+      return true;
+    }
+
+    function removeStatus(index) {
+      const row = statusRows[index];
+      if (!row) return false;
+      if (statusKey(row.name) === statusKey(configDefaultStatus)) {
+        showConfigStatusMessage("Choose a different default status before removing this one.");
+        return false;
+      }
+      if (row.taskCount > 0) {
+        showConfigStatusMessage("Move its active tasks before removing this status.");
+        return false;
+      }
+      statusRows.splice(index, 1);
+      showConfigStatusMessage("");
+      renderStatusRows();
+      return true;
+    }
+
+    function addStatusFromInput() {
+      if (!configStatusAddInput || !addStatus(configStatusAddInput.value)) return;
+      configStatusAddInput.value = "";
+      configStatusAddInput.focus();
     }
 
     function setMilestoneBusy(control, busy) {
@@ -1030,30 +1153,48 @@
     }
 
     async function openConfigSettings() {
-      const response = await fetch("/api/settings/config");
-      if (!response.ok) {
-        console.error(await response.text());
-        return;
+      const generation = ++configSettingsLoadGeneration;
+      showConfigStatusMessage("");
+      try {
+        const response = await fetch("/api/settings/config");
+        if (generation !== configSettingsLoadGeneration) return;
+        if (!response.ok) {
+          const message = await responseErrorMessage(response, "Unable to load project settings");
+          if (generation !== configSettingsLoadGeneration) return;
+          showConfigStatusMessage(message);
+          return;
+        }
+        const payload = await response.json();
+        if (generation !== configSettingsLoadGeneration) return;
+        const settings = payload.settings || {};
+        if (configSettingsForm) {
+          configSettingsForm.elements.projectName.value = settings.projectName || "";
+          configSettingsForm.elements.defaultAssignee.value = settings.defaultAssignee || "";
+          configSettingsForm.elements.dateFormat.value = settings.dateFormat || "";
+          configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
+          configSettingsForm.elements.activeBranchDays.value = settings.activeBranchDays || "";
+          configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
+          configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
+          configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
+          configSettingsForm.elements.remoteOperations.checked = Boolean(settings.remoteOperations);
+          configSettingsForm.elements.checkActiveBranches.checked = Boolean(settings.checkActiveBranches);
+          configSettingsForm.elements.autoCommit.checked = Boolean(settings.autoCommit);
+        }
+        statusRows = Array.isArray(settings.statusRows)
+          ? settings.statusRows.map((row) => ({name: String(row.name || ""), taskCount: Number(row.taskCount) || 0}))
+          : [];
+        configDefaultStatus = String(settings.defaultStatus || "");
+        renderStatusRows();
+        if (configSettingsDialog && !configSettingsDialog.open && configSettingsDialog.showModal) {
+          configSettingsDialog.showModal();
+        } else if (configSettingsDialog && !configSettingsDialog.open) {
+          configSettingsDialog.setAttribute("open", "open");
+        }
+      } catch (error) {
+        if (generation === configSettingsLoadGeneration) {
+          showConfigStatusMessage(error instanceof Error ? error.message : "Unable to load project settings");
+        }
       }
-      const payload = await response.json();
-      const settings = payload.settings || {};
-      if (configSettingsForm) {
-        configSettingsForm.elements.projectName.value = settings.projectName || "";
-        configSettingsForm.elements.defaultAssignee.value = settings.defaultAssignee || "";
-        configSettingsForm.elements.defaultStatus.value = settings.defaultStatus || "";
-        configSettingsForm.elements.dateFormat.value = settings.dateFormat || "";
-        configSettingsForm.elements.defaultPort.value = settings.defaultPort || "";
-        configSettingsForm.elements.activeBranchDays.value = settings.activeBranchDays || "";
-        configSettingsForm.elements.zeroPaddedIds.value = settings.zeroPaddedIds || "";
-        configSettingsForm.elements.statuses.value = (settings.statuses || []).join("\n");
-        configSettingsForm.elements.includeDatetimeInDates.checked = Boolean(settings.includeDatetimeInDates);
-        configSettingsForm.elements.autoOpenBrowser.checked = Boolean(settings.autoOpenBrowser);
-        configSettingsForm.elements.remoteOperations.checked = Boolean(settings.remoteOperations);
-        configSettingsForm.elements.checkActiveBranches.checked = Boolean(settings.checkActiveBranches);
-        configSettingsForm.elements.autoCommit.checked = Boolean(settings.autoCommit);
-      }
-      if (configSettingsDialog && configSettingsDialog.showModal) configSettingsDialog.showModal();
-      else if (configSettingsDialog) configSettingsDialog.setAttribute("open", "open");
     }
 
     async function openDodDefaultsSettings() {
@@ -1400,36 +1541,41 @@
       event.preventDefault();
       const form = event.currentTarget;
       const data = new FormData(form);
-      const statuses = String(data.get("statuses") || "")
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean);
-      const response = await fetch("/api/settings/config", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          settings: {
-            projectName: String(data.get("projectName") || ""),
-            defaultAssignee: String(data.get("defaultAssignee") || ""),
-            defaultStatus: String(data.get("defaultStatus") || ""),
-            dateFormat: String(data.get("dateFormat") || ""),
-            defaultPort: Number(data.get("defaultPort") || 0),
-            activeBranchDays: Number(data.get("activeBranchDays") || 0),
-            zeroPaddedIds: String(data.get("zeroPaddedIds") || ""),
-            statuses,
-            includeDatetimeInDates: Boolean(form.elements.includeDatetimeInDates?.checked),
-            autoOpenBrowser: Boolean(form.elements.autoOpenBrowser?.checked),
-            remoteOperations: Boolean(form.elements.remoteOperations?.checked),
-            checkActiveBranches: Boolean(form.elements.checkActiveBranches?.checked),
-            autoCommit: Boolean(form.elements.autoCommit?.checked),
-          },
-        }),
-      });
-      if (!response.ok) {
-        console.error(await response.text());
-        return;
+      const control = event.submitter;
+      if (control) control.disabled = true;
+      showConfigStatusMessage("");
+      try {
+        const response = await fetch("/api/settings/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            settings: {
+              projectName: String(data.get("projectName") || ""),
+              defaultAssignee: String(data.get("defaultAssignee") || ""),
+              defaultStatus: String(form.elements.defaultStatus.value || ""),
+              dateFormat: String(data.get("dateFormat") || ""),
+              defaultPort: Number(data.get("defaultPort") || 0),
+              activeBranchDays: Number(data.get("activeBranchDays") || 0),
+              zeroPaddedIds: String(data.get("zeroPaddedIds") || ""),
+              statuses: statusRows.map((row) => row.name),
+              includeDatetimeInDates: Boolean(form.elements.includeDatetimeInDates?.checked),
+              autoOpenBrowser: Boolean(form.elements.autoOpenBrowser?.checked),
+              remoteOperations: Boolean(form.elements.remoteOperations?.checked),
+              checkActiveBranches: Boolean(form.elements.checkActiveBranches?.checked),
+              autoCommit: Boolean(form.elements.autoCommit?.checked),
+            },
+          }),
+        });
+        if (!response.ok) {
+          showConfigStatusMessage(await responseErrorMessage(response, "Unable to save project settings"));
+          return;
+        }
+        window.location.reload();
+      } catch (error) {
+        showConfigStatusMessage(error instanceof Error ? error.message : "Unable to save project settings");
+      } finally {
+        if (control) control.disabled = false;
       }
-      window.location.reload();
     }
 
     async function submitDodDefaultsSettings(event) {
@@ -1467,6 +1613,17 @@
     document.getElementById("config-settings-open")?.addEventListener("click", openConfigSettings);
     document.getElementById("config-settings-cancel")?.addEventListener("click", () => configSettingsDialog?.close());
     configSettingsForm?.addEventListener("submit", submitConfigSettings);
+    configSettingsForm?.elements.defaultStatus?.addEventListener("change", (event) => {
+      configDefaultStatus = event.currentTarget.value;
+      showConfigStatusMessage("");
+      renderStatusRows();
+    });
+    configStatusAddButton?.addEventListener("click", addStatusFromInput);
+    configStatusAddInput?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      addStatusFromInput();
+    });
     document.getElementById("dod-defaults-open")?.addEventListener("click", openDodDefaultsSettings);
     document.getElementById("dod-defaults-cancel")?.addEventListener("click", () => dodDefaultsDialog?.close());
     dodDefaultsForm?.addEventListener("submit", submitDodDefaultsSettings);

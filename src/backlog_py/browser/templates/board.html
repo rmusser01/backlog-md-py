@@ -208,9 +208,8 @@
         <label>Default assignee
           <input name="defaultAssignee" autocomplete="off">
         </label>
-        <label>Default status
-          <input name="defaultStatus" autocomplete="off" required>
-        </label>
+        <label for="config-default-status">Default status</label>
+        <select id="config-default-status" name="defaultStatus" required></select>
         <label>Date format
           <input name="dateFormat" autocomplete="off" required>
         </label>
@@ -223,9 +222,16 @@
         <label>Zero-padded ID width
           <input name="zeroPaddedIds" type="number" min="0" step="1">
         </label>
-        <label>Statuses
-          <textarea name="statuses"></textarea>
-        </label>
+        <fieldset class="status-editor">
+          <legend>Statuses</legend>
+          <div id="config-status-rows"></div>
+          <div class="status-add-row">
+            <label for="config-status-add">Add status</label>
+            <input id="config-status-add" autocomplete="off">
+            <button type="button" id="config-status-add-button">Add</button>
+          </div>
+          <p id="config-status-message" role="status" aria-live="polite"></p>
+        </fieldset>
         <label>
           <input name="includeDatetimeInDates" type="checkbox">
           Include time in dates
