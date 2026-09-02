@@ -269,6 +269,23 @@ def test_current_milestone_loads_id_title_due_date_and_description(tmp_path):
     }
 
 
+def test_current_milestone_description_stops_at_valid_level_two_heading(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = repo / "backlog" / "milestones" / "m-9 - description.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "---\nid: m-9\ntitle: Description boundary\n---\n\n"
+        "## Description\n\nScope.\n\n### Details\n\nStill scope.\n\n  ##\tNotes\n\nLater section.\n",
+        encoding="utf-8",
+    )
+
+    record = _service(repo).list_milestones()[0]
+
+    assert record.description == "Scope.\n\n### Details\n\nStill scope."
+    assert "Later section." in record.content
+    assert "Later section." not in record.description
+
+
 def test_legacy_milestone_retains_name_path_content_and_frontmatter(tmp_path):
     repo = _copy_fixture(tmp_path)
     path = repo / "backlog" / "milestones" / "Alpha.md"
@@ -348,6 +365,11 @@ def test_malformed_current_looking_file_is_warned_and_skipped(tmp_path):
         "m-9 - missing-id.md": "---\ntitle: Missing id\n---\n\nBody\n",
         "m-10 - blank-title.md": "---\nid: m-10\ntitle: '   '\n---\n\nBody\n",
         "release.md": "---\nid: m-11\n---\n\nBody\n",
+        "title-only.md": "---\ntitle: Missing id\n---\n\nBody\n",
+        "invalid-id.md": "---\nid: m-x\ntitle: Invalid id\n---\n\nBody\n",
+        "numeric-id.md": "---\nid: 9\ntitle: Numeric id\n---\n\nBody\n",
+        "unicode-id.md": "---\nid: m-٩\ntitle: Unicode id\n---\n\nBody\n",
+        "numeric-title.md": "---\nid: m-12\ntitle: 12\n---\n\nBody\n",
     }
     for filename, source in bad_sources.items():
         (milestones_dir / filename).write_text(source, encoding="utf-8")
@@ -357,6 +379,20 @@ def test_malformed_current_looking_file_is_warned_and_skipped(tmp_path):
 
     assert listed == []
     assert all(any(filename in message for message in warnings) for filename in bad_sources)
+
+
+def test_current_milestone_normalizes_uppercase_zero_padded_ascii_id(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = repo / "backlog" / "milestones" / "M-009 - release.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "---\nid: M-009\ntitle: Release\n---\n\n## Description\n\nScope.\n", encoding="utf-8"
+    )
+
+    record = _service(repo).list_milestones()[0]
+
+    assert record.id == "m-9"
+    assert record.frontmatter["id"] == "M-009"
 
 
 def test_noncurrent_file_without_name_keeps_filename_fallback(tmp_path):

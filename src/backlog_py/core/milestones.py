@@ -263,12 +263,14 @@ def _load_milestone(project: BacklogProject, path: Path, *, archived: bool) -> M
     )
 
 
-_CURRENT_FILENAME_RE = re.compile(r"^m-\d+(?:$| - )", re.IGNORECASE)
-_CURRENT_ID_RE = re.compile(r"^m-\d+$", re.IGNORECASE)
+_CURRENT_FILENAME_RE = re.compile(r"^m-[0-9]+(?:$| - )", re.IGNORECASE)
+_CURRENT_ID_RE = re.compile(r"^m-[0-9]+$", re.IGNORECASE)
 
 
 def _description_from_body(content: str) -> str:
-    match = re.search(r"^## Description$(.*?)(?=^## |\Z)", content, re.MULTILINE | re.DOTALL)
+    match = re.search(
+        r"^## Description$(.*?)(?=^[ ]{0,3}##(?:[ \t]|$)|\Z)", content, re.MULTILINE | re.DOTALL
+    )
     return match.group(1).strip() if match else ""
 
 
