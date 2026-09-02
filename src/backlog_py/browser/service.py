@@ -636,7 +636,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
                     def edit_milestone() -> tuple[MilestoneRecord, int]:
                         service = MilestoneService(self.server.project)
-                        _resolve_active_milestone_api_key(service, raw_key, reference)
+                        existing = _resolve_active_milestone_api_key(service, raw_key, reference)
+                        if existing.format == "legacy" and "due_date" in milestone_edit_kwargs:
+                            raise MilestoneMutationError("Legacy milestones do not support dueDate")
                         record = service.edit_milestone(reference, **milestone_edit_kwargs)
                         return record, _milestone_reference_count(self.server.project, record)
 

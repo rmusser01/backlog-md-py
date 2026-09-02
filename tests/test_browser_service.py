@@ -2888,6 +2888,60 @@ def test_browser_legacy_milestone_key_edits_special_name_without_treating_it_as_
     assert not (repo / "Release").exists()
 
 
+@pytest.mark.parametrize("due_date", ["2026-10-01T09:30", "not-a-date"])
+def test_browser_legacy_milestone_edit_rejects_due_date_without_mutation(tmp_path, due_date):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    path = _write_browser_legacy_milestone(repo, "Legacy", filename="legacy.md")
+    before = path.read_bytes()
+
+    from backlog_py.browser import service as browser_service
+
+    key = browser_service._legacy_milestone_key("Legacy")
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(
+                f"{service.root_url}/api/milestones/{key}/edit",
+                {"title": "Renamed", "description": "Changed.", "dueDate": due_date},
+            )
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert json.loads(exc.value.read().decode("utf-8")) == {
+        "error": "Legacy milestones do not support dueDate"
+    }
+    assert path.read_bytes() == before
+    assert sorted(item.name for item in path.parent.glob("*.md")) == ["legacy.md"]
+
+
+def test_browser_legacy_milestone_edit_without_due_date_preserves_legacy_format(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    original = _write_browser_legacy_milestone(repo, "Legacy", filename="legacy.md")
+
+    from backlog_py.browser import service as browser_service
+
+    key = browser_service._legacy_milestone_key("Legacy")
+    service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        response = _post_json(
+            f"{service.root_url}/api/milestones/{key}/edit",
+            {"title": "Renamed Legacy", "description": "Changed safely."},
+        )["milestone"]
+    finally:
+        service.shutdown()
+
+    assert response["format"] == "legacy"
+    assert response["id"] is None
+    assert response["title"] == "Renamed Legacy"
+    assert response["description"] == "Changed safely."
+    assert response["dueDate"] is None
+    assert not original.exists()
+    assert (repo / "backlog" / response["path"]).is_file()
+
+
 def test_browser_milestone_remove_without_policy_is_allowed_when_unreferenced(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
