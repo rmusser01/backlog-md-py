@@ -34,6 +34,26 @@
       return task.milestoneArchived ? `${title} (archived)` : title;
     }
 
+    function selectTaskStatus(task) {
+      const select = taskEditForm?.elements.status;
+      if (!(select instanceof HTMLSelectElement)) return;
+      select.querySelectorAll("[data-stored-status]").forEach((option) => option.remove());
+      const raw = task.status || "";
+      if (!raw) {
+        taskEditForm.elements.status.value = "";
+        return;
+      }
+      const exact = Array.from(select.options).some((option) => option.value === raw);
+      if (!exact) {
+        const option = document.createElement("option");
+        option.value = raw;
+        option.dataset.storedStatus = "true";
+        option.textContent = raw;
+        select.appendChild(option);
+      }
+      taskEditForm.elements.status.value = raw;
+    }
+
     function selectTaskMilestone(task) {
       const select = taskEditForm?.elements.milestone;
       if (!(select instanceof HTMLSelectElement)) return;
@@ -811,7 +831,7 @@
       if (!taskEditForm) return;
       taskEditForm.dataset.taskId = task.id;
       taskEditForm.elements.title.value = task.title || "";
-      taskEditForm.elements.status.value = task.status || "";
+      selectTaskStatus(task);
       taskEditForm.elements.priority.value = task.priority || "";
       selectTaskMilestone(task);
       taskEditForm.elements.assignees.value = (task.assignees || []).join(", ");

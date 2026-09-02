@@ -2530,14 +2530,72 @@ def test_configured_active_branch_only_column_omits_sort_controls(tmp_path, monk
 
     service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
     try:
+        payload = _get_json(f"{service.root_url}/api/board")
         html = _get_text(service.root_url)
     finally:
         service.shutdown()
 
+    branch_tasks = payload["columns"]["Done"]
+    assert [task["mutable"] for task in branch_tasks] == [False, False]
     branch_column = html.split('data-status="Done"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
     assert "TASK-20" in branch_column
     assert "TASK-21" in branch_column
     assert "column-sort" not in branch_column
+    assert branch_column.count('draggable="false"') == 2
+    assert "data-task-edit" not in branch_column
+    assert "data-task-archive" not in branch_column
+
+
+def test_newer_branch_winner_is_readonly_while_local_winner_remains_mutable(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    repository = MutableRepository(project)
+    repository.create_task(title="Local companion", task_id="TASK-2", status="In Progress")
+
+    from backlog_py.browser import service as browser_service
+    from backlog_py.core import repository as repository_module
+    from backlog_py.runtime.git import GitTaskSnapshot
+
+    local_path = _task_file(repo)
+    branch_source = local_path.read_text(encoding="utf-8").replace(
+        "title: Example task", "title: Newer branch winner"
+    )
+    relative_path = local_path.relative_to(repo).as_posix()
+    monkeypatch.setattr(
+        repository_module,
+        "current_task_snapshot_timestamps",
+        lambda project, paths: {path: 1.0 for path in paths},
+    )
+    monkeypatch.setattr(
+        repository_module,
+        "list_active_branch_task_snapshots",
+        lambda project: [
+            GitTaskSnapshot(
+                ref="refs/heads/feature",
+                relative_path=relative_path,
+                source=branch_source,
+                committed_at=2.0,
+            )
+        ],
+    )
+
+    payload = browser_service.build_board_payload(project)
+    html = browser_service.render_board_html(project)
+
+    tasks = {task["id"]: task for task in payload["columns"]["In Progress"]}
+    assert tasks["TASK-1"]["title"] == "Newer branch winner"
+    assert tasks["TASK-1"]["mutable"] is False
+    assert tasks["TASK-2"]["mutable"] is True
+    column = html.split('data-status="In Progress"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    branch_card = column.split('data-task-id="TASK-1"', maxsplit=1)[1].split("</article>", maxsplit=1)[0]
+    local_card = column.split('data-task-id="TASK-2"', maxsplit=1)[1].split("</article>", maxsplit=1)[0]
+    assert 'draggable="false"' in branch_card
+    assert "data-task-edit" not in branch_card
+    assert "data-task-archive" not in branch_card
+    assert 'draggable="true"' in local_card
+    assert 'data-task-edit="TASK-2"' in local_card
+    assert 'data-task-archive="TASK-2"' in local_card
+    assert "column-sort" not in column
 
 
 def test_browser_board_html_exposes_sort_controls_only_for_multi_task_local_columns(tmp_path):
@@ -3562,6 +3620,77 @@ def test_filtering_does_not_change_revision(tmp_path):
     assert len(revisions) == 1
 
 
+def test_board_payload_refreshes_one_config_snapshot_after_external_change(tmp_path, monkeypatch):
+    repo = _copy_fixture_repo(tmp_path)
+    stale_project = discover_project(Path.cwd(), explicit_cwd=repo)
+    from backlog_py.browser import service as browser_service
+
+    before = browser_service.build_board_payload(stale_project)
+    config_path = repo / "backlog" / "config.yml"
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["projectName"] = "refreshed-project"
+    raw["statuses"] = ["Ready", "Review"]
+    raw["defaultStatus"] = "Ready"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    from backlog_py.core import repository as repository_module
+
+    load_calls = []
+    real_load_config = browser_service.load_config
+
+    def tracked_load_config(path):
+        load_calls.append(path)
+        return real_load_config(path)
+
+    def fail_nested_config_load(path):
+        pytest.fail(f"board repository reloaded config instead of reusing its snapshot: {path}")
+
+    monkeypatch.setattr(browser_service, "load_config", tracked_load_config)
+    monkeypatch.setattr(repository_module, "load_config", fail_nested_config_load)
+
+    payload = browser_service.build_board_payload(stale_project)
+
+    assert load_calls == [config_path]
+    assert payload["project"]["name"] == "refreshed-project"
+    assert payload["defaultStatus"] == "Ready"
+    assert payload["statuses"] == ["Ready", "Review", "In Progress"]
+    assert payload["assignableStatuses"] == ["Ready", "Review", "In Progress"]
+    assert payload["revision"] != before["revision"]
+
+
+def test_running_browser_uses_one_fresh_config_for_api_and_html(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    stale_project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import build_board_payload, start_browser_service
+
+    service = start_browser_service(stale_project, host="127.0.0.1", port=0)
+    try:
+        config_path = repo / "backlog" / "config.yml"
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw["projectName"] = "refreshed-project"
+        raw["statuses"] = ["Ready", "Review"]
+        raw["defaultStatus"] = "Ready"
+        config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        expected = build_board_payload(discover_project(Path.cwd(), explicit_cwd=repo))
+
+        payload = _get_json(f"{service.root_url}/api/board")
+        html = _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    assert payload["project"]["name"] == "refreshed-project"
+    assert payload["defaultStatus"] == "Ready"
+    assert payload["statuses"] == ["Ready", "Review", "In Progress"]
+    assert payload["assignableStatuses"] == ["Ready", "Review", "In Progress"]
+    assert payload["revision"] == expected["revision"]
+    assert "<h1>refreshed-project</h1>" in html
+    assert '<option value="Ready" selected>Ready</option>' in html
+    assert 'data-status="Ready"' in html
+    assert 'data-status="Review"' in html
+    assert 'data-status="Done"' not in html
+
+
 def test_milestone_filter_resolves_current_title_numeric_and_archived_aliases(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -3699,6 +3828,30 @@ def test_task_details_show_resolved_milestone_state_not_raw_id(tmp_path):
     )[0]
     assert 'setText("task-dialog-milestone", milestoneDetailText(task))' in details
     assert 'setText("task-dialog-milestone", task.milestone)' not in details
+
+
+def test_task_edit_preserves_exact_status_missing_from_current_options(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(project)
+    helper = html.split("function selectTaskStatus(task)", maxsplit=1)[1].split(
+        "function selectTaskMilestone(task)", maxsplit=1
+    )[0]
+    edit = html.split("async function openTaskEdit", maxsplit=1)[1].split(
+        "async function openTaskArchive", maxsplit=1
+    )[0]
+
+    assert 'select.querySelectorAll("[data-stored-status]")' in helper
+    assert 'option.dataset.storedStatus = "true"' in helper
+    assert 'const option = document.createElement("option")' in helper
+    assert "option.textContent = raw" in helper
+    assert "option.value === raw" in helper
+    assert "innerHTML" not in helper
+    assert "selectTaskStatus(task);" in edit
+    assert "taskEditForm.elements.status.value = task.status" not in edit
 
 
 @pytest.mark.parametrize("statuses", [None, [], ["Configured"]])
@@ -3863,8 +4016,42 @@ def test_browser_filter_form_and_assignment_controls_are_native_accessible_and_c
     assert '<select class="task-form-select" name="milestone">' in html
     assert '<option value="m-1">Release 2</option>' in html
     assert ".board-filter :focus-visible" in html
+    label_css = html.split(".label-filter-options {", maxsplit=1)[1].split("}", maxsplit=1)[0]
+    assert "max-height:" in label_css
+    assert "overflow-y: auto;" in label_css
+    assert "max-inline-size:" in label_css
+    assert "min-inline-size:" in label_css
+    label_row_css = html.split(".label-filter-options label {", maxsplit=1)[1].split(
+        "}", maxsplit=1
+    )[0]
+    assert "overflow-wrap: anywhere;" in label_row_css
     responsive = html.split("@media (max-width: 720px)", maxsplit=1)[1]
     assert ".board-filter" in responsive
+
+
+def test_board_filter_preserves_escaped_stale_queue_and_label_controls(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import render_board_html
+
+    html = render_board_html(
+        project,
+        queue_category_filter='stale<&"',
+        label_filters=['missing<&"', "second-missing"],
+    )
+    filter_markup = html.split('<form class="board-filter"', maxsplit=1)[1].split(
+        "</form>", maxsplit=1
+    )[0]
+
+    assert '<option value="stale&lt;&amp;&quot;" selected>Unknown: stale&lt;&amp;&quot;</option>' in filter_markup
+    assert 'name="labels" value="missing&lt;&amp;&quot;" checked' in filter_markup
+    assert "Unknown: missing&lt;&amp;&quot;" in filter_markup
+    assert 'name="labels" value="second-missing" checked' in filter_markup
+    assert "Unknown: second-missing" in filter_markup
+    assert "Labels (2)" in filter_markup
+    assert 'stale<&"' not in filter_markup
+    assert 'missing<&"' not in filter_markup
 
 
 def test_browser_create_submission_sends_visible_metadata_fields(tmp_path):

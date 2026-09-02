@@ -83,7 +83,10 @@
       z-index: 1;
       display: grid;
       gap: 6px;
-      min-width: 180px;
+      min-inline-size: min(180px, calc(100vw - 48px));
+      max-inline-size: min(360px, calc(100vw - 48px));
+      max-height: min(320px, 50vh);
+      overflow-y: auto;
       margin-top: 6px;
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -95,6 +98,8 @@
       display: flex;
       gap: 7px;
       align-items: center;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     .secondary-link {
       border: 1px solid var(--border);
@@ -542,7 +547,11 @@
       .header-actions button { flex: 1 1 180px; }
       .board-filter,
       .queue-filter { padding-inline: 14px; }
-      .label-filter-options { position: static; }
+      .label-filter-options {
+        position: static;
+        min-inline-size: 0;
+        max-inline-size: calc(100vw - 28px);
+      }
       .board { grid-template-columns: 1fr; padding: 14px; gap: 14px; }
       .column-sort-actions button { flex: 1 1 80px; }
       .task-actions { justify-content: flex-start; }

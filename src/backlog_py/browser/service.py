@@ -212,7 +212,16 @@ def build_board_payload(
     label_filters: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service."""
+    project = BacklogProject(
+        root=project.root,
+        backlog_dir=project.backlog_dir,
+        config_path=project.config_path,
+        config=load_config(project.config_path),
+    )
     repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+    local_repository = MutableRepository(project, refresh_remote_refs=False)
+    local_tasks = local_repository.list_tasks()
+    local_task_signatures = {_task_record_signature(task) for task in local_tasks}
     board = repository.board()
     board.setdefault(project.config.default_status, [])
     queue_report = OrchestrationService(project).queue()
@@ -228,15 +237,14 @@ def build_board_payload(
                 project=project,
                 queue_item=queue_items.get(task.id.casefold()),
                 milestones=milestones,
+                mutable=_task_record_signature(task) in local_task_signatures,
             )
             for task in tasks
         ]
         for status, tasks in board.items()
     }
     unfiltered_tasks = [task for tasks in unfiltered_columns.values() for task in tasks]
-    assignable_statuses = list(
-        MutableRepository(project, refresh_remote_refs=False).status_assignment_options()
-    )
+    assignable_statuses = list(local_repository.status_assignment_options(config=project.config))
     milestone_choices = _milestone_filter_choices(milestones, unfiltered_tasks)
     labels_by_key: dict[str, str] = {}
     for task in unfiltered_tasks:
@@ -267,6 +275,7 @@ def build_board_payload(
             "root": str(project.root),
             "backlogDir": str(project.backlog_dir),
         },
+        "defaultStatus": project.config.default_status,
         "statuses": list(board.keys()),
         "assignableStatuses": assignable_statuses,
         "queueCategories": sorted(queue_report.by_category),
@@ -1068,12 +1077,12 @@ def render_board_html(
         milestone_filter=milestone_filter,
         label_filters=label_filters,
     )
-    project_name = escape(project.config.project_name)
+    raw_project = payload.get("project")
+    payload_project = raw_project if isinstance(raw_project, dict) else {}
+    project_name = escape(str(payload_project.get("name") or ""))
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
     columns = columns_obj if isinstance(columns_obj, dict) else {}
-    local_repository = MutableRepository(project, refresh_remote_refs=False)
-    local_tasks = local_repository.list_tasks()
     raw_assignable_statuses = payload.get("assignableStatuses")
     assignable_status_list = (
         [str(status) for status in raw_assignable_statuses]
@@ -1082,9 +1091,11 @@ def render_board_html(
     )
     assignable_statuses = set(assignable_status_list)
     sortable_statuses = {
-        status
-        for status in assignable_statuses
-        if sum(task.status == status for task in local_tasks) >= 2
+        str(status)
+        for status, tasks in columns.items()
+        if str(status) in assignable_statuses
+        and isinstance(tasks, list)
+        and sum(isinstance(task, dict) and task.get("mutable") is True for task in tasks) >= 2
     }
     filters_active = bool(
         payload.get("queueCategoryFilter")
@@ -1128,7 +1139,7 @@ def render_board_html(
     select_tag = "select"
     status_options = _render_status_options(
         assignable_status_list,
-        selected=project.config.default_status,
+        selected=_metadata_string(payload.get("defaultStatus")),
     )
     raw_milestone_choices = payload.get("milestoneChoices")
     milestone_choices = (
@@ -1374,7 +1385,13 @@ def _render_column(
         </div>
       </details>
 """
-    task_markup = "\n".join(_render_task(task, readonly=not assignable) for task in tasks)
+    task_markup = "\n".join(
+        _render_task(
+            task,
+            readonly=not assignable or not (isinstance(task, dict) and task.get("mutable") is True),
+        )
+        for task in tasks
+    )
     if not task_markup:
         task_markup = f'      <div class="empty">{"No matching tasks" if filtered else "No tasks"}</div>'
     readonly = '' if assignable else '<span class="column-readonly">Read only</span>'
@@ -1450,11 +1467,18 @@ def _render_board_filter(
     total_task_count: int,
 ) -> str:
     option_markup = ['<option value="">All queue states</option>']
+    queue_category_values: set[str] = set()
     for category in queue_categories:
         category_text = str(category)
+        queue_category_values.add(category_text)
         selected_attr = ' selected' if selected_queue == category_text else ""
         option_markup.append(
             f'<option value="{escape(category_text)}"{selected_attr}>{escape(_queue_category_label(category_text))}</option>'
+        )
+    if selected_queue and selected_queue not in queue_category_values:
+        option_markup.append(
+            f'<option value="{escape(selected_queue)}" selected>'
+            f"{escape(f'Unknown: {selected_queue}')}</option>"
         )
     milestone_options = ['<option value="">All milestones</option>']
     for choice in milestone_choices:
@@ -1468,14 +1492,26 @@ def _render_board_filter(
         milestone_options.append(
             f'<option value="{escape(selected_milestone)}" selected>{escape(selected_milestone)}</option>'
         )
-    selected_label_keys = {str(label).casefold() for label in selected_labels}
+    selected_labels_by_key = {str(label).casefold(): str(label) for label in selected_labels}
+    selected_label_keys = set(selected_labels_by_key)
     label_options = []
+    available_label_keys: set[str] = set()
     for index, available_label in enumerate(available_labels):
         label_text = str(available_label)
+        available_label_keys.add(label_text.casefold())
         checked = " checked" if label_text.casefold() in selected_label_keys else ""
         label_options.append(
             f'<label for="board-label-{index}"><input id="board-label-{index}" type="checkbox" '
             f'name="labels" value="{escape(label_text)}"{checked}> {escape(label_text)}</label>'
+        )
+    for label_key, label_text in selected_labels_by_key.items():
+        if label_key in available_label_keys:
+            continue
+        index = len(label_options)
+        label_options.append(
+            f'<label for="board-label-{index}"><input id="board-label-{index}" type="checkbox" '
+            f'name="labels" value="{escape(label_text)}" checked> '
+            f"{escape(f'Unknown: {label_text}')}</label>"
         )
     labels_summary = f"Labels ({len(selected_label_keys)})" if selected_label_keys else "Labels"
     count = ""
@@ -1637,12 +1673,18 @@ def _decision_detail_payload(decision: DecisionRecord) -> dict[str, object]:
     return payload
 
 
+def _task_record_signature(task: TaskRecord) -> tuple[str, Path, str]:
+    """Identify the exact local record backing a visible task."""
+    return task.id, task.path, task.raw_source
+
+
 def _task_payload(
     task: TaskRecord,
     *,
     project: BacklogProject,
     queue_item: OrchestrationQueueItem | None = None,
     milestones: Sequence[MilestoneRecord] | None = None,
+    mutable: bool | None = None,
 ) -> dict[str, object]:
     frontmatter = task.parsed.frontmatter
     try:
@@ -1672,6 +1714,8 @@ def _task_payload(
         "updatedDate": _metadata_string(frontmatter.get("updated_date")),
         "ordinal": ordinal,
     }
+    if mutable is not None:
+        payload["mutable"] = mutable
     if queue_item is None:
         queue_item = _queue_item_for_task(project, task.id)
     if queue_item is not None:
