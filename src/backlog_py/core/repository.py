@@ -5,7 +5,7 @@ import re
 import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import inf, isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -33,6 +33,7 @@ _TASK_ID_RE = re.compile(r"^[A-Z]+-\d+(?:\.\d+)*$")
 _CHECKLIST_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*]\s+\[)[ xX](?P<suffix>\]\s+.*)$")
 _SECTION_MARKER_LINE_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):(?P<kind>BEGIN|END) -->\s*$")
 _NO_STATUS_CALLBACK_UPDATE = object()
+_DEFAULT_PRIORITIES = ("high", "medium", "low")
 _SECTION_NAME_ALIASES = {
     "IMPLEMENTATION_NOTES": ("IMPLEMENTATION_NOTES", "NOTES"),
 }
@@ -64,6 +65,12 @@ class TaskRecord:
     @property
     def raw_source(self) -> str:
         return self.parsed.raw_source
+
+
+@dataclass(frozen=True)
+class TaskSortResult:
+    task_ids: tuple[str, ...]
+    changed_task_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -824,6 +831,54 @@ class MutableRepository(ReadOnlyRepository):
         task = self.get_task(task_id)
         source = _replace_frontmatter_values(task.raw_source, task.parsed, updates)
         return self.replace_task_source(task.id, source)
+
+    def sort_tasks(self, status: str, *, sort: str, direction: str | None = None) -> TaskSortResult:
+        if sort == "priority":
+            if direction is not None:
+                raise TaskMutationError("Priority sorting does not support a direction")
+        elif sort == "created":
+            if direction not in {"asc", "desc"}:
+                raise TaskMutationError("Created-date sorting requires an asc or desc direction")
+        else:
+            raise TaskMutationError(f"Unsupported task sort: {sort}")
+
+        config = load_config(self.project.config_path)
+        active_tasks = _load_tasks_from_dir(self.project.backlog_dir / "tasks")
+        if status not in (config.statuses or ()) and status not in {task.status for task in active_tasks}:
+            raise TaskMutationError(f"Unknown status: {status}")
+        tasks = [task for task in active_tasks if task.status == status]
+        if sort == "priority":
+            priorities = config.priorities or _DEFAULT_PRIORITIES
+            ordered_tasks = sorted(tasks, key=lambda task: _priority_order_key(task, priorities))
+        else:
+            valid_tasks = [task for task in tasks if _created_datetime(task) is not None]
+            valid_tasks.sort(key=lambda task: _task_sort_key(task.id))
+            valid_tasks.sort(key=_created_datetime, reverse=direction == "desc")
+            invalid_tasks = sorted(
+                (task for task in tasks if _created_datetime(task) is None),
+                key=lambda task: _task_sort_key(task.id),
+            )
+            ordered_tasks = [*valid_tasks, *invalid_tasks]
+
+        changed_task_ids = self._assign_task_ordinals(ordered_tasks)
+        return TaskSortResult(
+            task_ids=tuple(task.id for task in ordered_tasks),
+            changed_task_ids=changed_task_ids,
+        )
+
+    def _assign_task_ordinals(self, tasks: Sequence[TaskRecord]) -> tuple[str, ...]:
+        changed_task_ids: list[str] = []
+        for index, task in enumerate(tasks, start=1):
+            ordinal = index * 1000
+            current = task.parsed.frontmatter.get("ordinal")
+            if type(current) is int and current == ordinal:
+                continue
+            source = _replace_frontmatter_values(task.raw_source, task.parsed, {"ordinal": ordinal})
+            _atomic_write_text(self._safe_task_path(task.path), source, base=self.project.backlog_dir)
+            changed_task_ids.append(task.id)
+        if changed_task_ids:
+            self._invalidate_task_cache()
+        return tuple(changed_task_ids)
 
     def archive_task(self, task_id: str) -> TaskRecord:
         task = self.get_task(task_id)
@@ -1814,6 +1869,36 @@ def _statuses_from_tasks(tasks: Iterable[TaskRecord]) -> list[str]:
         if task.status not in statuses:
             statuses.append(task.status)
     return statuses
+
+
+def _priority_order_key(task: TaskRecord, priorities: Sequence[str]) -> tuple[int, tuple[object, ...]]:
+    raw = task.parsed.frontmatter.get("priority")
+    priority = str(raw).strip().casefold() if raw is not None else ""
+    order = {value.strip().casefold(): index for index, value in enumerate(priorities)}
+    return order.get(priority, len(order)), _task_sort_key(task.id)
+
+
+def _created_datetime(task: TaskRecord) -> datetime | None:
+    raw = task.parsed.frontmatter.get("created_date")
+    if isinstance(raw, datetime):
+        value = raw
+    elif isinstance(raw, date):
+        value = datetime.combine(raw, datetime.min.time())
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        try:
+            value = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _task_sort_key(task_id: str) -> tuple[str, tuple[tuple[int, int | str], ...]]:
