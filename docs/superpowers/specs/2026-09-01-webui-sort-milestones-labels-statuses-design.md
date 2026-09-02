@@ -150,7 +150,7 @@ The operation loads the complete local column under the project lock, rejects in
 
 Priority order comes from an optional Backlog.md-compatible `priorities` config list. If absent or empty, use high, medium, low. Matching is normalized case-insensitively; unknown and missing priorities sort last. Equal priorities use natural task-ID order.
 
-Creation timestamps are parsed from supported stored timestamp forms. Invalid and missing values sort last. Equal timestamps use natural task-ID order.
+Creation timestamps accept the repository's generated `YYYY-MM-DD` and `YYYY-MM-DD HH:MM` forms plus ISO-compatible `YYYY-MM-DDTHH:MM`, optional seconds/fraction, and optional `Z` or numeric offset. Date-only and offset-less values are interpreted as UTC; offset-bearing values are normalized to UTC before comparison. Invalid and missing values sort last. Equal timestamps use natural task-ID order.
 
 Do not implement a sort as repeated `edit_task()` calls. That would create misleading `updated_date` changes and could leave a partial batch. Instead:
 
@@ -171,6 +171,8 @@ Add a second repository helper for browser status movement. Because the current 
 5. Apply the status change and any required ordinal materialization through the same rollback-backed batch writer used by sorting.
 
 This ensures “append” really means the bottom of a column. Writing an ordinal only to the moved task would incorrectly place it above every ordinal-less target task because ordinal-bearing tasks currently sort first.
+
+Pure ordinal materialization on existing target tasks preserves their `updated_date`. The moved task receives the new status and ordinal through the batch, and its `updated_date` changes exactly as it does in the existing status endpoint. After all writes succeed and caches are invalidated, load the moved task and run the existing `onStatusChange` callback. Preserve the current failure semantics: if that callback fails, the written status/ordinal changes remain, the error propagates, and optional auto-commit does not run. Do not roll back a successful file mutation solely because its post-write callback failed.
 
 ### 2. Milestones use stable optional identity without breaking legacy callers
 
@@ -211,6 +213,8 @@ Current renames preserve the ID, change the title, and rename the file. Legacy r
 
 Milestone matching supports exact ID, numeric ID alias, exact path stem, and unique title/name. Mutations fail closed when more than one record matches. Active create/rename rejects title aliases that collide with another active title, ID, or numeric ID alias.
 
+Browser milestone records expose a single-segment API `key`. Current records use their canonical `m-N` ID. Legacy records use `legacy-<token>`, where `<token>` is the legacy name encoded as UTF-8 base64url without padding. Endpoint decoding restores the exact logical name and never treats it as a filesystem path. This keeps legacy names containing `/`, `\\`, `%`, or non-ASCII characters out of route/path parsing while remaining deterministic and reversible with the standard library.
+
 Task-reference rules:
 
 - Current selections store the canonical `m-N` ID.
@@ -239,13 +243,13 @@ The browser service applies WebUI-specific case-insensitive any-match label filt
 
 Available labels and milestone choices are collected from the unfiltered board, so one filter never erases another filter's choices. The revision hash remains based on unfiltered board state so external changes still trigger refreshes.
 
-Milestone filtering resolves active milestones, referenced archived milestones, and unknown raw references. Task assignment selectors show only active milestones plus an existing unknown value when editing a task.
+Milestone filtering resolves active milestones, referenced archived milestones, and unknown raw references. Task assignment selectors show only active milestones plus the task's exact existing raw value when it differs from the canonical assignment value, including an active milestone referenced by a unique title alias. Ordinary saves keep that raw option selected; a separate canonical active option lets the user explicitly convert it to the stable ID. Archived and unknown existing values remain preservable but cannot be newly assigned.
 
 ### 4. Status editing remains config-based and becomes safe
 
 Replace the statuses textarea with an ordered list of rows, usage counts, Move up, Move down, and Remove controls, plus an Add status input. Existing names are not directly editable. A rename requires adding the replacement, moving tasks, and removing the old status.
 
-Default status becomes a selector driven by the working list. The working list initializes from configured statuses when non-empty; otherwise it uses task-derived local active statuses in board order; if there are no task-derived statuses, it contains the current default status. UI removal is disabled when the status is selected as default or used by a current active local task. The server repeats both checks using the submitted final statuses/default pair and current task files.
+Default status becomes a selector driven by the working list. The working list initializes from configured statuses when non-empty; otherwise it uses task-derived local active statuses in board order. In either case, append the current default status when it is not already present case-insensitively; with no configured or task-derived statuses, the list therefore contains only the current default. UI removal is disabled when the status is selected as default or used by a current active local task. The server repeats both checks using the submitted final statuses/default pair and current task files.
 
 Partial settings requests retain their existing compatibility:
 
@@ -272,7 +276,7 @@ Existing `POST /api/tasks/<id>/status` changes to call ordinal-aware append beha
 ### Milestones
 
 - `GET /api/milestones`
-  - Returns active and archived summaries with `key`, title, due date, description, format, path, and task-reference count. `key` is the canonical ID for current records and the exact milestone name for legacy records.
+  - Returns active and archived summaries with `key`, title, due date, description, format, path, and task-reference count. `key` is the canonical ID for current records and the path-safe deterministic `legacy-<base64url-name>` token described above for legacy records.
 - `POST /api/milestones`
   - Creates current format from title, optional description, and optional due date.
 - `POST /api/milestones/<key>/edit`
@@ -327,7 +331,7 @@ The dialog contains:
 - Empty state with a direct create action.
 - Read-only archived details.
 
-Task-create milestone inputs contain active milestones only. Task-edit inputs contain active milestones plus the task's current value when necessary. A current value that resolves to an archived milestone is rendered as `<title> (archived)`; an unresolved value is rendered as `Unknown: <value>`. In either case the option value remains the task's exact stored string, is enabled, and stays selected through an ordinary save until the user explicitly clears or replaces it.
+Task-create milestone inputs contain active milestones only. Task-edit inputs contain active milestones plus the task's exact current value when necessary. A current value that resolves to an active milestone through a non-canonical title alias is rendered as `<title> (stored as <value>)`, alongside the canonical `<title> (m-N)` option. A value that resolves to an archived milestone is rendered as `<title> (archived)`; an unresolved value is rendered as `Unknown: <value>`. The raw option value remains the task's exact stored string, is enabled, and stays selected through an ordinary save until the user explicitly clears or replaces it. Options are de-duplicated by exact value, not logical milestone, so the explicit canonical migration choice remains available.
 
 ### Status editor
 
@@ -381,7 +385,7 @@ Write a failing test before each behavior change.
 - Priority sorting with default and configured priority order.
 - Created-date ascending/descending, invalid/missing dates, and deterministic task-ID ties.
 - Ordinal assignment, no-op cases, rollback after injected write failure, cache invalidation, and `updated_date` preservation.
-- Cross-column append ordinal.
+- Cross-column append ordinal, target-task timestamp preservation, moved-task timestamp update, and existing status-callback success/failure semantics.
 - Current, legacy, BOM, readme, malformed, duplicate, and archived milestone reads.
 - ID allocation across active/archive and filename fallback collision reservation.
 - Current/legacy rename behavior, title/ID alias collisions, ambiguous lookup, due-date normalization, reference updates, and rollback.
@@ -394,7 +398,7 @@ Write a failing test before each behavior change.
 - Same-origin rejection and project-lock operation names.
 - Combined queue/milestone/repeated-label filtering and any-match semantics.
 - Available filter choices remain based on unfiltered data.
-- Milestone selectors preserve unknown references.
+- Milestone selectors preserve archived, unknown, and active-title-alias references while offering an explicit canonical-ID choice for the latter.
 - Status controls, usage data, accessible names, error regions, pending revision behavior, and responsive CSS contracts.
 - Package resources continue shipping in wheels/sdists.
 
@@ -425,7 +429,7 @@ Write a failing test before each behavior change.
 - Sorting priority or creation date persists after reload by changing only ordinals for every local task in the selected status.
 - Filtered views cannot cause a partial-column sort.
 - Configured, task-derived, and visible legacy status columns can be sorted when they contain local tasks.
-- Browser status drops append below ordinal-bearing and ordinal-less target tasks without changing `updated_date`.
+- Browser status drops append below ordinal-bearing and ordinal-less target tasks; ordinal-only target rewrites preserve `updated_date`, while the moved task receives the normal status-change timestamp and callback behavior.
 - Current Backlog.md milestones load with their real `m-N` IDs/titles, legacy Python milestones continue loading, and `readme.md` is absent.
 - New milestone files use current format and never reuse an active or archived numeric ID.
 - Current milestone renames preserve ID; task references follow the explicit update/remove policy.
