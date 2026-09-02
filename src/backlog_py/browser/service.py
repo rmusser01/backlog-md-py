@@ -870,11 +870,15 @@ def render_board_html(project: BacklogProject, *, queue_category_filter: str | N
     board_revision = escape(str(payload.get("revision", "")))
     columns_obj = payload["columns"]
     columns = columns_obj if isinstance(columns_obj, dict) else {}
-    mutable_statuses = set(
-        MutableRepository(project, refresh_remote_refs=False).status_assignment_options()
-    )
+    local_repository = MutableRepository(project, refresh_remote_refs=False)
+    local_tasks = local_repository.list_tasks()
+    sortable_statuses = {
+        status
+        for status in local_repository.status_assignment_options()
+        if sum(task.status == status for task in local_tasks) >= 2
+    }
     column_markup = "\n".join(
-        _render_column(str(status), tasks, mutable=str(status) in mutable_statuses)
+        _render_column(str(status), tasks, sortable=str(status) in sortable_statuses)
         for status, tasks in columns.items()
     )
     task_create_description_editor = _render_markdown_editor(
@@ -1100,10 +1104,10 @@ def _render_markdown_editor(*, field_id: str, name: str, label: str, data_field:
         </div>"""
 
 
-def _render_column(status: str, raw_tasks: object, *, mutable: bool = False) -> str:
+def _render_column(status: str, raw_tasks: object, *, sortable: bool = False) -> str:
     tasks = raw_tasks if isinstance(raw_tasks, list) else []
     sort_controls = ""
-    if mutable and len(tasks) >= 2:
+    if sortable and len(tasks) >= 2:
         sort_controls = """      <details class="column-sort">
         <summary>Sort</summary>
         <div class="column-sort-actions">

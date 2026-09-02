@@ -2404,7 +2404,7 @@ def test_browser_status_move_uses_ordinal_aware_append(tmp_path):
     assert stored == {"TASK-2": 1000, "TASK-3": 2000, "TASK-1": 3000}
 
 
-def test_active_branch_only_column_omits_sort_controls(tmp_path, monkeypatch):
+def test_configured_active_branch_only_column_omits_sort_controls(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
@@ -2416,7 +2416,7 @@ def test_active_branch_only_column_omits_sort_controls(tmp_path, monkeypatch):
         return GitTaskSnapshot(
             ref="refs/heads/feature",
             relative_path=f"backlog/tasks/{task_id.lower()} - {title}.md",
-            source=f"---\nid: {task_id}\ntitle: {title}\nstatus: Branch Only\n---\n",
+            source=f"---\nid: {task_id}\ntitle: {title}\nstatus: Done\n---\n",
             committed_at=1.0,
         )
 
@@ -2432,7 +2432,7 @@ def test_active_branch_only_column_omits_sort_controls(tmp_path, monkeypatch):
     finally:
         service.shutdown()
 
-    branch_column = html.split('data-status="Branch Only"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
+    branch_column = html.split('data-status="Done"', maxsplit=1)[1].split("</section>", maxsplit=1)[0]
     assert "TASK-20" in branch_column
     assert "TASK-21" in branch_column
     assert "column-sort" not in branch_column
@@ -2470,7 +2470,7 @@ def test_browser_board_html_exposes_sort_controls_only_for_multi_task_local_colu
     assert "column-sort" not in one_task_column
 
 
-def test_browser_board_status_region_is_live_and_outside_main(tmp_path):
+def test_browser_board_status_region_is_live_before_main_and_accessible_when_empty(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
@@ -2483,9 +2483,16 @@ def test_browser_board_status_region_is_live_and_outside_main(tmp_path):
         service.shutdown()
 
     marker = '<div id="board-status" class="board-status" role="status" aria-live="polite"></div>'
-    assert html.count('role="status"') == 1
     assert marker in html
-    assert html.index(marker) > html.index("</main>")
+    assert html.index(marker) < html.index("<main")
+
+    empty_rule = html.split(".board-status:empty {", maxsplit=1)[1].split("}", maxsplit=1)[0]
+    assert "display:" not in empty_rule
+    assert "visibility:" not in empty_rule
+    assert "content-visibility:" not in empty_rule
+    assert "margin: 0;" in empty_rule
+    assert "border: 0;" in empty_rule
+    assert "padding: 0;" in empty_rule
 
 
 def test_browser_sort_controls_use_visible_board_status_and_preserve_query_on_success(tmp_path):
@@ -2536,8 +2543,13 @@ def test_browser_sort_controls_are_responsive_and_keyboard_visible(tmp_path):
 
     assert ".column-sort-actions {" in html
     assert "flex-wrap: wrap;" in html
-    assert ".column-sort summary:focus-visible" in html
-    assert "outline: 2px solid var(--accent);" in html
+    focus_selector = (
+        ".column-sort summary:focus-visible,\n"
+        "    .column-sort-actions button:focus-visible {"
+    )
+    focus_rule = html.split(focus_selector, maxsplit=1)[1].split("}", maxsplit=1)[0]
+    assert "outline: 2px solid var(--accent);" in focus_rule
+    assert "outline-offset: 2px;" in focus_rule
     responsive = html.split("@media (max-width: 720px)", maxsplit=1)[1]
     assert ".queue-filter" in responsive
     assert ".column-sort-actions button" in responsive
