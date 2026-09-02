@@ -7,7 +7,7 @@ from backlog_py.compat.report import build_compatibility_report
 
 def _release_evidence(
     *,
-    generated_at: str = "2026-05-31",
+    generated_at: str = "2026-09-01",
     max_age_days: int = 14,
     rich_artifacts: list[str] | None = None,
     screenshot_artifacts: list[str] | None = None,
@@ -17,8 +17,8 @@ def _release_evidence(
         "generated_at": generated_at,
         "upstream_baseline": {
             "package": "backlog.md",
-            "version": "1.45.2",
-            "audit_date": "2026-05-31",
+            "version": "1.50.1",
+            "audit_date": "2026-09-01",
         },
         "command": {
             "argv": ["backlog-py", "compat", "evidence-template"],
@@ -61,13 +61,13 @@ def test_compatibility_report_summarizes_inventory_statuses():
     }
     assert report["upstream_baseline"] == {
         "package": "backlog.md",
-        "version": "1.45.2",
-        "audit_date": "2026-05-31",
+        "version": "1.50.1",
+        "audit_date": "2026-09-01",
     }
     assert report["summary"] == {
-        "implemented": 102,
+        "implemented": 106,
         "deferred": 0,
-        "total": 102,
+        "total": 106,
     }
     assert report["categories"]["cli"] == {
         "implemented": 45,
@@ -80,9 +80,9 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "total": 24,
     }
     assert report["categories"]["browser"] == {
-        "implemented": 24,
+        "implemented": 28,
         "deferred": 0,
-        "total": 24,
+        "total": 28,
     }
     assert report["categories"]["config"] == {
         "implemented": 2,
@@ -183,6 +183,18 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:service-transport-shutdown"]["expected"] == (
         "browser SSE shutdown event and client transport teardown policy"
     )
+    assert items_by_name["browser:persistent-column-sort"]["expected"] == (
+        "persistent per-column priority and creation-date sorting through task ordinals"
+    )
+    assert items_by_name["browser:milestone-management"]["expected"] == (
+        "browser current-format milestone create, edit, archive, remove, and task assignment"
+    )
+    assert items_by_name["browser:milestone-label-filters"]["expected"] == (
+        "browser milestone and case-insensitive any-match multi-label board filtering"
+    )
+    assert items_by_name["browser:structured-status-editor"]["expected"] == (
+        "browser ordered status add, remove, and move controls with default and usage safeguards"
+    )
     assert "git:hook-bypass" not in deferred_by_name
 
 
@@ -191,7 +203,7 @@ def test_compatibility_report_separates_release_validation_from_feature_counts()
 
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
-    assert report["summary"]["implemented"] == 102
+    assert report["summary"]["implemented"] == 106
     assert report["summary"]["deferred"] == 0
     assert report["full_browser_release_ready"] is False
     assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
@@ -208,19 +220,19 @@ def test_compatibility_report_marks_browser_release_ready_with_evidence_manifest
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 31),
+        today=date(2026, 9, 1),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
     assert report["full_browser_release_ready"] is True
     assert report["release_evidence"]["status"] == "fresh"
-    assert report["release_evidence"]["generated_at"] == "2026-05-31"
+    assert report["release_evidence"]["generated_at"] == "2026-09-01"
     assert report["release_evidence"]["age_days"] == 0
     assert report["release_evidence"]["max_age_days"] == 14
     assert report["release_evidence"]["upstream_baseline"] == {
         "package": "backlog.md",
-        "version": "1.45.2",
-        "audit_date": "2026-05-31",
+        "version": "1.50.1",
+        "audit_date": "2026-09-01",
     }
     assert report["release_evidence"]["command"]["argv"] == [
         "backlog-py",
@@ -247,20 +259,20 @@ def test_compatibility_report_marks_browser_release_ready_with_evidence_manifest
 def test_compatibility_report_keeps_release_gates_required_with_stale_evidence(tmp_path):
     evidence_path = tmp_path / "browser-release-evidence.json"
     evidence_path.write_text(
-        json.dumps(_release_evidence(generated_at="2026-05-01", max_age_days=7)),
+        json.dumps(_release_evidence(generated_at="2026-08-01", max_age_days=7)),
         encoding="utf-8",
     )
 
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 31),
+        today=date(2026, 9, 1),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
     assert report["full_browser_release_ready"] is False
     assert report["release_evidence"]["status"] == "stale"
-    assert report["release_evidence"]["age_days"] == 30
+    assert report["release_evidence"]["age_days"] == 31
     assert "stale" in report["release_evidence"]["error"]
     assert gates_by_name["browser:rich-edit-e2e-release-check"]["status"] == "required"
     assert "stale" in gates_by_name["browser:rich-edit-e2e-release-check"]["evidence_error"]
@@ -301,13 +313,14 @@ def test_compatibility_report_keeps_release_gates_required_with_mismatched_upstr
     evidence = _release_evidence()
     baseline = evidence["upstream_baseline"]
     assert isinstance(baseline, dict)
-    baseline["version"] = "1.44.0"
+    baseline["version"] = "1.45.2"
+    baseline["audit_date"] = "2026-05-31"
     evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
 
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 31),
+        today=date(2026, 9, 1),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
@@ -337,7 +350,7 @@ def test_compatibility_report_rejects_absolute_artifact_paths(tmp_path):
         report = build_compatibility_report(
             load_builtin_inventory(),
             release_evidence_path=evidence_path,
-            today=date(2026, 5, 31),
+            today=date(2026, 9, 1),
         )
         gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 
@@ -356,7 +369,7 @@ def test_compatibility_report_keeps_screenshot_gate_required_without_desktop_and
     report = build_compatibility_report(
         load_builtin_inventory(),
         release_evidence_path=evidence_path,
-        today=date(2026, 5, 31),
+        today=date(2026, 9, 1),
     )
     gates_by_name = {gate["name"]: gate for gate in report["release_gates"]["gates"]}
 

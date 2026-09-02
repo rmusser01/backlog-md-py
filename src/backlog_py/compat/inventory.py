@@ -259,6 +259,30 @@ def load_builtin_inventory() -> CompatibilityInventory:
             "browser edit form updates assignees, labels, priority, and milestone",
         ),
         _implemented(
+            "browser:persistent-column-sort",
+            "browser-implemented",
+            "web TaskColumn sort actions and /api/tasks/reorder",
+            "persistent per-column priority and creation-date sorting through task ordinals",
+        ),
+        _implemented(
+            "browser:milestone-management",
+            "browser-implemented",
+            "web MilestonesPage and milestone API",
+            "browser current-format milestone create, edit, archive, remove, and task assignment",
+        ),
+        _implemented(
+            "browser:milestone-label-filters",
+            "browser-implemented",
+            "web board milestone and label filters",
+            "browser milestone and case-insensitive any-match multi-label board filtering",
+        ),
+        _implemented(
+            "browser:structured-status-editor",
+            "browser-implemented",
+            "web Settings status controls",
+            "browser ordered status add, remove, and move controls with default and usage safeguards",
+        ),
+        _implemented(
             "browser:task-create-form",
             "browser-implemented",
             "web task create form",
@@ -444,5 +468,4 @@ def _implemented(name: str, classification: str, upstream_reference: str, expect
         status="implemented",
         fixture=name,
     )
-
 

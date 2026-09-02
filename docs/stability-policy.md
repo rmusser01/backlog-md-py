@@ -31,13 +31,13 @@ decision.
 
 ## Compatibility Baseline
 
-The audited upstream baseline is `backlog.md@1.45.2`. The compatibility
-inventory and oracle manifest define the implemented local behavior for that
-baseline. The `v1.45.2` upstream delta adds Windows ARM prebuilt binary
-packaging support and release workflow updates without changing the audited
-CLI, MCP, browser, or configuration surfaces. Future upstream audits should
-update the inventory, oracle manifest, and parity docs before changing the
-supported contract.
+The current feature audit baseline is `backlog.md@1.50.1`, commit `e515400`,
+audited 2026-09-01. The compatibility inventory and parity docs define the
+implemented local behavior for that baseline. The agent-critical oracle
+manifest remains pinned to its historical `backlog.md@1.45.2` CLI/MCP golden
+evidence because the 1.50.1 slice changes only WebUI feature coverage. Future
+audits should update the compatibility inventory and parity docs; update the
+oracle only when its agent-critical command surface or golden behavior changes.
 
 ## Change Policy
 

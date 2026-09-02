@@ -38,8 +38,8 @@ def _release_evidence_manifest() -> dict[str, object]:
         "generated_at": date.today().isoformat(),
         "upstream_baseline": {
             "package": "backlog.md",
-            "version": "1.45.2",
-            "audit_date": "2026-05-31",
+            "version": "1.50.1",
+            "audit_date": "2026-09-01",
         },
         "command": {
             "argv": ["backlog-py", "compat", "evidence-template"],
@@ -960,12 +960,12 @@ def test_compat_status_outputs_cutover_summary():
     assert result.exit_code == 0
     assert "agentCutoverReady: true" in result.output
     assert "fullBrowserReleaseReady: false" in result.output
-    assert "upstreamBaseline: backlog.md 1.45.2 audited 2026-05-31" in result.output
-    assert "implemented: 102" in result.output
+    assert "upstreamBaseline: backlog.md 1.50.1 audited 2026-09-01" in result.output
+    assert "implemented: 106" in result.output
     assert "deferred: 0" in result.output
-    assert "total: 102" in result.output
+    assert "total: 106" in result.output
     assert "cli: 45 implemented, 0 deferred, 45 total" in result.output
-    assert "browser: 24 implemented, 0 deferred, 24 total" in result.output
+    assert "browser: 28 implemented, 0 deferred, 28 total" in result.output
     assert "config: 2 implemented, 0 deferred, 2 total" in result.output
     assert "core: 3 implemented, 0 deferred, 3 total" in result.output
     assert "git: 4 implemented, 0 deferred, 4 total" in result.output
@@ -982,8 +982,8 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"full_browser_release_ready": false' in result.output
     assert '"upstream_baseline": {' in result.output
     assert '"package": "backlog.md"' in result.output
-    assert '"version": "1.45.2"' in result.output
-    assert '"audit_date": "2026-05-31"' in result.output
+    assert '"version": "1.50.1"' in result.output
+    assert '"audit_date": "2026-09-01"' in result.output
     assert '"browser:rich-edit-e2e-release-check"' in result.output
     assert '"browser:desktop-mobile-screenshot-release-check"' in result.output
     assert '"cli:interactive-task-view-editor"' in result.output
@@ -1011,6 +1011,10 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"browser:live-refresh-polling"' in result.output
     assert '"browser:sse-live-refresh"' in result.output
     assert '"browser:service-transport-shutdown"' in result.output
+    assert '"browser:persistent-column-sort"' in result.output
+    assert '"browser:milestone-management"' in result.output
+    assert '"browser:milestone-label-filters"' in result.output
+    assert '"browser:structured-status-editor"' in result.output
     assert '"core:task-timestamps"' in result.output
     assert '"core:date-only-timestamps"' in result.output
     assert '"git:hook-bypass"' in result.output
@@ -1071,8 +1075,8 @@ def test_compat_evidence_template_writes_portable_manifest(tmp_path):
     assert manifest["schema_version"] == 1
     assert manifest["upstream_baseline"] == {
         "package": "backlog.md",
-        "version": "1.45.2",
-        "audit_date": "2026-05-31",
+        "version": "1.50.1",
+        "audit_date": "2026-09-01",
     }
     assert manifest["freshness"]["max_age_days"] == 14
     assert manifest["command"]["argv"] == ["manual browser validation"]

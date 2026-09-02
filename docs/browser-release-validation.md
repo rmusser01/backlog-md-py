@@ -31,11 +31,11 @@ provenance, freshness policy, and release gate evidence:
 ```json
 {
   "schema_version": 1,
-  "generated_at": "2026-05-31",
+  "generated_at": "2026-09-01",
   "upstream_baseline": {
     "package": "backlog.md",
-    "version": "1.45.2",
-    "audit_date": "2026-05-31"
+    "version": "1.50.1",
+    "audit_date": "2026-09-01"
   },
   "command": {
     "argv": [
@@ -69,7 +69,7 @@ provenance, freshness policy, and release gate evidence:
 - `generated_at`, `upstream_baseline`, `command.argv`, `command.cwd`,
   `freshness.max_age_days`, and `release_gates` are required.
 - `schema_version` must be `1`, and `upstream_baseline` must match the current
-  compatibility baseline (`backlog.md` `1.45.2`, audited `2026-05-31`).
+  compatibility baseline (`backlog.md` `1.50.1`, audited `2026-09-01`).
 - Evidence is `fresh` only when `generated_at` is not in the future and its age
   is less than or equal to `freshness.max_age_days`.
 - Artifact paths must be repo-relative or artifact-bundle-relative. Absolute
@@ -106,6 +106,10 @@ The CI package job publishes a `compatibility-release-evidence` artifact with:
 Release candidates that advertise full browser parity should replace or extend
 the template with fresh browser artifacts and attach the completed manifest
 plus referenced files to the release evidence bundle.
+
+The checked-in `release-evidence/browser-release-evidence.json` is preserved as
+historical 1.45.2 evidence. It is intentionally not relabeled for this feature
+audit and therefore cannot satisfy the current 1.50.1 baseline check.
 
 ## Historical Validation Record
 

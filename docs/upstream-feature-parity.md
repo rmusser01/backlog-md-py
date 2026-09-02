@@ -5,15 +5,18 @@ Backlog.md feature set beyond the first local-file agent cutover gate.
 
 ## Current Upstream Baseline
 
-- Upstream package: `backlog.md@1.45.2`
-- Audit date: 2026-05-31
-- Latest release check: 2026-05-31, GitHub latest release `v1.45.2`
-- Sources: upstream `README.md`, `CLI-INSTRUCTIONS.md`, `ADVANCED-CONFIG.md`,
-  and `package.json`.
+- Upstream package: `backlog.md@1.50.1`
+- Upstream source commit: `e515400`
+- Audit date: 2026-09-01
+- Sources: upstream WebUI, API server, core/storage code, `README.md`,
+  `CLI-INSTRUCTIONS.md`, `ADVANCED-CONFIG.md`, and `package.json`.
 
-`v1.45.2` is a packaging release for upstream Windows ARM prebuilt binary
-support and release workflow updates. The audited CLI, MCP, browser, and
-configuration surfaces remain unchanged from the previous `v1.45.1` inventory.
+The 1.50.1 audit compared WebUI sorting, ordinal movement, milestone storage
+and lifecycle, milestone/label filtering, and status settings against the
+Python browser, service, core, and Markdown/config paths. The delivered source
+trace, compatibility decisions, test evidence, scope boundaries, and ordered
+follow-ups are recorded in
+[webui-gap-analysis.md](webui-gap-analysis.md).
 
 The agent-critical matrix remains focused on deterministic CLI, MCP, and file
 format behavior. Full upstream parity additionally includes human-facing
@@ -166,7 +169,21 @@ larger task commands:
   header/actions, single-column board flow, constrained dialogs, and mobile
   form actions.
 - Browser drag-and-drop status movement backed by the project write lock and
-  status validation.
+  status validation. Cross-column moves append through persistent target-column
+  ordinals, including materializing ordinal-less target tasks.
+- Persistent per-column priority and created-date sorting backed by complete
+  unfiltered local-column reads and deterministic task ordinals.
+- Dual-read/current-write milestone compatibility: current `m-N` files and
+  legacy `name` files are read without migration, new milestones use current
+  format, and CLI/MCP legacy fields remain available additively.
+- Browser milestone create/edit/archive/remove management, assignment,
+  resolved display, and milestone filtering, including explicit keep/clear
+  policy for referenced removal.
+- Browser repeated-label filtering with case-insensitive any-match semantics,
+  without changing the repository/CLI/MCP all-match label-filter contract.
+- Structured browser status add/move/remove controls with usage/default
+  safeguards and atomic multi-setting config replacement. This user-requested
+  status-list editor goes beyond the audited upstream WebUI.
 - Browser task detail endpoint and in-page dialog for task metadata,
   description, Acceptance Criteria, Definition of Done, and AC/DoD checklist
   state controls.
@@ -220,22 +237,18 @@ larger task commands:
   `/api/service/requests` endpoint and Service dialog request list.
 - Browser service shutdown state through idempotent stop scheduling and
   `/api/service/status` shutdown metadata.
-- Upstream `v1.45.2` Windows ARM packaging coverage maps to the Python
-  package's platform-independent wheel/sdist distribution model; no runtime
-  compatibility inventory item changed for this packaging-only upstream delta.
-
 ## Remaining Scope Decisions
 
 | Area | Future or rejected behavior | Current decision |
 | --- | --- | --- |
-| Browser UI | complex full-WYSIWYG Markdown round trips, shell-hook settings | Basic board service, responsive narrow-viewport layout, drag-and-drop status movement, basic task creation/editing, metadata editing, raw Markdown Implementation Notes/Final Summary editing, Markdown toolbar, safe preview controls, and dependency-free Rich mode v1 for raw description/notes/summary textareas, archive confirmation, task detail dialogs with safe Markdown and Mermaid rendering, document/decision read-only dialogs with safe Markdown rendering, AC/DoD checklist state controls, DoD defaults settings, safe general settings, safe git automation settings, SSE live refresh with polling fallback, and service status/shutdown/logging dialog controls are implemented; complex full-WYSIWYG Markdown round trips remain outside the current release scope, and shell-hook execution plus hook-bypass settings stay CLI-only |
+| Browser UI | branch selection/mutation, positional reorder, milestone lanes, all-tasks table, broader config/task metadata, document/decision writes, statistics/cleanup/search, incremental reconciliation, complex full-WYSIWYG Markdown round trips, shell-hook settings | Persistent sort, append movement, milestone lifecycle/assignment/filtering, multi-label filtering, structured statuses, responsive board, task CRUD/metadata/checklists, read-only documents/decisions, safe Markdown/Rich mode v1, safe settings, SSE/polling, and service controls are implemented. See the ordered dependencies in `webui-gap-analysis.md`; shell execution and hook bypass stay CLI-only. |
 | Browser service | future non-SSE persistent transports if introduced | Custom port, no-open, foreground lifecycle, health, service status, guarded local shutdown, idempotent shutdown state, bounded request logging, board JSON with deterministic revisions, SSE revision events with polling fallback, SSE shutdown events with client transport teardown, task create/edit/archive/checklist/detail JSON, and static board snapshot are implemented; any future WebSocket or long-lived non-SSE transport needs its own explicit shutdown policy |
 | Git automation | none currently tracked | Local auto-commit, explicit auto-commit hook bypass, fetch-only remote operations, and read-only active branch snapshots are implemented |
 
 ## Release Validation Gates
 
 `backlog-py compat status` reports implemented feature coverage and release
-validation separately. A `100/100` implemented inventory means the audited
+validation separately. A `106/106` implemented inventory means the audited
 upstream feature items in this clone are covered. A release that advertises
 browser parity must also provide browser release evidence. Use
 `backlog-py compat evidence-template` to create the manifest scaffold, then run
@@ -265,8 +278,10 @@ The current browser release gates are:
 
 ## Recommended Work Order
 
-1. Keep the oracle manifest and compatibility inventory pinned to the audited
-   upstream release before adding new runtime behavior.
+1. Keep the current compatibility inventory pinned to the audited upstream
+   feature release. Update the agent-critical oracle only when its CLI/MCP
+   golden command surface changes; it intentionally remains historical at
+   `backlog.md@1.45.2` for this WebUI-only audit.
 2. For release packaging, attach a fresh browser release-evidence manifest with
    repo-relative artifact paths and run
    `backlog-py compat status --release-evidence <manifest.json>` before claiming

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- Add persistent priority/created-date column sorting and ordinal-aware append
+  moves to the browser board.
+- Add current-format milestone management and assignment, plus URL-persisted
+  milestone and any-match multi-label board filters.
+- Replace raw status text editing with ordered add, move, and remove controls
+  backed by usage/default safeguards and atomic config updates.
+- Add the audited WebUI source-path gap analysis and ordered follow-up roadmap.
+
+### Changed
+
+- Refresh the current feature-audit baseline to `backlog.md@1.50.1` (commit
+  `e515400`, audited 2026-09-01) while preserving the historical 1.45.2
+  agent-critical oracle and browser release evidence.
+- Read both current and legacy milestone files without automatic migration;
+  new milestone files use canonical current format, and ordinary task saves
+  preserve existing legacy, archived, alias, and unknown milestone values.
+
 ## 2.0.1 - 2026-08-01
 
 A follow-up to 2.0.0 closing the two items its review left open. No behaviour

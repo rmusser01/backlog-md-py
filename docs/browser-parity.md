@@ -9,10 +9,14 @@ output and pure MCP helpers.
 
 ## Decision
 
-Browser feature coverage for the audited `backlog.md@1.45.2` baseline is
-implemented in the current compatibility inventory. Browser release readiness
-is still evidence-gated: releases that advertise full browser parity must
-attach fresh rich-edit E2E and desktop/mobile screenshot evidence through
+Browser feature coverage for the audited `backlog.md@1.50.1` baseline is
+implemented in the current compatibility inventory, including persistent
+column sorting, current-format milestone management, milestone/label filters,
+and the structured status editor. The detailed source-path comparison and
+remaining dependencies are in [webui-gap-analysis.md](webui-gap-analysis.md).
+Browser release readiness is still evidence-gated: releases that advertise
+full browser parity must attach fresh rich-edit E2E and desktop/mobile
+screenshot evidence through
 `backlog-py compat status --release-evidence <manifest.json>`.
 
 Browser capabilities remain independent from the first agent cutover candidate.
@@ -31,13 +35,16 @@ behavior matches source-tree behavior.
 | Requirement | Classification | Agent cutover impact | Rationale |
 | --- | --- | --- | --- |
 | Responsive Kanban board | Required for full clone | Implemented for narrow viewports | The static board includes explicit mobile viewport rules for header actions, board columns, task actions, dialogs, and form actions while preserving the dependency-free browser service. |
-| drag-and-drop task movement | Required for full clone | Implemented for status changes | Native drag/drop moves tasks across status columns through a loopback browser API protected by the project write lock, with invalid-status and persistence tests. |
+| drag-and-drop task movement | Required for full clone | Implemented for append status changes | Native drag/drop moves local working-tree tasks across status columns through a loopback browser API protected by the project write lock. Cross-column moves append below ordinal-bearing and ordinal-less target tasks; arbitrary positional and keyboard movement remain follow-ups. |
+| Persistent column sorting | Required for audited WebUI scope | Implemented for priority and created date | Each sortable local column exposes persistent priority and created-date actions. The locked server operation loads the complete unfiltered status column and writes deterministic ordinals without changing task update timestamps. |
+| Milestone management | Required for audited WebUI scope | Implemented for current and legacy files | The Milestones dialog and locked API support active/archive inspection, current-format create/edit/archive/remove, due dates, task assignment, and explicit keep/clear removal policy. Current `m-N` files and legacy `name` files are both read; new files use current format and existing files are never auto-migrated. |
+| Milestone and label filters | Required for audited WebUI scope | Implemented | One URL-backed filter form combines queue, milestone, and repeated labels. Labels use case-insensitive any-match semantics only in the WebUI; milestone aliases, archives, and unknown stored values remain visible and preservable. |
 | Task detail dialog | Required for full clone | Implemented for inspection, Markdown rendering, Mermaid diagrams, and checklist state | Browser cards can open a detail dialog backed by `/api/tasks/<id>` for metadata, safe Markdown-rendered description, client-side Mermaid diagrams, Implementation Notes, Final Summary, Acceptance Criteria, and Definition of Done. Checklist controls update AC/DoD check state through a locked `/api/tasks/<id>/checklist` endpoint. |
 | Document and decision detail | Required for full clone | Implemented for read-only inspection | Browser users can open read-only Documents and Decisions dialogs. The loopback service exposes `/api/docs`, `/api/docs/<id-or-path>`, `/api/decisions`, and `/api/decisions/<id>` for list/detail payloads, with safe Markdown HTML rendering for document bodies and decision sections. |
 | Task create/edit forms | Required for full clone | Basic create/edit plus metadata, Markdown toolbar, safe preview, Rich mode v1, and rich section replacement implemented | Browser users can create tasks through a locked `/api/tasks` endpoint and edit owned task fields through a locked `/api/tasks/<id>/edit` endpoint, including assignees, labels, priority, milestone, raw Markdown replacement for Implementation Notes and Final Summary, a local Markdown formatting toolbar for raw textareas, safe server-rendered preview mode, and dependency-free Rich mode for the supported Markdown subset. Broader WYSIWYG edit flows remain deferred. |
 | Acceptance criteria editor | Required for full clone | Basic replacement and check-state controls implemented | The browser edit form can replace Acceptance Criteria text through the safe core writer, and the task detail dialog can check or uncheck AC items without replacing the list. Rich text editing remains later UI work. |
 | Definition of Done settings | Required for full clone | Implemented for DoD defaults | Browser users can view and update project-level Definition of Done defaults through a settings dialog backed by the same safe config writer used by CLI and MCP. |
-| General project settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, `zeroPaddedIds`, and `statuses` through a locked settings endpoint. Shell-hook settings remain outside the browser surface. |
+| General project settings | Required for full clone | Implemented for safe non-shell settings and structured statuses | Browser users can view and update `projectName`, `defaultAssignee`, `defaultStatus`, `dateFormat`, `includeDatetimeInDates`, `defaultPort`, `autoOpenBrowser`, and `zeroPaddedIds` through a locked settings endpoint. Statuses use ordered add/move/remove controls with usage/default safeguards and one atomic config replacement. Status-list editing is a user-requested extension beyond the audited upstream WebUI. Shell-hook settings remain outside the browser surface. |
 | Git automation settings | Required for full clone | Implemented for safe non-shell settings | Browser users can view and update `remoteOperations`, `checkActiveBranches`, `activeBranchDays`, and `autoCommit` through the locked project settings endpoint. `onStatusChange` and `bypassGitHooks` remain rejected by the browser API because they introduce shell execution or hook-bypass risk. |
 | Real-time updates | Required for full clone | Implemented with SSE, shutdown events, and polling fallback | The browser page subscribes to `/api/board/events` for deterministic board revision events and reloads when external CLI, MCP, or browser-tab edits change task state. Browsers without `EventSource` keep using conservative `/api/board` polling. When service shutdown starts, the same SSE endpoint emits a shutdown event so the client closes the EventSource and stops revision polling. |
 | Archive confirmations | Required for full clone | Implemented for task archive | Browser users can archive active tasks through a confirmation dialog backed by a locked `/api/tasks/<id>/archive` endpoint. |
@@ -65,8 +72,9 @@ artifacts.
 Future browser milestones should not be marked complete until they have:
 
 - End-to-end browser tests for rich edit flows beyond the
-  implemented drag-and-drop status movement, basic create/edit forms, Markdown
-  edit toolbar, safe server-rendered preview, Rich mode v1, archive
+  implemented sorting, append status movement, milestone management and
+  filtering, multi-label filters, structured status editing, basic create/edit
+  forms, Markdown edit toolbar, safe server-rendered preview, Rich mode v1, archive
   confirmation, checklist-state controls, document/decision read-only
   inspection, task detail inspection, safe
   Markdown rendering, Mermaid detail diagrams, raw Markdown Implementation
