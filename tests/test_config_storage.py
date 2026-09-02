@@ -83,6 +83,42 @@ def test_set_config_values_validates_every_value_before_writing(
     assert project.config_path.read_bytes() == before
 
 
+def test_set_config_values_parses_priorities_as_a_list(project: BacklogProject) -> None:
+    config = config_module.set_config_values(project, {"priorities": "[critical, high]"})
+
+    assert config.priorities == ["critical", "high"]
+    assert yaml.safe_load(project.config_path.read_text(encoding="utf-8"))["priorities"] == ["critical", "high"]
+
+
+def test_set_config_values_validates_complete_candidate_before_writing(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    raw["defaultAssignee"] = {"invalid": True}
+    project.config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    before = project.config_path.read_bytes()
+    writes = _record_atomic_writes(monkeypatch)
+
+    with pytest.raises(ValueError, match="default_assignee must be a string"):
+        config_module.set_config_values(project, {"projectName": "Changed"})
+
+    assert writes == []
+    assert project.config_path.read_bytes() == before
+
+
+def test_set_config_values_empty_updates_do_not_write_or_reformat(
+    project: BacklogProject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = project.config_path.read_bytes()
+    writes = _record_atomic_writes(monkeypatch)
+
+    config = config_module.set_config_values(project, {})
+
+    assert writes == []
+    assert project.config_path.read_bytes() == before
+    assert config == load_config(project.config_path)
+
+
 def test_set_config_values_preserves_existing_alias_key(
     project: BacklogProject,
 ) -> None:
@@ -97,9 +133,27 @@ def test_set_config_values_preserves_existing_alias_key(
     assert "defaultStatus" not in written
 
 
+def test_set_config_values_reconciles_duplicate_aliases(project: BacklogProject) -> None:
+    raw = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    raw["default_status"] = "Stale"
+    project.config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    config = config_module.set_config_values(project, {"defaultStatus": "Ready"})
+
+    written = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    assert written["default_status"] == "Ready"
+    assert written["defaultStatus"] == "Ready"
+    assert config.default_status == "Ready"
+
+
 def test_set_config_values_removes_optional_values_like_single_value_api(
     project: BacklogProject,
 ) -> None:
+    raw = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    raw["zero_padded_ids"] = 2
+    raw["on_status_change"] = "echo stale"
+    project.config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
     config = config_module.set_config_values(
         project,
         {"zeroPaddedIds": "0", "onStatusChange": "disabled"},
@@ -107,10 +161,25 @@ def test_set_config_values_removes_optional_values_like_single_value_api(
 
     written = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
     assert "zeroPaddedIds" not in written
+    assert "zero_padded_ids" not in written
     assert "onStatusChange" not in written
+    assert "on_status_change" not in written
     assert config.zero_padded_ids is None
     assert config.on_status_change is None
 
 
 def test_set_config_value_keeps_optional_removal_return_contract(project: BacklogProject) -> None:
     assert set_config_value(project, "zeroPaddedIds", "0") == ("zeroPaddedIds", "(disabled)")
+
+
+def test_set_config_value_keeps_requested_alias_return_with_duplicates(project: BacklogProject) -> None:
+    raw = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    raw["default_status"] = "Stale"
+    project.config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    result = set_config_value(project, "defaultStatus", "Ready")
+
+    written = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    assert result == ("defaultStatus", "Ready")
+    assert written["default_status"] == "Ready"
+    assert written["defaultStatus"] == "Ready"
