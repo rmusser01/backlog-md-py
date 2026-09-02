@@ -33,11 +33,12 @@ decision.
 
 The current feature audit baseline is `backlog.md@1.50.1`, commit `e515400`,
 audited 2026-09-01. The compatibility inventory and parity docs define the
-implemented local behavior for that baseline. The agent-critical oracle
-manifest remains pinned to its historical `backlog.md@1.45.2` CLI/MCP golden
-evidence because the 1.50.1 slice changes only WebUI feature coverage. Future
-audits should update the compatibility inventory and parity docs; update the
-oracle only when its agent-critical command surface or golden behavior changes.
+implemented local behavior for the explicitly audited slice, not exhaustive
+upstream WebUI parity. The agent-critical oracle manifest remains pinned to its
+historical `backlog.md@1.45.2` CLI/MCP golden evidence because the 1.50.1 slice
+changes only WebUI feature coverage. Future audits should update the
+compatibility inventory and parity docs; update the oracle only when its
+agent-critical command surface or golden behavior changes.
 
 ## Change Policy
 
@@ -76,7 +77,7 @@ A stable release candidate should pass:
 - `uv run --extra dev python -m twine check dist/*`
 - `backlog-py compat status --json`
 - `backlog-py compat status --release-evidence <manifest.json>` when release
-  notes advertise full browser parity
+  notes declare the inventoried browser release scope ready
 - copied-repository mutation smoke with diff review
 - direct `backlog-py-mcp` stdio smoke
 - singleton daemon smoke for multi-agent use

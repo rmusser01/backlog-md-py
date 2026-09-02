@@ -1,8 +1,10 @@
 # Browser Release Validation
 
-`backlog-py compat status` separates implemented feature coverage from browser
-release readiness. A clone can report all audited features as implemented while
-still requiring browser release evidence before advertising full browser parity.
+`backlog-py compat status` separates explicit compatibility-inventory coverage
+from browser release readiness. A clone can report every inventoried item as
+implemented while still requiring browser release evidence before declaring the
+inventoried browser release scope ready. Neither result asserts exhaustive
+Backlog.md WebUI parity.
 The browser HTML template and its CSS/JavaScript assets are package resources,
 so package build validation should continue to confirm that source
 distributions and wheels include `src/backlog_py/browser/templates` and
@@ -86,10 +88,14 @@ provenance, freshness policy, and release gate evidence:
 
 When both required browser release gates pass, `fullBrowserReleaseReady` becomes
 `true` in plain output and `full_browser_release_ready` becomes `true` in JSON
-output. Plain output also reports `releaseEvidence: missing`, `fresh`, or
-`stale`; JSON output includes the same metadata under `release_evidence`. When
-fresh release evidence leaves a gate unsatisfied, both plain and JSON output
-include the gate-specific evidence error.
+output. These legacy field names apply only to the explicit compatibility
+inventory and its release gates; they are not an exhaustive upstream-parity
+claim. Plain output records that boundary in `coverageScope` and `coverageNote`,
+while JSON reports it under `coverage_scope`. Plain output also reports
+`releaseEvidence: missing`, `fresh`, or `stale`; JSON output includes the same
+metadata under `release_evidence`. When fresh release evidence leaves a gate
+unsatisfied, both plain and JSON output include the gate-specific evidence
+error.
 
 ## CI Evidence Artifacts
 
@@ -103,9 +109,9 @@ The CI package job publishes a `compatibility-release-evidence` artifact with:
   freshness handling, but does not by itself satisfy browser gates because it
   does not include manual browser artifacts.
 
-Release candidates that advertise full browser parity should replace or extend
-the template with fresh browser artifacts and attach the completed manifest
-plus referenced files to the release evidence bundle.
+Release candidates that declare the inventoried browser release scope ready
+should replace or extend the template with fresh browser artifacts and attach
+the completed manifest plus referenced files to the release evidence bundle.
 
 The checked-in `release-evidence/browser-release-evidence.json` is preserved as
 historical 1.45.2 evidence. It is intentionally not relabeled for this feature

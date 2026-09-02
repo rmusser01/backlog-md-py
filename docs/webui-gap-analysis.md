@@ -8,10 +8,13 @@ the delivered implementation described here was reviewed through `aba4799`.
 The audit covers the WebUI, its loopback API, the core mutation paths used by
 that API, and the Markdown/config formats those paths persist.
 
-This is a feature-coverage audit, not fresh browser release evidence. The
+This is the implemented, explicitly inventoried WebUI slice, not exhaustive
+Backlog.md 1.50.1 WebUI parity and not fresh browser release evidence. The ten
+ordered follow-ups below remain outside its 106 inventory entries. The
 checked-in agent-critical oracle and browser evidence remain historical
-`1.45.2` records. A release that advertises full browser parity still needs a
-new evidence manifest and desktop/mobile artifacts for the current baseline.
+`1.45.2` records. Declaring this inventoried browser release scope ready still
+requires a new evidence manifest and desktop/mobile artifacts for the current
+baseline.
 
 ## Delivered First-Priority Gaps
 

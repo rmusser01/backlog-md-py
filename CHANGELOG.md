@@ -17,6 +17,9 @@
 - Refresh the current feature-audit baseline to `backlog.md@1.50.1` (commit
   `e515400`, audited 2026-09-01) while preserving the historical 1.45.2
   agent-critical oracle and browser release evidence.
+- Scope compatibility counts and the legacy full-browser-readiness field to
+  the explicit inventory and release gates instead of implying exhaustive
+  Backlog.md 1.50.1 WebUI parity.
 - Read both current and legacy milestone files without automatic migration;
   new milestone files use canonical current format, and ordinary task saves
   preserve existing legacy, archived, alias, and unknown milestone values.

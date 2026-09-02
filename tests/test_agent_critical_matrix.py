@@ -728,8 +728,11 @@ def test_agent_critical_manifest_items_remain_covered_by_inventory():
     inventory_by_name = {item.name: item for item in inventory.items}
     fixture_by_name = {fixture.name: fixture for fixture in manifest.fixtures}
 
-    # The manifest is historical agent-critical evidence. Current WebUI-only
-    # inventory items are ratcheted by the compatibility report tests instead.
+    assert len(fixture_by_name) == 102
+    assert set(fixture_by_name) == {
+        item.name for item in inventory.items if item.fixture is not None
+    }
+
     for name, fixture in fixture_by_name.items():
         item = inventory_by_name[name]
         assert fixture.classification == item.classification
@@ -740,15 +743,13 @@ def test_agent_critical_matrix_doc_matches_inventory():
     inventory = load_builtin_inventory()
     matrix = MATRIX_PATH.read_text(encoding="utf-8")
     matrix_lines = matrix.splitlines()
-    oracle_names = {
-        fixture.name for fixture in load_oracle_manifest(MANIFEST_PATH).fixtures
-    }
 
-    # Keep this historical matrix aligned with its pinned oracle scope.
     for item in inventory.items:
-        if item.name not in oracle_names:
-            continue
-        detail = item.fixture if item.status == "implemented" else item.deferred_reason
+        detail = (
+            item.fixture
+            if item.fixture is not None
+            else "self-declared; no 1.45.2 oracle"
+        )
         assert any(
             item.name in line
             and item.expected in line

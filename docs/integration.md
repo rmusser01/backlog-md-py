@@ -83,9 +83,10 @@ implemented inventory can still report `fullBrowserReleaseReady: false` when
 browser release gates such as rich-edit E2E coverage and desktop/mobile
 screenshot checks still need recorded evidence. See
 `docs/browser-release-validation.md` for the JSON manifest format.
-The plain and JSON status output also includes the audited upstream baseline
-covered by the compatibility inventory; release-evidence manifests repeat that
-baseline and are rejected when they do not match it.
+The plain and JSON status output also includes `coverageScope`/`coverage_scope`
+metadata and the audited upstream baseline covered by the explicit inventory;
+release-evidence manifests repeat that baseline and are rejected when they do
+not match it.
 
 Unfiltered `search` output includes matching tasks, documents, and decisions.
 Search uses deterministic fuzzy ranking: exact token and substring matches rank
@@ -340,7 +341,9 @@ backlog-py compat status --json --release-evidence browser-release-evidence.json
 Read both `agent_cutover_ready` and `full_browser_release_ready`. The first
 answers whether agent-critical CLI/MCP/file-format coverage is implemented; the
 second answers whether browser-specific release gates have enough evidence for
-a full-browser-parity release claim.
+the inventoried browser release scope. The second is a legacy field name: read
+the adjacent `coverage_scope` metadata as well, because neither field asserts
+exhaustive upstream WebUI parity.
 
 Before switching a project to `backlog-md-py`, run at least:
 

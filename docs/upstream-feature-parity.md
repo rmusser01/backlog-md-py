@@ -11,11 +11,11 @@ Backlog.md feature set beyond the first local-file agent cutover gate.
 - Sources: upstream WebUI, API server, core/storage code, `README.md`,
   `CLI-INSTRUCTIONS.md`, `ADVANCED-CONFIG.md`, and `package.json`.
 
-The 1.50.1 audit compared WebUI sorting, ordinal movement, milestone storage
-and lifecycle, milestone/label filtering, and status settings against the
-Python browser, service, core, and Markdown/config paths. The delivered source
-trace, compatibility decisions, test evidence, scope boundaries, and ordered
-follow-ups are recorded in
+The 1.50.1 audit covers an explicitly inventoried WebUI slice: sorting, ordinal
+movement, milestone storage and lifecycle, milestone/label filtering, and
+status settings. It is not an exhaustive audit of every 1.50.1 WebUI feature.
+The delivered source trace, compatibility decisions, test evidence, scope
+boundaries, and ten ordered follow-ups are recorded in
 [webui-gap-analysis.md](webui-gap-analysis.md).
 
 The agent-critical matrix remains focused on deterministic CLI, MCP, and file
@@ -237,6 +237,7 @@ larger task commands:
   `/api/service/requests` endpoint and Service dialog request list.
 - Browser service shutdown state through idempotent stop scheduling and
   `/api/service/status` shutdown metadata.
+
 ## Remaining Scope Decisions
 
 | Area | Future or rejected behavior | Current decision |
@@ -248,9 +249,10 @@ larger task commands:
 ## Release Validation Gates
 
 `backlog-py compat status` reports implemented feature coverage and release
-validation separately. A `106/106` implemented inventory means the audited
-upstream feature items in this clone are covered. A release that advertises
-browser parity must also provide browser release evidence. Use
+validation separately. A `106/106` implemented inventory means every explicit
+inventory entry is self-declared implemented; it does not mean exhaustive
+Backlog.md 1.50.1 parity. Declaring the inventoried browser release scope ready
+also requires browser release evidence. Use
 `backlog-py compat evidence-template` to create the manifest scaffold, then run
 `backlog-py compat status --release-evidence <manifest.json>` with the completed
 fresh manifest format in `docs/browser-release-validation.md` to promote
@@ -284,8 +286,8 @@ The current browser release gates are:
    `backlog.md@1.45.2` for this WebUI-only audit.
 2. For release packaging, attach a fresh browser release-evidence manifest with
    repo-relative artifact paths and run
-   `backlog-py compat status --release-evidence <manifest.json>` before claiming
-   full browser readiness.
+   `backlog-py compat status --release-evidence <manifest.json>` before declaring
+   the inventoried browser slice release-ready.
 3. Keep any future shell-hook or browser-exposed automation behind separate
    security review; the CLI-only hook-bypass milestone is complete for
    explicit local auto-commit opt-in.

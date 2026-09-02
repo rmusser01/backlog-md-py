@@ -64,6 +64,13 @@ def test_compatibility_report_summarizes_inventory_statuses():
         "version": "1.50.1",
         "audit_date": "2026-09-01",
     }
+    assert report["coverage_scope"] == {
+        "kind": "explicit-inventory",
+        "note": (
+            "Counts and readiness cover only the explicit compatibility inventory and "
+            "release gates; they do not assert exhaustive Backlog.md 1.50.1 WebUI parity."
+        ),
+    }
     assert report["summary"] == {
         "implemented": 106,
         "deferred": 0,
@@ -186,15 +193,19 @@ def test_compatibility_report_lists_deferred_items_with_reasons():
     assert items_by_name["browser:persistent-column-sort"]["expected"] == (
         "persistent per-column priority and creation-date sorting through task ordinals"
     )
+    assert items_by_name["browser:persistent-column-sort"]["fixture"] is None
     assert items_by_name["browser:milestone-management"]["expected"] == (
         "browser current-format milestone create, edit, archive, remove, and task assignment"
     )
+    assert items_by_name["browser:milestone-management"]["fixture"] is None
     assert items_by_name["browser:milestone-label-filters"]["expected"] == (
         "browser milestone and case-insensitive any-match multi-label board filtering"
     )
+    assert items_by_name["browser:milestone-label-filters"]["fixture"] is None
     assert items_by_name["browser:structured-status-editor"]["expected"] == (
         "browser ordered status add, remove, and move controls with default and usage safeguards"
     )
+    assert items_by_name["browser:structured-status-editor"]["fixture"] is None
     assert "git:hook-bypass" not in deferred_by_name
 
 

@@ -961,6 +961,11 @@ def test_compat_status_outputs_cutover_summary():
     assert "agentCutoverReady: true" in result.output
     assert "fullBrowserReleaseReady: false" in result.output
     assert "upstreamBaseline: backlog.md 1.50.1 audited 2026-09-01" in result.output
+    assert "coverageScope: explicit-inventory" in result.output
+    assert (
+        "coverageNote: Counts and readiness cover only the explicit compatibility inventory and "
+        "release gates; they do not assert exhaustive Backlog.md 1.50.1 WebUI parity."
+    ) in result.output
     assert "implemented: 106" in result.output
     assert "deferred: 0" in result.output
     assert "total: 106" in result.output
@@ -981,6 +986,9 @@ def test_compat_status_json_outputs_deferred_items():
     assert '"agent_cutover_ready": true' in result.output
     assert '"full_browser_release_ready": false' in result.output
     assert '"upstream_baseline": {' in result.output
+    assert '"coverage_scope": {' in result.output
+    assert '"kind": "explicit-inventory"' in result.output
+    assert "they do not assert exhaustive Backlog.md 1.50.1 WebUI parity." in result.output
     assert '"package": "backlog.md"' in result.output
     assert '"version": "1.50.1"' in result.output
     assert '"audit_date": "2026-09-01"' in result.output

@@ -71,7 +71,11 @@ do not block the first local-file agent cutover candidate.
 | mcp:definition-of-done-defaults-get | implemented | definition_of_done_defaults_get(project) | mcp:definition-of-done-defaults-get |
 | mcp:definition-of-done-defaults-upsert | implemented | definition_of_done_defaults_upsert(project, items) | mcp:definition-of-done-defaults-upsert |
 
-## Implemented Full-Parity Extensions
+## Implemented Inventory Extensions
+
+The fixture column records historical `backlog.md@1.45.2` oracle mappings.
+The four WebUI-only additions from the 1.50.1 audit are self-declared current
+inventory entries and intentionally have no 1.45.2 oracle fixture.
 
 | Inventory item | Status | Expected command, resource, or tool | Fixture |
 | --- | --- | --- | --- |
@@ -99,6 +103,10 @@ do not block the first local-file agent cutover candidate.
 | browser:rich-markdown-editor | implemented | browser Rich mode for the supported Markdown editing subset | browser:rich-markdown-editor |
 | browser:mermaid-rendering | implemented | browser Mermaid diagram rendering for task detail Markdown fences | browser:mermaid-rendering |
 | browser:metadata-editing | implemented | browser edit form updates assignees, labels, priority, and milestone | browser:metadata-editing |
+| browser:persistent-column-sort | implemented | persistent per-column priority and creation-date sorting through task ordinals | self-declared; no 1.45.2 oracle |
+| browser:milestone-management | implemented | browser current-format milestone create, edit, archive, remove, and task assignment | self-declared; no 1.45.2 oracle |
+| browser:milestone-label-filters | implemented | browser milestone and case-insensitive any-match multi-label board filtering | self-declared; no 1.45.2 oracle |
+| browser:structured-status-editor | implemented | browser ordered status add, remove, and move controls with default and usage safeguards | self-declared; no 1.45.2 oracle |
 | browser:task-create-form | implemented | basic browser task create endpoint and form | browser:task-create-form |
 | browser:task-edit-form | implemented | basic browser task edit endpoint and form | browser:task-edit-form |
 | browser:task-archive-confirmation | implemented | browser task archive endpoint and confirmation dialog | browser:task-archive-confirmation |
