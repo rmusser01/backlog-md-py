@@ -874,7 +874,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            status = _status_from_payload(self._read_json_body())
+            status = _task_status_from_payload(self._read_json_body())
             task = with_project_write_lock(
                 self.server.project,
                 "browser_task_status",
@@ -2201,7 +2201,7 @@ def _task_detail_endpoint_task_id(path: str) -> str | None:
     return _endpoint_segment(path, "/api/tasks/")
 
 
-def _status_from_payload(payload: object) -> str:
+def _task_status_from_payload(payload: object) -> str:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
     status = payload.get("status")
@@ -2275,8 +2275,9 @@ def _task_create_kwargs_from_payload(payload: object) -> dict[str, object]:
         raise ValueError("Request body must be a JSON object")
     title = _required_string_field(payload, "title")
     create_kwargs: dict[str, object] = {"title": title}
+    if "status" in payload:
+        create_kwargs["status"] = _task_status_from_payload(payload)
     for payload_key, repository_key in (
-        ("status", "status"),
         ("description", "description"),
         ("priority", "priority"),
         ("milestone", "milestone"),
@@ -2300,9 +2301,10 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object")
     edit_kwargs: dict[str, object] = {}
-    for payload_key, repository_key in (("title", "title"), ("status", "status")):
-        if payload_key in payload:
-            edit_kwargs[repository_key] = _required_string_field(payload, payload_key)
+    if "title" in payload:
+        edit_kwargs["title"] = _required_string_field(payload, "title")
+    if "status" in payload:
+        edit_kwargs["status"] = _task_status_from_payload(payload)
     for payload_key, repository_key in (
         ("description", "description"),
         ("implementationNotes", "notes"),

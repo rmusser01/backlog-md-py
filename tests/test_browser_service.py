@@ -1184,6 +1184,105 @@ def test_browser_task_create_endpoint_creates_task_under_project_lock(tmp_path, 
     assert "title: Browser created task" in _created_task_file(repo).read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("source_kind", ["configured", "default", "local"])
+def test_browser_task_endpoints_round_trip_every_exact_assignable_status(tmp_path, source_kind):
+    repo = _copy_fixture_repo(tmp_path)
+    exact_status = " Intentional "
+    statuses = ["Configured"]
+    default = "Ready"
+    if source_kind == "configured":
+        statuses.insert(0, exact_status)
+    elif source_kind == "default":
+        default = exact_status
+    else:
+        _replace_browser_fixture_task_status(repo, exact_status)
+    project = _configure_statuses(repo, statuses, default=default)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        board = _get_json(f"{service.root_url}/api/board")
+        for index, status in enumerate(board["assignableStatuses"], start=2):
+            created = _post_json_response(
+                f"{service.root_url}/api/tasks",
+                {"title": f"Exact status {index}", "status": status},
+            )
+            edited = _post_json_response(
+                f"{service.root_url}/api/tasks/TASK-{index}/edit",
+                {"status": status},
+            )
+            detail = _get_json(f"{service.root_url}/api/tasks/TASK-{index}")
+            assert created["body"]["task"]["status"] == status
+            assert edited["body"]["task"]["status"] == status
+            assert detail["status"] == status
+    finally:
+        service.shutdown()
+
+    repository = MutableRepository(project)
+    assert exact_status in board["assignableStatuses"]
+    assert [repository.get_task(f"TASK-{index}").status for index in range(2, 2 + len(board["assignableStatuses"]))] == board[
+        "assignableStatuses"
+    ]
+
+
+@pytest.mark.parametrize("status_value", ["", " \t ", None, 17])
+@pytest.mark.parametrize("operation", ["create", "edit"])
+def test_browser_task_endpoints_reject_explicit_invalid_status_without_mutation(
+    tmp_path,
+    operation,
+    status_value,
+):
+    repo = _copy_fixture_repo(tmp_path)
+    project = _configure_statuses(repo, ["To Do", "In Progress"], default="To Do")
+    before = _backlog_snapshot(repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        url = f"{service.root_url}/api/tasks"
+        payload = {"title": "Must not exist", "status": status_value}
+        if operation == "edit":
+            url = f"{service.root_url}/api/tasks/TASK-1/edit"
+            payload = {"status": status_value}
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json(url, payload)
+    finally:
+        service.shutdown()
+
+    assert exc.value.code == 400
+    assert _backlog_snapshot(repo) == before
+
+
+def test_browser_task_endpoints_distinguish_omitted_status(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    exact_default = " Default "
+    project = _configure_statuses(repo, ["Configured"], default=exact_default)
+    original_status = MutableRepository(project).get_task("TASK-1").status
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        created = _post_json_response(
+            f"{service.root_url}/api/tasks",
+            {"title": "Default status"},
+        )
+        edited = _post_json_response(
+            f"{service.root_url}/api/tasks/TASK-1/edit",
+            {"title": "Status preserved"},
+        )
+        detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
+    finally:
+        service.shutdown()
+
+    assert created["body"]["task"]["status"] == exact_default
+    assert edited["body"]["task"]["status"] == original_status
+    assert detail["status"] == original_status
+    assert MutableRepository(project).get_task("TASK-2").status == exact_default
+
+
 def test_browser_task_create_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
