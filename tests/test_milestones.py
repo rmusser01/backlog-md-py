@@ -1311,6 +1311,34 @@ def test_current_edit_removes_owned_target_when_source_is_replaced_after_link(tm
     assert not target.exists()
 
 
+def test_current_edit_preserves_target_replaced_after_move_before_load(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    added.path.write_bytes(added.path.read_bytes().replace(b"\n", b"\r\n"))
+    original_source = added.path.read_bytes()
+    concurrent_target = b"\xffconcurrent edit target\n"
+    target = added.path.parent / "m-1 - beta.md"
+    original_loader = service._load_milestone
+    replaced = False
+
+    def replace_target_before_load(path: Path, *, archived: bool):
+        nonlocal replaced
+        if path == target and not replaced:
+            replaced = True
+            target.unlink()
+            target.write_bytes(concurrent_target)
+        return original_loader(path, archived=archived)
+
+    monkeypatch.setattr(service, "_load_milestone", replace_target_before_load)
+
+    with pytest.raises(UnicodeDecodeError):
+        service.edit_milestone("m-1", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == concurrent_target
+
+
 def test_current_edit_restores_original_before_inspecting_redirected_target(tmp_path, monkeypatch):
     repo = _copy_fixture(tmp_path)
     service = _service(repo)
@@ -1492,6 +1520,33 @@ def test_archive_removes_owned_target_when_source_is_replaced_after_link(tmp_pat
 
     assert added.path.read_bytes() == concurrent_source
     assert not target.exists()
+
+
+def test_archive_preserves_target_replaced_after_move_before_load(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    concurrent_target = b"\xffconcurrent archive target\n"
+    target = repo / "backlog" / "archive" / "milestones" / added.path.name
+    original_loader = service._load_milestone
+    replaced = False
+
+    def replace_target_before_load(path: Path, *, archived: bool):
+        nonlocal replaced
+        if path == target and not replaced:
+            replaced = True
+            target.unlink()
+            target.write_bytes(concurrent_target)
+        return original_loader(path, archived=archived)
+
+    monkeypatch.setattr(service, "_load_milestone", replace_target_before_load)
+
+    with pytest.raises(UnicodeDecodeError):
+        service.archive_milestone("m-1")
+
+    assert added.path.read_bytes() == original_source
+    assert target.read_bytes() == concurrent_target
 
 
 def test_list_milestones_rejects_symlinked_file_escape_before_read(tmp_path):

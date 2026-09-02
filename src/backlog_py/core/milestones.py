@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -165,9 +166,10 @@ class MilestoneService:
                 content = description.strip()
         source = _render_milestone(frontmatter, content)
         parse_task_markdown(source)
-        original_source = safe_existing.read_text(encoding="utf-8")
+        original_source = safe_existing.read_bytes()
         task_updates = self._task_reference_updates(existing, new_title, known) if update_tasks else []
         written_updates: list[_TaskReferenceUpdate] = []
+        move_identity: tuple[int, int] | None = None
         try:
             _atomic_write_text(safe_existing, source, base=self.project.backlog_dir)
             _write_task_updates(
@@ -178,7 +180,7 @@ class MilestoneService:
             if not same_path:
                 move_source = self._mutation_path(safe_existing)
                 move_target = self._mutation_path(safe_target)
-                _move_no_clobber(move_source, move_target, base=self.project.backlog_dir)
+                move_identity = _move_no_clobber(move_source, move_target, base=self.project.backlog_dir)
             result = self._load_milestone(safe_target, archived=False)
         except Exception:
             _rollback_task_updates(written_updates, base=self.project.backlog_dir)
@@ -188,6 +190,7 @@ class MilestoneService:
                 original_source,
                 source.encode("utf-8"),
                 same_path=same_path,
+                published_identity=move_identity,
                 base=self.project.backlog_dir,
             )
             raise
@@ -238,15 +241,19 @@ class MilestoneService:
         target.parent.mkdir(parents=True, exist_ok=True)
         safe_existing = self._mutation_path(existing.path)
         safe_target = self._mutation_path(target)
+        original_source = safe_existing.read_bytes()
+        move_identity: tuple[int, int] | None = None
         try:
             move_source = self._mutation_path(safe_existing)
             move_target = self._mutation_path(safe_target)
-            _move_no_clobber(move_source, move_target, base=self.project.backlog_dir)
+            move_identity = _move_no_clobber(move_source, move_target, base=self.project.backlog_dir)
             result = self._load_milestone(safe_target, archived=True)
         except Exception:
             _rollback_milestone_move(
                 safe_existing,
                 safe_target,
+                original_source,
+                published_identity=move_identity,
                 base=self.project.backlog_dir,
             )
             raise
@@ -585,7 +592,7 @@ def _rollback_task_updates(updates: list[_TaskReferenceUpdate], *, base: Path) -
             logger.warning("Failed to rollback task milestone reference {}: {}", update.path, exc)
 
 
-def _move_no_clobber(source: Path, target: Path, *, base: Path) -> None:
+def _move_no_clobber(source: Path, target: Path, *, base: Path) -> tuple[int, int]:
     safe_source = _mutation_path(base, source)
     safe_target = _mutation_path(base, target)
     source_identity = _path_identity(safe_source)
@@ -617,11 +624,71 @@ def _move_no_clobber(source: Path, target: Path, *, base: Path) -> None:
             base=base,
         )
         raise
+    return source_identity
 
 
 def _path_identity(path: Path) -> tuple[int, int]:
     stat = path.stat(follow_symlinks=False)
     return stat.st_dev, stat.st_ino
+
+
+def _path_has_identity(path: Path, identity: tuple[int, int], *, base: Path) -> bool:
+    try:
+        return _path_identity(_mutation_path(base, path)) == identity
+    except FileNotFoundError:
+        return False
+
+
+def _unlink_owned_path(path: Path, identity: tuple[int, int], *, base: Path) -> bool:
+    safe_path = _mutation_path(base, path)
+    if not _path_has_identity(safe_path, identity, base=base):
+        return False
+    safe_path = _mutation_path(base, safe_path)
+    if not _path_has_identity(safe_path, identity, base=base):
+        return False
+    safe_path.unlink()
+    return True
+
+
+def _restore_no_clobber(target: Path, source: bytes, *, base: Path) -> bool:
+    safe_target = _mutation_path(base, target)
+    temporary: Path | None = None
+    temporary_identity: tuple[int, int] | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b",
+            dir=safe_target.parent,
+            prefix=".milestone-rollback-",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            stat = os.fstat(handle.fileno())
+            temporary_identity = (stat.st_dev, stat.st_ino)
+            handle.write(source)
+            handle.flush()
+            os.fsync(handle.fileno())
+        safe_temporary = _mutation_path(base, temporary)
+        safe_target = _mutation_path(base, safe_target)
+        try:
+            os.link(safe_temporary, safe_target, follow_symlinks=False)
+        except FileExistsError:
+            return False
+        except Exception:
+            _remove_created_link(
+                safe_temporary,
+                safe_target,
+                temporary_identity,
+                publication_succeeded=False,
+                base=base,
+            )
+            raise
+        return _path_has_identity(safe_target, temporary_identity, base=base)
+    finally:
+        if temporary is not None and temporary_identity is not None:
+            try:
+                _unlink_owned_path(temporary, temporary_identity, base=base)
+            except Exception as exc:
+                logger.warning("Failed to clean up milestone rollback file {}: {}", temporary, exc)
 
 
 def _remove_created_link(
@@ -656,10 +723,11 @@ def _remove_created_link(
 def _rollback_milestone_edit(
     original: Path,
     target: Path,
-    original_source: str,
+    original_source: bytes,
     attempted_source: bytes,
     *,
     same_path: bool,
+    published_identity: tuple[int, int] | None,
     base: Path,
 ) -> None:
     try:
@@ -671,30 +739,86 @@ def _rollback_milestone_edit(
     if same_path and not original_exists:
         return
     if same_path or original_exists:
+        if published_identity is not None:
+            try:
+                _unlink_owned_path(target, published_identity, base=base)
+            except Exception as exc:
+                logger.warning("Failed to clean up moved milestone {}: {}", target, exc)
         try:
-            if _mutation_path(base, safe_original).read_bytes() != attempted_source:
+            safe_original = _mutation_path(base, safe_original)
+            if safe_original.read_bytes() != attempted_source:
                 return
-            _atomic_write_text(safe_original, original_source, base=base)
+            if published_identity is not None and _path_identity(safe_original) != published_identity:
+                return
+            _atomic_write_text(safe_original, original_source.decode("utf-8"), base=base)
         except Exception as exc:
             logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
         return
+    target_owned = False
+    if published_identity is not None:
+        try:
+            target_owned = _path_has_identity(target, published_identity, base=base)
+        except Exception as exc:
+            logger.warning("Failed to inspect moved milestone {}: {}", target, exc)
+    if target_owned:
+        assert published_identity is not None
+        try:
+            _move_no_clobber(target, safe_original, base=base)
+            _atomic_write_text(safe_original, original_source.decode("utf-8"), base=base)
+            return
+        except Exception as exc:
+            logger.warning("Failed to move back milestone {}: {}", original, exc)
+            try:
+                _unlink_owned_path(target, published_identity, base=base)
+            except Exception as cleanup_error:
+                logger.warning("Failed to clean up moved milestone {}: {}", target, cleanup_error)
     try:
-        safe_target = _mutation_path(base, target)
-        if safe_target.exists():
-            _move_no_clobber(safe_target, safe_original, base=base)
-        _atomic_write_text(safe_original, original_source, base=base)
+        _restore_no_clobber(safe_original, original_source, base=base)
     except Exception as exc:
         logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
 
 
-def _rollback_milestone_move(original: Path, target: Path, *, base: Path) -> None:
+def _rollback_milestone_move(
+    original: Path,
+    target: Path,
+    original_source: bytes,
+    *,
+    published_identity: tuple[int, int] | None,
+    base: Path,
+) -> None:
     try:
         safe_original = _mutation_path(base, original)
-        safe_target = _mutation_path(base, target)
-        if not safe_original.exists() and safe_target.exists():
-            _move_no_clobber(safe_target, safe_original, base=base)
     except Exception as exc:
         logger.warning("Failed to rollback milestone move {}: {}", original, exc)
+        return
+    if safe_original.exists():
+        if published_identity is not None:
+            try:
+                _unlink_owned_path(target, published_identity, base=base)
+            except Exception as exc:
+                logger.warning("Failed to clean up moved milestone {}: {}", target, exc)
+        return
+    target_owned = False
+    if published_identity is not None:
+        try:
+            target_owned = _path_has_identity(target, published_identity, base=base)
+        except Exception as exc:
+            logger.warning("Failed to inspect moved milestone {}: {}", target, exc)
+    if target_owned:
+        assert published_identity is not None
+        try:
+            _move_no_clobber(target, safe_original, base=base)
+            return
+        except Exception as exc:
+            logger.warning("Failed to move back milestone {}: {}", original, exc)
+            try:
+                _unlink_owned_path(target, published_identity, base=base)
+            except Exception as cleanup_error:
+                logger.warning("Failed to clean up moved milestone {}: {}", target, cleanup_error)
+    try:
+        _restore_no_clobber(safe_original, original_source, base=base)
+    except Exception as exc:
+        logger.warning("Failed to restore milestone {}: {}", original, exc)
 
 
 def _render_milestone(frontmatter: dict[str, Any], content: str) -> str:
