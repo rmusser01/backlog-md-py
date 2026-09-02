@@ -124,7 +124,6 @@ class MilestoneService:
         known = self.list_milestones(include_archived=update_tasks)
         active = [record for record in known if not record.archived]
         existing = _resolve_milestone(reference, active)
-        self._assert_aliases_available(_milestone_aliases(existing), active, ignore=existing)
         new_title = existing.title if title is None else _required_title(title)
         if title is None:
             target = existing.path
@@ -133,12 +132,13 @@ class MilestoneService:
             target = self._current_active_path(existing.id, new_title)
         else:
             target = self._active_path(new_title)
-        candidate_aliases = (
-            _current_aliases(existing.id, new_title, target.stem)
-            if existing.format == "current" and existing.id is not None
-            else {new_title.casefold(), target.stem.casefold()}
-        )
-        self._assert_aliases_available(candidate_aliases, active, ignore=existing)
+        if title is not None:
+            candidate_aliases = (
+                _current_aliases(existing.id, new_title, target.stem)
+                if existing.format == "current" and existing.id is not None
+                else {new_title.casefold(), target.stem.casefold()}
+            )
+            self._assert_aliases_available(candidate_aliases, active, ignore=existing)
 
         safe_existing = self._mutation_path(existing.path)
         safe_target = self._mutation_path(target)
@@ -201,7 +201,6 @@ class MilestoneService:
         known = self.list_milestones(include_archived=clear_tasks)
         active = [record for record in known if not record.archived]
         existing = _resolve_milestone(name, active)
-        self._assert_aliases_available(_milestone_aliases(existing), active, ignore=existing)
         task_updates = self._task_reference_updates(existing, None, known) if clear_tasks else []
         safe_existing = self._mutation_path(existing.path)
         original_source = safe_existing.read_text(encoding="utf-8")
@@ -234,7 +233,6 @@ class MilestoneService:
     def archive_milestone(self, name: str) -> MilestoneRecord:
         active = self.list_milestones()
         existing = _resolve_milestone(name, active)
-        self._assert_aliases_available(_milestone_aliases(existing), active, ignore=existing)
         target = self._archive_path(existing.path.name)
         if target.exists():
             raise MilestoneConflictError(f"Archived milestone already exists: {existing.name}")
@@ -563,8 +561,18 @@ def _rollback_milestone_edit(
 ) -> None:
     try:
         safe_original = _mutation_path(base, original)
+    except Exception as exc:
+        logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
+        return
+    if same_path or safe_original.exists():
+        try:
+            _atomic_write_text(safe_original, original_source, base=base)
+        except Exception as exc:
+            logger.warning("Failed to rollback milestone edit {}: {}", original, exc)
+        return
+    try:
         safe_target = _mutation_path(base, target)
-        if not same_path and not safe_original.exists() and safe_target.exists():
+        if safe_target.exists():
             os.replace(safe_target, safe_original)
         _atomic_write_text(safe_original, original_source, base=base)
     except Exception as exc:

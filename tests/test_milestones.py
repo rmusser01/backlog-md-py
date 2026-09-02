@@ -817,6 +817,56 @@ def test_rename_rejects_aliases_owned_by_another_active_milestone(tmp_path, alia
     assert editable.exists()
 
 
+def test_canonical_rename_can_disambiguate_a_duplicate_title(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    first = _write_current_milestone(repo, "m-1", "Release")
+    second = _write_current_milestone(repo, "m-2", "release")
+
+    renamed = _service(repo).rename_milestone("m-1", "Unique")
+
+    assert renamed.id == "m-1"
+    assert renamed.title == "Unique"
+    assert not first.exists()
+    assert second.exists()
+
+
+def test_canonical_description_edit_is_not_blocked_by_a_duplicate_title(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    first = _write_current_milestone(repo, "m-1", "Release")
+    second = _write_current_milestone(repo, "m-2", "release")
+
+    edited = _service(repo).edit_milestone("m-1", description="Updated")
+
+    assert edited.path == first
+    assert edited.description == "Updated"
+    assert second.exists()
+
+
+def test_canonical_remove_is_not_blocked_by_a_duplicate_title(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    first = _write_current_milestone(repo, "m-1", "Release")
+    second = _write_current_milestone(repo, "m-2", "release")
+
+    removed = _service(repo).remove_milestone("m-1")
+
+    assert removed.id == "m-1"
+    assert not first.exists()
+    assert second.exists()
+
+
+def test_canonical_archive_is_not_blocked_by_a_duplicate_title(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    first = _write_current_milestone(repo, "m-1", "Release")
+    second = _write_current_milestone(repo, "m-2", "release")
+
+    archived = _service(repo).archive_milestone("m-1")
+
+    assert archived.id == "m-1"
+    assert archived.archived is True
+    assert not first.exists()
+    assert second.exists()
+
+
 def test_current_edit_preserves_id_unknown_frontmatter_and_other_body_sections(tmp_path):
     repo = _copy_fixture(tmp_path)
     old_path = _write_current_milestone(
@@ -1095,6 +1145,36 @@ def test_current_edit_does_not_overwrite_a_target_created_during_transaction(tmp
 
     assert added.path.read_bytes() == original_source
     assert target.read_bytes() == b"concurrent file\n"
+
+
+def test_current_edit_restores_original_before_inspecting_redirected_target(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    added = service.add_milestone("Alpha")
+    original_source = added.path.read_bytes()
+    target = added.path.parent / "m-1 - beta.md"
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(b"outside stays unchanged\n")
+    original_writer = milestones_module._atomic_write_text
+    redirected = False
+
+    def redirect_target_after_milestone_write(path: Path, source: str, base: Path | None = None) -> None:
+        nonlocal redirected
+        original_writer(path, source, base=base)
+        if path == added.path and not redirected:
+            redirected = True
+            try:
+                target.symlink_to(outside)
+            except OSError as exc:
+                pytest.skip(f"symlink creation unavailable: {exc}")
+
+    monkeypatch.setattr(milestones_module, "_atomic_write_text", redirect_target_after_milestone_write)
+
+    with pytest.raises(MilestoneMutationError, match="outside allowed base"):
+        service.edit_milestone("m-1", title="Beta")
+
+    assert added.path.read_bytes() == original_source
+    assert outside.read_bytes() == b"outside stays unchanged\n"
 
 
 def test_current_edit_rolls_back_a_rename_that_raises_after_moving(tmp_path, monkeypatch):
