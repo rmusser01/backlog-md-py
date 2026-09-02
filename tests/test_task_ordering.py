@@ -157,6 +157,17 @@ def test_sort_tasks_by_created_date_uses_natural_id_for_equivalent_instants(
     assert result.task_ids == ("TASK-1", "TASK-2", "TASK-3", "TASK-4")
 
 
+def test_sort_tasks_by_created_date_keeps_boundary_offset_overflows_last(project: BacklogProject) -> None:
+    _write_task(project, task_id="TASK-1", created_date="2026-09-01T12:00:00Z")
+    _write_task(project, task_id="TASK-2", created_date="0001-01-01T00:00:00+14:00")
+    _write_task(project, task_id="TASK-3", created_date="9999-12-31T23:59:59-14:00")
+    _write_task(project, task_id="TASK-4")
+
+    result = MutableRepository(project).sort_tasks("To Do", sort="created", direction="asc")
+
+    assert result.task_ids == ("TASK-1", "TASK-2", "TASK-3", "TASK-4")
+
+
 def test_sort_tasks_by_priority_uses_only_local_active_tasks(project: BacklogProject) -> None:
     _write_task(project, task_id="TASK-2", priority="low")
     _write_task(project, task_id="TASK-1", priority="high")

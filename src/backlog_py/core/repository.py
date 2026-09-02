@@ -851,14 +851,20 @@ class MutableRepository(ReadOnlyRepository):
             priorities = config.priorities or _DEFAULT_PRIORITIES
             ordered_tasks = sorted(tasks, key=lambda task: _priority_order_key(task, priorities))
         else:
-            valid_tasks = [task for task in tasks if _created_datetime(task) is not None]
-            valid_tasks.sort(key=lambda task: _task_sort_key(task.id))
-            valid_tasks.sort(key=_created_datetime, reverse=direction == "desc")
-            invalid_tasks = sorted(
-                (task for task in tasks if _created_datetime(task) is None),
-                key=lambda task: _task_sort_key(task.id),
-            )
-            ordered_tasks = [*valid_tasks, *invalid_tasks]
+            valid_tasks: list[tuple[TaskRecord, datetime]] = []
+            invalid_tasks: list[TaskRecord] = []
+            for task in tasks:
+                created = _created_datetime(task)
+                if created is None:
+                    invalid_tasks.append(task)
+                else:
+                    valid_tasks.append((task, created))
+            valid_tasks.sort(key=lambda item: _task_sort_key(item[0].id))
+            valid_tasks.sort(key=lambda item: item[1], reverse=direction == "desc")
+            ordered_tasks = [
+                *(task for task, _ in valid_tasks),
+                *sorted(invalid_tasks, key=lambda task: _task_sort_key(task.id)),
+            ]
 
         changed_task_ids = self._assign_task_ordinals(ordered_tasks)
         return TaskSortResult(
@@ -1898,7 +1904,10 @@ def _created_datetime(task: TaskRecord) -> datetime | None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+    try:
+        return value.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        return None
 
 
 def _task_sort_key(task_id: str) -> tuple[str, tuple[tuple[int, int | str], ...]]:
