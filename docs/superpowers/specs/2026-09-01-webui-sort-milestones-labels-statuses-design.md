@@ -146,7 +146,7 @@ Supported requests:
 - `sort: "priority"`, with no direction.
 - `sort: "created"`, with `direction: "asc"` or `"desc"`.
 
-The operation loads the complete local column under the project lock, rejects invalid status/sort/direction values before writing, deterministically sorts, and assigns `1000, 2000, 3000, ...` ordinals.
+The operation loads the complete local column under the project lock, rejects invalid status/sort/direction values before writing, deterministically sorts, and assigns `1000, 2000, 3000, ...` ordinals. A sortable status is valid when it is configured or currently used by at least one local active task. This covers task-derived columns when `statuses` is absent or empty, plus visible legacy columns whose task status is no longer configured. An empty status that is neither configured nor used is rejected.
 
 Priority order comes from an optional Backlog.md-compatible `priorities` config list. If absent or empty, use high, medium, low. Matching is normalized case-insensitively; unknown and missing priorities sort last. Equal priorities use natural task-ID order.
 
@@ -162,7 +162,15 @@ Do not implement a sort as repeated `edit_task()` calls. That would create misle
 
 This is application-level rollback, not a claim of crash-safe multi-file transactions. A process or machine failure between file replacements can still leave a partial batch. Adding a journal is not justified for this feature.
 
-Add a second repository helper for browser status movement that changes status and assigns the next target-column ordinal in one task write. Because the current browser supports column-level, not positional, drops, append semantics are sufficient.
+Add a second repository helper for browser status movement. Because the current browser supports column-level, not positional, drops, append semantics are sufficient. A drop onto the task's existing status is a no-op. For a cross-column drop:
+
+1. Load target tasks in their current rendered order, excluding the moved task.
+2. Keep valid existing ordinals unchanged.
+3. Materialize ordinal-less target tasks after the greatest valid target ordinal, in their existing deterministic order.
+4. Give the moved task the next ordinal after every target task.
+5. Apply the status change and any required ordinal materialization through the same rollback-backed batch writer used by sorting.
+
+This ensures “append” really means the bottom of a column. Writing an ordinal only to the moved task would incorrectly place it above every ordinal-less target task because ordinal-bearing tasks currently sort first.
 
 ### 2. Milestones use stable optional identity without breaking legacy callers
 
@@ -215,7 +223,9 @@ Task-reference rules:
 - Archived milestones remain resolvable for display but are unavailable for new assignment.
 - Unknown references remain visible and are preserved until explicitly cleared or replaced.
 
-Due dates use the current Backlog.md UTC datetime shape. Offset-bearing input is normalized to UTC minute precision. Date-only and invalid values fail before writes.
+Due dates accept the current Backlog.md UTC datetime shapes: `YYYY-MM-DD HH:MM` or `YYYY-MM-DDTHH:MM`, optional seconds/fraction, and optional `Z` or numeric offset. Offset-bearing input is converted to UTC; input without an offset, including browser `datetime-local` values, is interpreted as UTC. Storage is normalized to `YYYY-MM-DD HH:MM`. Date-only and invalid values fail before writes.
+
+Current milestone filenames use `m-N - <safe-title>.md`. `<safe-title>` removes `< > : " / \\ | ? *`, collapses whitespace to hyphens, lowercases the result, and truncates it to 50 characters, matching the audited upstream convention. If sanitization produces an empty value, use `milestone` rather than creating an empty filename suffix.
 
 ### 3. Browser filters are server-rendered view state
 
@@ -235,7 +245,14 @@ Milestone filtering resolves active milestones, referenced archived milestones, 
 
 Replace the statuses textarea with an ordered list of rows, usage counts, Move up, Move down, and Remove controls, plus an Add status input. Existing names are not directly editable. A rename requires adding the replacement, moving tasks, and removing the old status.
 
-Default status becomes a selector driven by the working list. UI removal is disabled when the status is selected as default or used by a current active local task. The server repeats both checks using the submitted final statuses/default pair and current task files.
+Default status becomes a selector driven by the working list. The working list initializes from configured statuses when non-empty; otherwise it uses task-derived local active statuses in board order; if there are no task-derived statuses, it contains the current default status. UI removal is disabled when the status is selected as default or used by a current active local task. The server repeats both checks using the submitted final statuses/default pair and current task files.
+
+Partial settings requests retain their existing compatibility:
+
+- When `statuses` is submitted, it must be non-empty and the submitted or current default must be a member.
+- When only `defaultStatus` is submitted and configured statuses are non-empty, the new default must be a member.
+- When only `defaultStatus` is submitted and statuses are absent or empty, any non-empty default remains valid.
+- When neither field is submitted, status-pair validation does not run.
 
 Add a storage helper that applies multiple validated config changes to one loaded raw mapping and performs one atomic config-file replacement. `set_config_value()` can continue to expose the single-setting API, while the browser uses the batch helper. Unknown config keys remain preserved.
 
@@ -255,7 +272,7 @@ Existing `POST /api/tasks/<id>/status` changes to call ordinal-aware append beha
 ### Milestones
 
 - `GET /api/milestones`
-  - Returns active and archived summaries with stable storage key, title, due date, description, format, path, and task-reference count.
+  - Returns active and archived summaries with `key`, title, due date, description, format, path, and task-reference count. `key` is the canonical ID for current records and the exact milestone name for legacy records.
 - `POST /api/milestones`
   - Creates current format from title, optional description, and optional due date.
 - `POST /api/milestones/<key>/edit`
@@ -263,7 +280,7 @@ Existing `POST /api/tasks/<id>/status` changes to call ordinal-aware append beha
 - `POST /api/milestones/<key>/archive`
   - Moves an active milestone to the archive and preserves task references.
 - `POST /api/milestones/<key>/remove`
-  - Requires explicit `taskHandling: "keep" | "clear"`; omission rejects when references exist.
+  - When references exist, requires explicit `taskHandling: "keep" | "clear"` and rejects omission with `409`. When no references exist, omission is accepted and is equivalent to `keep`.
 
 The API deliberately follows the existing browser service's POST action-route style rather than adding isolated PUT/DELETE handling.
 
@@ -310,7 +327,7 @@ The dialog contains:
 - Empty state with a direct create action.
 - Read-only archived details.
 
-Task create/edit milestone inputs become selectors. An unknown existing reference is rendered as `Unknown: <value>` and remains selected until the user changes it.
+Task-create milestone inputs contain active milestones only. Task-edit inputs contain active milestones plus the task's current value when necessary. A current value that resolves to an archived milestone is rendered as `<title> (archived)`; an unresolved value is rendered as `Unknown: <value>`. In either case the option value remains the task's exact stored string, is enabled, and stays selected through an ordinary save until the user explicitly clears or replaces it.
 
 ### Status editor
 
@@ -407,13 +424,16 @@ Write a failing test before each behavior change.
 
 - Sorting priority or creation date persists after reload by changing only ordinals for every local task in the selected status.
 - Filtered views cannot cause a partial-column sort.
-- Browser status drops append predictably in the target column.
+- Configured, task-derived, and visible legacy status columns can be sorted when they contain local tasks.
+- Browser status drops append below ordinal-bearing and ordinal-less target tasks without changing `updated_date`.
 - Current Backlog.md milestones load with their real `m-N` IDs/titles, legacy Python milestones continue loading, and `readme.md` is absent.
 - New milestone files use current format and never reuse an active or archived numeric ID.
 - Current milestone renames preserve ID; task references follow the explicit update/remove policy.
+- Ordinary task edits preserve resolved archived and unresolved milestone references.
 - Browser users can create, edit, archive, remove, assign, display, and filter milestones.
 - Browser users can filter by multiple task labels with any-match semantics and preserve filters in the URL.
 - Browser users can add, remove, and reorder statuses; unsafe removals are rejected without config mutation.
+- Partial settings updates retain their existing behavior when statuses are absent or empty.
 - Existing CLI/MCP milestone `name`, path, content, and archive behavior remains available, with current-format fields added rather than replacing existing fields.
 - No frontend runtime/build dependency is added.
 - Focused and full blocking test/lint gates pass, with advisory type-check changes reported accurately.
