@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.1.0 - 2026-09-02
+
+This release adds guided project setup, repository diagnostics, and persistent
+browser management for task order, milestones, labels, and statuses. It also
+improves feedback during slower operations and reduces repeated repository
+scans across the browser, TUI, MCP, and cross-branch paths.
+
 ### Added
 
 - Add persistent priority/created-date column sorting and ordinal-aware append
@@ -11,6 +18,12 @@
 - Replace raw status text editing with ordered add, move, and remove controls
   backed by usage/default safeguards and atomic config updates.
 - Add the audited WebUI source-path gap analysis and ordered follow-up roadmap.
+- Add an interactive `init` flow that prompts for core project settings while
+  preserving the existing non-interactive defaults path.
+- Add `doctor` diagnostics and targeted repairs for unreadable task files,
+  duplicate task ids, and malformed Markdown sections. (#162)
+- Report progress while loading active-branch task snapshots for long scans.
+  (#163)
 
 ### Changed
 
@@ -23,6 +36,29 @@
 - Read both current and legacy milestone files without automatic migration;
   new milestone files use canonical current format, and ordinary task saves
   preserve existing legacy, archived, alias, and unknown milestone values.
+- Reuse unchanged project scans across MCP tool calls and browser requests, and
+  avoid duplicate repository loads when rendering browser and TUI boards.
+- Batch cross-branch task snapshots by Git blob id instead of spawning one Git
+  process per task. (#168)
+- Show explicit loading feedback in the TUI while its first board snapshot is
+  being prepared.
+- Rewrite the README and getting-started guidance around the first-time user
+  path.
+- Make the optional TUI installation hint work for `uv tool` installations.
+  (#164)
+- Document the SQLite index and remove an internal column that was never read.
+  (#161)
+
+### Fixed
+
+- Accept both snake_case and camelCase argument spellings consistently across
+  MCP tools. (#181)
+- Stop the singleton daemon from reporting projects that have disappeared from
+  disk. (#183)
+- Bound the shared scan cache by entry count and idle time.
+- Keep log output from corrupting the screen while the TUI is painting.
+- Repair only the parse errors matched by `doctor`, including malformed section
+  boundaries, without rewriting unrelated task content.
 
 ## 2.0.1 - 2026-08-01
 
