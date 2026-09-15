@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from math import inf
 from pathlib import Path
 
@@ -439,3 +440,225 @@ def test_branch_snapshots_read_each_shared_blob_once(
     assert len(snapshots) == 3, "each branch should still contribute its own snapshot"
     assert len(requested) == 1, "content must be read in one cat-file process for the whole scan"
     assert len(requested[0].split()) == 1, "the shared blob was requested more than once"
+
+
+def _recent(seconds_ago: int) -> int:
+    """A commit date inside `active_branch_days`, so the branch is actually scanned."""
+    return int(time.time()) - seconds_ago
+
+
+def _branches_with_tasks(tmp_path: Path, branch_count: int) -> object:
+    """A project with `branch_count` branches, each carrying its own extra task."""
+    from backlog_py.storage.project import discover_project
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git_init(repo)
+    project = init_project(repo).project
+    _task(project, "task-1 - seed.md")
+    _commit(repo, "seed", when=_recent(3600))
+
+    for index in range(branch_count):
+        name = f"feature-{index}"
+        _git(repo, "checkout", "-q", "-b", name)
+        _task(project, f"task-{index + 2} - {name}.md")
+        _commit(repo, f"tasks for {name}", when=_recent(1800 - index))
+        _git(repo, "checkout", "-q", "main")
+
+    config = project.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "check_active_branches: false", "check_active_branches: true"
+        ),
+        encoding="utf-8",
+    )
+    return discover_project(Path.cwd(), explicit_cwd=repo)
+
+
+def _count_git_log_walks(monkeypatch: pytest.MonkeyPatch, project) -> int:
+    walks = 0
+    real_run_git = git_module._run_git
+
+    def counting(work_dir, *args):
+        nonlocal walks
+        if "log" in args and "--name-only" not in args and "-1" not in args:
+            walks += 1
+        return real_run_git(work_dir, *args)
+
+    monkeypatch.setattr(git_module, "_run_git", counting)
+    assert git_module.list_active_branch_task_snapshots(project), "no snapshots loaded"
+    return walks
+
+
+def test_branch_snapshots_walk_history_once_regardless_of_ref_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard for #170.
+
+    History was walked once per ref, and branches share nearly all of their
+    commits, so 67 refs re-traversed the same history 67 times: 46s of a 50.7s
+    scan. One union walk over every ref costs ~1s and visits each commit once.
+    """
+    few = _count_git_log_walks(monkeypatch, _branches_with_tasks(tmp_path / "few", 2))
+    many = _count_git_log_walks(monkeypatch, _branches_with_tasks(tmp_path / "many", 8))
+
+    assert few == many == 1, f"history walks scale with ref count ({few} for 2 refs, {many} for 8)"
+
+
+def test_newer_branch_content_wins_a_duplicate_id(tmp_path: Path) -> None:
+    """The timestamp exists only to break id ties; that outcome must not drift."""
+    from backlog_py.core.repository import ReadOnlyRepository
+    from backlog_py.storage.project import discover_project
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git_init(repo)
+    project = init_project(repo).project
+    task_name = "task-1 - contested.md"
+    path = project.backlog_dir / "tasks" / task_name
+
+    def write(title: str) -> None:
+        path.write_text(
+            f"---\nid: TASK-1\ntitle: {title}\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n\n"
+            "## Description\n\nx\n",
+            encoding="utf-8",
+        )
+
+    write("Original")
+    _commit(repo, "seed", when=_recent(3600))
+    _git(repo, "checkout", "-q", "-b", "older")
+    write("Older branch")
+    _commit(repo, "older", when=_recent(2400))
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "checkout", "-q", "-b", "newer")
+    write("Newer branch")
+    _commit(repo, "newer", when=_recent(1200))
+    _git(repo, "checkout", "-q", "main")
+
+    config = project.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "check_active_branches: false", "check_active_branches: true"
+        ),
+        encoding="utf-8",
+    )
+    tasks = ReadOnlyRepository.from_path(repo).list_tasks()
+
+    assert [task.title for task in tasks] == ["Newer branch"]
+
+
+def test_branch_snapshots_fall_back_to_the_ref_tip_when_the_walk_reports_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shallow clone or an old git can leave the walk empty; snapshots still rank."""
+    project = _branches_with_tasks(tmp_path, 2)
+    monkeypatch.setattr(git_module, "_blob_introduction_timestamps", lambda *args, **kwargs: {})
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    assert snapshots
+    assert all(snapshot.committed_at > 0 for snapshot in snapshots), (
+        "a snapshot with no timestamp sorts below everything and silently loses every tie"
+    )
+
+
+def test_identical_content_on_two_refs_resolves_to_one_timestamp(tmp_path: Path) -> None:
+    """Recency is a property of the content, not of the branch carrying it.
+
+    Two refs holding the same blob at the same path are the same version of the
+    task, so they rank equally — and at the newest time that content was written
+    anywhere, not at whenever each branch happened to touch the path.
+    """
+    from backlog_py.storage.project import discover_project
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git_init(repo)
+    project = init_project(repo).project
+    _task(project, "task-1 - seed.md")
+    _commit(repo, "seed", when=_recent(3600))
+
+    shared = "---\nid: TASK-2\ntitle: Shared\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n\nx\n"
+    path = project.backlog_dir / "tasks" / "task-2 - shared.md"
+    for name, seconds_ago in (("early", 2400), ("late", 600)):
+        _git(repo, "checkout", "-q", "-b", name, "main")
+        path.write_text(shared, encoding="utf-8")
+        _commit(repo, f"write on {name}", when=_recent(seconds_ago))
+    _git(repo, "checkout", "-q", "main")
+    config = project.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "check_active_branches: false", "check_active_branches: true"
+        ),
+        encoding="utf-8",
+    )
+
+    snapshots = [
+        snapshot
+        for snapshot in git_module.list_active_branch_task_snapshots(
+            discover_project(Path.cwd(), explicit_cwd=repo)
+        )
+        if snapshot.relative_path.endswith("task-2 - shared.md")
+    ]
+
+    assert len(snapshots) == 2, "both branches should contribute a snapshot"
+    assert len({snapshot.blob_id for snapshot in snapshots}) == 1, "same content, one blob id"
+    assert len({snapshot.committed_at for snapshot in snapshots}) == 1, (
+        "identical content ranked differently by branch"
+    )
+    assert max(snapshot.committed_at for snapshot in snapshots) == pytest.approx(
+        _recent(600), abs=5
+    ), "the shared version should carry the newest time it was written"
+
+
+def _refs_sharing_one_tree(tmp_path: Path, branch_count: int) -> tuple[Path, object]:
+    """`branch_count` branches whose trees are byte-identical to main's."""
+    from backlog_py.storage.project import discover_project
+
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git_init(repo)
+    project = init_project(repo).project
+    for index in range(1, 4):
+        _task(project, f"task-{index} - shared.md")
+    _commit(repo, "seed", when=_recent(3600))
+    for index in range(branch_count):
+        _git(repo, "branch", f"feature-{index}")
+    config = project.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "check_active_branches: false", "check_active_branches: true"
+        ),
+        encoding="utf-8",
+    )
+    return repo, discover_project(Path.cwd(), explicit_cwd=repo)
+
+
+def test_branch_snapshots_parse_each_blob_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parsing dominates a cross-branch scan, so it must scale with content.
+
+    On a real project 150,162 snapshots carried only 2,615 distinct blobs;
+    parsing per snapshot cost 45s of a 48.8s command.
+    """
+    from backlog_py.core import repository as repository_module
+
+    def count_parses(branch_count: int) -> int:
+        repo, project = _refs_sharing_one_tree(tmp_path / f"n{branch_count}", branch_count)
+        parses = 0
+        real_parse = repository_module.parse_task_markdown
+
+        def counting(source: str):
+            nonlocal parses
+            parses += 1
+            return real_parse(source)
+
+        monkeypatch.setattr(repository_module, "parse_task_markdown", counting)
+        snapshots = git_module.list_active_branch_task_snapshots(project)
+        assert len(snapshots) == 3 * branch_count, "each branch should contribute every task"
+        repository_module._load_active_branch_records(project)
+        monkeypatch.undo()
+        return parses
+
+    assert count_parses(2) == count_parses(8), "parsing scales with refs, not with content"
