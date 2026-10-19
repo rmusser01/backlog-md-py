@@ -1812,7 +1812,8 @@ def test_renumber_task_by_path_moves_only_that_file_of_a_duplicated_id(tmp_path)
     assert original.exists()
 
 
-def test_renumber_task_refuses_an_id_on_another_active_branch(tmp_path):
+def _git_fixture_with_active_branches(tmp_path):
+    """The fixture as a git repo on `main`, one commit, with checkActiveBranches on."""
     repo = _copy_fixture(tmp_path)
     git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)  # noqa: E731
     git("init", "-q", "-b", "main")
@@ -1825,6 +1826,11 @@ def test_renumber_task_refuses_an_id_on_another_active_branch(tmp_path):
     )
     git("add", "-A")
     git("commit", "-qm", "seed")
+    return repo, git
+
+
+def test_renumber_task_refuses_an_id_on_another_active_branch(tmp_path):
+    repo, git = _git_fixture_with_active_branches(tmp_path)
     git("checkout", "-q", "-b", "feature")
     _repository(repo).create_task(title="Branch task")
     git("add", "-A")
@@ -1834,6 +1840,22 @@ def test_renumber_task_refuses_an_id_on_another_active_branch(tmp_path):
 
     with pytest.raises(TaskMutationError, match="TASK-2 is on another active branch"):
         _repository(repo).renumber_task("TASK-1", "TASK-2")
+    assert _snapshot_backlog_markdown(repo) == before
+
+
+def test_renumber_task_refuses_an_id_only_another_worktree_uses(tmp_path):
+    """An uncommitted task in a sibling `git worktree` is on no ref, so only that worktree's files show it."""
+    repo, git = _git_fixture_with_active_branches(tmp_path)
+    git("worktree", "add", "-q", str(tmp_path / "wt"), "-b", "wt")
+    (tmp_path / "wt" / "backlog" / "tasks" / "task-2 - Worktree-task.md").write_text(
+        "---\nid: TASK-2\ntitle: Worktree task\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n", "utf-8"
+    )
+    before = _snapshot_backlog_markdown(repo)
+
+    with pytest.raises(
+        TaskMutationError, match=r"TASK-002 is on another active branch or worktree \(task-2 - Worktree-task\.md\)"
+    ):
+        _repository(repo).renumber_task("TASK-1", "TASK-002")
     assert _snapshot_backlog_markdown(repo) == before
 
 

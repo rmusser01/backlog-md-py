@@ -14,7 +14,8 @@
   reference, across active, completed, archived and draft tasks. An id carried
   by two files is refused, since a reference to it is ambiguous; name one of
   the files instead (`task renumber <file> NEW_ID`) and only that file moves.
-  An id already used on another active branch is refused too.
+  An id already used on another active branch or in another `git worktree`
+  (committed or not) is refused too.
 
 ### Fixed
 
