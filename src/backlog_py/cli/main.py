@@ -461,6 +461,8 @@ def task_command(
             click.echo(f"{old_id} -> {new_id}")
         if result.updated_references:
             click.echo("Updated references in: " + ", ".join(result.updated_references))
+        if result.references_left_on:
+            click.echo(f"References to {result.renamed[0][0]} left on {result.references_left_on}")
         return
     if args and args[0] == "demote":
         if len(args) != 2:
@@ -1023,7 +1025,7 @@ def _echo_doctor_report(report: DoctorReport) -> None:
     if report.unreadable:
         click.echo("Run `backlog-py doctor --fix` to repair the mechanical ones.")
     if report.duplicate_ids:
-        click.echo("Duplicate ids need a human: renumber or remove one of the files.")
+        click.echo("Duplicate ids need a human: remove one of the files, or run `task renumber <file> NEW_ID` on one.")
 
 
 @main.command("overview")

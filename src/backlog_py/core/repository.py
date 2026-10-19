@@ -78,6 +78,8 @@ class TaskSortResult:
 class TaskRenumberResult:
     renamed: tuple[tuple[str, str], ...]
     updated_references: tuple[str, ...]
+    # Set when a task FILE was renumbered: references stay with the file that kept the id.
+    references_left_on: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1035,38 +1037,60 @@ class MutableRepository(ReadOnlyRepository):
         """Give a task and its subtasks a new id, and repoint every parent and dependency reference.
 
         ``TASK-4`` -> ``TASK-9`` also moves ``TASK-4.1`` to ``TASK-9.1``. Only this
-        checkout's files change. An id carried by two files is refused: which one
-        a reference means cannot be known.
+        checkout's files change. An id carried by two files is refused, since which
+        one a reference means cannot be known; name the file to move instead
+        (``task_id`` as a path) and only that file changes, because references and
+        subtasks stay with the file that keeps the id.
         """
         config = load_config(self.project.config_path)
-        root = self.get_task(task_id)
+        records = self._lookup_task_records_cached()
+        by_path = self._task_record_for_path(task_id, records)
+        root = by_path if by_path is not None else self.get_task(task_id)
         new_root = _normalize_task_id(new_task_id, config.task_prefix)
         if _reference_key(new_root) == _reference_key(root.id):
             raise TaskMutationError(f"{root.id} already has id {new_root}")
-        records = self._lookup_task_records_cached()
         subtree_prefix = f"{root.id}.".casefold()
-        renames = {
-            _reference_key(record.id): new_root + record.id[len(root.id):]
-            for record in records
-            if record.id.casefold() == root.id.casefold() or record.id.casefold().startswith(subtree_prefix)
-        }
-        for old_key, new_id in renames.items():
+        if by_path is not None:
+            renames = {_reference_key(root.id): new_root}
+        else:
+            renames = {
+                _reference_key(record.id): new_root + record.id[len(root.id):]
+                for record in records
+                if record.id.casefold() == root.id.casefold() or record.id.casefold().startswith(subtree_prefix)
+            }
+        # Ids on other active branches are visible to every reader but not to this
+        # checkout's files; a rename onto one would recreate the collision.
+        visible = ReadOnlyRepository(self.project, refresh_remote_refs=False)
+        elsewhere = [*visible.list_tasks(), *visible.list_completed_tasks()]
+        for old_key, target_id in renames.items():
             carriers = [record for record in records if _reference_key(record.id) == old_key]
-            if len(carriers) > 1:
-                names = ", ".join(record.path.name for record in carriers)
-                raise TaskMutationError(f"{carriers[0].id} is on {len(carriers)} files ({names}); renumber one by hand")
-            if self._task_id_is_reserved(new_id):
-                raise TaskMutationError(f"Task id already exists: {new_id}")
+            if len(carriers) > 1 and by_path is None:
+                names = ", ".join(self._display_path(record.path) for record in carriers)
+                raise TaskMutationError(
+                    f"{carriers[0].id} is on {len(carriers)} files ({names}); "
+                    "name the file to renumber, e.g. `task renumber <file> NEW_ID`"
+                )
+            if self._task_id_is_reserved(target_id):
+                raise TaskMutationError(f"Task id already exists: {target_id}")
+            for other in elsewhere:
+                if _reference_key(other.id) == _reference_key(target_id):
+                    raise TaskMutationError(
+                        f"Task id {target_id} is on another active branch ({self._display_path(other.path)})"
+                    )
 
         updated_date = _current_task_timestamp(config.include_datetime_in_dates)
         updates: list[_TaskSourceUpdate] = []
         renamed: list[tuple[str, str]] = []
         updated_references: list[str] = []
-        for record in records:
+        # Drafts carry the same parent/dependency fields; their draft-N ids never move.
+        drafts = [] if by_path is not None else _load_tasks_from_dir(self.project.backlog_dir / "drafts")
+        for record in [*records, *drafts]:
             frontmatter = record.parsed.frontmatter
             changes: dict[str, object] = {}
             target_path = None
             new_id = renames.get(_reference_key(record.id))
+            if by_path is not None and record.path != root.path:
+                new_id = None
             if new_id is not None:
                 changes["id"] = new_id
                 _, separator, slug = record.path.name.partition(" - ")
@@ -1074,6 +1098,20 @@ class MutableRepository(ReadOnlyRepository):
                     f"{new_id.lower()}{separator}{slug}" if separator else f"{new_id.lower()}{record.path.suffix}"
                 )
                 renamed.append((record.id, new_id))
+            if by_path is not None:
+                if not changes:
+                    continue
+                changes["updated_date"] = updated_date
+                updates.append(
+                    _TaskSourceUpdate(
+                        task_id=record.id,
+                        path=record.path,
+                        original_source=record.raw_source,
+                        updated_source=_replace_frontmatter_values(record.raw_source, record.parsed, changes),
+                        target_path=target_path,
+                    )
+                )
+                continue
             parent = frontmatter.get("parent_task_id")
             if isinstance(parent, str) and _reference_key(parent) in renames:
                 changes["parent_task_id"] = renames[_reference_key(parent)]
@@ -1099,7 +1137,25 @@ class MutableRepository(ReadOnlyRepository):
         return TaskRenumberResult(
             renamed=tuple(sorted(renamed, key=lambda pair: _task_sort_key(pair[0]))),
             updated_references=tuple(sorted(updated_references, key=_task_sort_key)),
+            references_left_on=None if by_path is None else self._display_path(root.path),
         )
+
+    def _display_path(self, path: Path) -> str:
+        try:
+            return path.relative_to(self.project.root).as_posix()
+        except ValueError:
+            return str(path)
+
+    def _task_record_for_path(self, value: str, records: list[TaskRecord]) -> TaskRecord | None:
+        """The task file ``value`` names (relative to the project or the cwd), or None if it is an id."""
+        for base in (self.project.root, Path.cwd()):
+            candidate = (base / value).resolve()
+            if candidate.is_file():
+                for record in records:
+                    if record.path.resolve() == candidate:
+                        return record
+                raise TaskMutationError(f"{value} is not a task file in this project")
+        return None
 
     def _next_task_id(self, config: BacklogConfig | None = None) -> str:
         current_config = config or self.project.config
@@ -1158,12 +1214,20 @@ def _write_task_source_batch(
                 else:
                     _atomic_write_text(path, update.original_source, base=repository.project.backlog_dir)
             except Exception as rollback_error:
-                logger.warning(
-                    "Failed to roll back task {} at {}: {}",
-                    update.task_id,
-                    path,
-                    rollback_error,
-                )
+                if target != path:
+                    logger.warning(
+                        "Failed to remove {} while rolling back {}: {}",
+                        target,
+                        update.task_id,
+                        rollback_error,
+                    )
+                else:
+                    logger.warning(
+                        "Failed to roll back task {} at {}: {}",
+                        update.task_id,
+                        path,
+                        rollback_error,
+                    )
         repository._invalidate_task_cache()
         raise
 

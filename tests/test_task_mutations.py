@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shlex
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -1737,6 +1738,13 @@ def test_renumber_task_moves_subtasks_and_rewrites_references(tmp_path):
     child = repository.create_task(title="First child task", parent_task_id="TASK-1")
     grandchild = repository.create_task(title="Grandchild task", parent_task_id=child.id)
     dependent = repository.create_task(title="Dependent task", dependencies=["TASK-1", child.id])
+    draft_path = repo / "backlog" / "drafts" / "draft-1 - Draft dep.md"
+    draft_path.parent.mkdir(exist_ok=True)
+    draft_path.write_text(
+        "---\nid: draft-1\ntitle: Draft dep\nstatus: Draft\nassignee: []\ncreated_date: '2026-01-01 00:00'\n"
+        "labels: []\ndependencies:\n  - TASK-1\n---\n\nbody\n",
+        "utf-8",
+    )
 
     result = _repository(repo).renumber_task("1", "task-7")
 
@@ -1745,7 +1753,7 @@ def test_renumber_task_moves_subtasks_and_rewrites_references(tmp_path):
         ("TASK-1.1", "TASK-7.1"),
         ("TASK-1.1.1", "TASK-7.1.1"),
     )
-    assert result.updated_references == (dependent.id,)
+    assert result.updated_references == (dependent.id, "draft-1")
     assert grandchild.id == "TASK-1.1.1"
     task_dir = repo / "backlog" / "tasks"
     assert sorted(path.name for path in task_dir.glob("*.md")) == [
@@ -1761,6 +1769,8 @@ def test_renumber_task_moves_subtasks_and_rewrites_references(tmp_path):
     assert reread.get_task("TASK-2").parsed.frontmatter["dependencies"] == ["TASK-7", "TASK-7.1"]
     with pytest.raises(NotFoundError):
         reread.get_task("TASK-1")
+    assert "TASK-7" in draft_path.read_text(encoding="utf-8")
+    assert "TASK-1\n" not in draft_path.read_text(encoding="utf-8")
 
 
 def test_renumber_task_refuses_a_taken_or_duplicated_id_without_writing(tmp_path):
@@ -1778,8 +1788,52 @@ def test_renumber_task_refuses_a_taken_or_duplicated_id_without_writing(tmp_path
     duplicate.write_text(_task_file(repo).read_text(encoding="utf-8").replace("Example task", "Duplicate"), "utf-8")
     before = _snapshot_backlog_markdown(repo)
 
-    with pytest.raises(TaskMutationError, match="TASK-1 is on 2 files"):
+    with pytest.raises(TaskMutationError, match=r"TASK-1 is on 2 files \(backlog/tasks/task-1 - "):
         _repository(repo).renumber_task("TASK-1", "TASK-9")
+    assert _snapshot_backlog_markdown(repo) == before
+
+
+def test_renumber_task_by_path_moves_only_that_file_of_a_duplicated_id(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    duplicate = repo / "backlog" / "tasks" / "task-1 - Duplicate.md"
+    duplicate.write_text(_task_file(repo).read_text(encoding="utf-8").replace("Example task", "Duplicate"), "utf-8")
+    original = next((repo / "backlog" / "tasks").glob("task-1 - Example*.md"))
+    before = _snapshot_backlog_markdown(repo)
+
+    result = _repository(repo).renumber_task("backlog/tasks/task-1 - Duplicate.md", "TASK-9")
+
+    assert result.renamed == (("TASK-1", "TASK-9"),)
+    assert result.references_left_on == "backlog/tasks/task-1 - Duplicate.md"
+    after = _snapshot_backlog_markdown(repo)
+    moved = Path("tasks/task-9 - Duplicate.md")
+    assert 'id: TASK-9' in after[moved]
+    unchanged = {k: v for k, v in before.items() if k != Path("tasks/task-1 - Duplicate.md")}
+    assert {k: v for k, v in after.items() if k != moved} == unchanged
+    assert original.exists()
+
+
+def test_renumber_task_refuses_an_id_on_another_active_branch(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)  # noqa: E731
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    config = repo / "backlog" / "config.yml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("checkActiveBranches: false", "checkActiveBranches: true"),
+        "utf-8",
+    )
+    git("add", "-A")
+    git("commit", "-qm", "seed")
+    git("checkout", "-q", "-b", "feature")
+    _repository(repo).create_task(title="Branch task")
+    git("add", "-A")
+    git("commit", "-qm", "branch task")
+    git("checkout", "-q", "main")
+    before = _snapshot_backlog_markdown(repo)
+
+    with pytest.raises(TaskMutationError, match="TASK-2 is on another active branch"):
+        _repository(repo).renumber_task("TASK-1", "TASK-2")
     assert _snapshot_backlog_markdown(repo) == before
 
 

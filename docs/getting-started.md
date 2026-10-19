@@ -131,7 +131,9 @@ backlog-py --cwd /path/to/project doctor --fix    # repair the mechanical cases
 `--fix` re-quotes a frontmatter title that breaks YAML and closes an owned
 section whose `:END` marker is missing, then re-parses; a file it cannot repair
 is left untouched. Duplicate ids are never resolved automatically — choosing
-which file keeps the id is a human decision. The non-zero exit makes `doctor`
+which file keeps the id is a human decision. Carry it out with
+`task renumber <file> NEW_ID` on the file that should move (references stay with
+the file that keeps the id). The non-zero exit makes `doctor`
 usable as a pre-commit or CI check.
 
 ## Faster Reads On A Large Project
