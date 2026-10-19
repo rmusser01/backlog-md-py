@@ -636,12 +636,15 @@ class MutableRepository(ReadOnlyRepository):
         modified_files: Sequence[str] | None = None,
         status: str | None = None,
         on_status_change: str | bool | None = None,
+        if_status: str | None = None,
     ) -> TaskRecord:
         if priority is not None and clear_priority:
             raise TaskMutationError("Cannot set and clear priority in one edit")
         if milestone is not None and clear_milestone:
             raise TaskMutationError("Cannot set and clear milestone in one edit")
         task = self.get_task(task_id)
+        if if_status is not None and task.status != if_status:
+            raise TaskMutationError(f"{task.id} is {task.status!r}, not {if_status!r}; nothing was changed")
         old_status = task.status
         original_source = task.raw_source
         on_status_change_update = _normalize_on_status_change_update(on_status_change)

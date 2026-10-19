@@ -398,6 +398,11 @@ def _reject_unsupported_edit_flags(*, parent_task_id: str | None, task_id: str |
 @click.option("--final-summary", default=None, help="Replace the final summary section.")
 @click.option("--append-final-summary", multiple=True, help="Append text to the final summary section.")
 @click.option("--clear-final-summary", is_flag=True, help="Clear the final summary section.")
+@click.option(
+    "--if-status",
+    default=None,
+    help="task edit: change nothing and exit 1 unless the task's current status is exactly this one.",
+)
 @click.pass_context
 def task_command(
     ctx: click.Context,
@@ -437,8 +442,11 @@ def task_command(
     final_summary: str | None,
     append_final_summary: tuple[str, ...],
     clear_final_summary: bool,
+    if_status: str | None,
 ) -> None:
     """View tasks."""
+    if if_status is not None and not (args and args[0] == "edit"):
+        raise click.UsageError("--if-status applies to 'task edit' only.")
     if args and args[0] == "archive":
         if len(args) != 2:
             raise click.UsageError("Usage: task archive TASK_ID")
@@ -573,6 +581,7 @@ def task_command(
                 final_summary=final_summary,
                 append_final_summary=append_final_summary,
                 clear_final_summary=clear_final_summary,
+                if_status=if_status,
             ),
         )
         click.echo(_format_task_line(task_record, plain=plain))
