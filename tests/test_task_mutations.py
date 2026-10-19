@@ -478,6 +478,45 @@ def test_edit_task_section_write_keeps_blank_line_before_next_heading(tmp_path):
     assert after.split("\n---\n", 1)[1] == expected.split("\n---\n", 1)[1]
 
 
+@pytest.mark.parametrize("nl", ["\n", "\r\n"], ids=["lf", "crlf"])
+@pytest.mark.parametrize(
+    ("name", "tail"),
+    [
+        ("IMPLEMENTATION_NOTES", "\n## Final Summary\n"),
+        ("IMPLEMENTATION_NOTES", ""),
+        ("NOTES", ""),
+    ],
+    ids=["blank-before-heading", "eof-final-newline", "legacy-notes-eof"],
+)
+def test_section_rewrite_keeps_bytes_after_end_marker(tmp_path, nl, name, tail):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    head = task_path.read_text(encoding="utf-8").split("\n---\n", 1)[0]
+    end = f"<!-- SECTION:{name}:END -->"
+    body = f"\n---\n\n## Implementation Notes\n\n<!-- SECTION:{name}:BEGIN -->\nold\n{end}\n" + tail
+    task_path.write_bytes((head + body).replace("\n", nl).encode())
+
+    _repository(repo).edit_task("TASK-1", append_notes="x")
+
+    after = task_path.read_bytes().decode()
+    assert after.endswith(("<!-- SECTION:IMPLEMENTATION_NOTES:END -->\n" + tail).replace("\n", nl))
+
+
+def test_section_rewrite_end_line_with_unicode_separator(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    head = task_path.read_text(encoding="utf-8").split("\n---\n", 1)[0]
+    task_path.write_text(
+        head + "\n---\n\n## Implementation Notes\n\n<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\nold\n"
+        "<!-- SECTION:IMPLEMENTATION_NOTES:END -->\u2028## Final Summary\n",
+        encoding="utf-8",
+    )
+
+    _repository(repo).edit_task("TASK-1", append_notes="x")
+
+    assert "END -->## Final Summary" not in task_path.read_text(encoding="utf-8")
+
+
 def test_edit_task_append_notes_canonicalizes_legacy_notes_section(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
