@@ -54,6 +54,7 @@ backlog-py --cwd /path/to/project task list --status "In Progress" --priority hi
 backlog-py --cwd /path/to/project task create "Implementation task" -d "Implementation notes." -s "To Do" --plan "1. Inspect current code." --final-summary "Initial PR summary." --parent TASK-1 --milestone "Release 1" --ordinal 1000 --ref "https://github.com/org/repo/issues/123" --doc "docs/design.md" --modified-file "src/api.py" -a codex -l implementation --priority high --ac "Behavior covered" --dod "Tests pass" --no-dod-defaults --dep 1 --plain
 backlog-py --cwd /path/to/project task edit TASK-2 --plan "1. Patch focused scope." --append-plan "2. Verify behavior." --milestone "Release 2" --ordinal 2000 --ref "src/api.py,tests/test_api.py" --doc "docs/verification.md" --modified-file "src/api.py,tests/test_api.py" -a reviewer -l ready --priority medium --notes "Implementation details." --ac "Regression covered" --dod "Package check passes" --remove-ac 1 --append-final-summary "Ready for review." --plain
 backlog-py --cwd /path/to/project task archive TASK-2 --plain
+backlog-py --cwd /path/to/project task renumber TASK-2 TASK-9 --plain
 backlog-py --cwd /path/to/project cleanup
 backlog-py --cwd /path/to/project doc create "Setup Guide" --path guides --type guide --tags setup,runbook --content "Install and smoke-test the integration."
 backlog-py --cwd /path/to/project doc update doc-1 --title "Setup Handbook" --path runbooks --type runbook --tags setup,verified --content "Updated runbook body."

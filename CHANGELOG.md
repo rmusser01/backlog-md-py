@@ -11,8 +11,10 @@
   refuses instead of appending the summary and notes again.
 - Add `task renumber TASK_ID NEW_ID`: it moves a task and its subtasks to new
   ids (file names keep their slugs) and repoints every parent and dependency
-  reference, across active, completed and archived tasks. An id carried by
-  two files is refused, since a reference to it is ambiguous.
+  reference, across active, completed, archived and draft tasks. An id carried
+  by two files is refused, since a reference to it is ambiguous; name one of
+  the files instead (`task renumber <file> NEW_ID`) and only that file moves.
+  An id already used on another active branch is refused too.
 
 ### Fixed
 
