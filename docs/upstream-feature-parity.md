@@ -161,7 +161,10 @@ larger task commands:
   repository reads include task snapshots from local branches, and from remote
   branches when `remoteOperations` is enabled, whose branch tip is within
   `activeBranchDays`. This uses `git for-each-ref`, `git ls-tree`, and
-  `git show` without checking out branches.
+  `git show` without checking out branches. The same switch also makes
+  `task create` and draft promotion skip ids used by task files on those
+  branches and in other `git worktree` directories (uncommitted ones
+  included); turning it off makes id allocation local-only.
 - Loopback `backlog browser` service with `--port <port>`,
   `--no-open`, config-driven default port and auto-open behavior, health and
   board JSON endpoints, and a static board snapshot.

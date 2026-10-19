@@ -296,32 +296,67 @@ def other_checkout_task_file_names(project: BacklogProject) -> list[str]:
     if backlog_path is None:
         return []
     buckets = ("tasks", "completed", "archive/tasks")
-    names: list[str] = []
-    for ref in _recent_branch_refs(project):
-        result = _run_git(
-            project.root,
-            "-c",
-            "core.quotePath=false",
-            "ls-tree",
-            "-r",
-            "--name-only",
-            ref,
-            "--",
-            *(f"{backlog_path}/{bucket}" for bucket in buckets),
-        )
-        if result.returncode == 0:
-            names.extend(posixpath.basename(path) for path in result.stdout.splitlines() if path.endswith(".md"))
-    result = _run_git(project.root, "worktree", "list", "--porcelain", "-z")
-    if result.returncode != 0:
-        return names
     prefix = _repository_prefix(project.root)
+    names = _tree_file_names(
+        project.root,
+        [
+            f"{ref}:{prefix}{backlog_path}/{bucket}"
+            for ref in _recent_branch_refs(project)
+            for bucket in buckets
+        ],
+    )
+    result = _run_git(project.root, "worktree", "list", "--porcelain", "-z")
+    if result.returncode == 0:
+        fields = result.stdout.split("\0")
+    else:
+        # `-z` needs git >= 2.36; older porcelain output is newline-separated and unquoted.
+        result = _run_git(project.root, "worktree", "list", "--porcelain")
+        if result.returncode != 0:
+            return names
+        fields = result.stdout.split("\n")
     own = project.backlog_dir.resolve()
-    for field in result.stdout.split("\0"):
+    for field in fields:
         if not field.startswith("worktree "):
             continue
         backlog_dir = Path(field.removeprefix("worktree ")) / prefix / backlog_path
         if backlog_dir.resolve() != own:
             names.extend(path.name for bucket in buckets for path in (backlog_dir / bucket).glob("*.md"))
+    return names
+
+
+def _tree_file_names(work_dir: Path, specs: list[str]) -> list[str]:
+    """File names of ``.md`` blobs in each ``<ref>:<dir>`` tree, in one ``cat-file --batch`` process."""
+    if not specs:
+        return []
+    stdin = "".join(f"{spec}\n" for spec in specs).encode()
+    result = _run_git_bytes(work_dir, "cat-file", "--batch", stdin=stdin)
+    if result.returncode != 0:
+        return []
+    encoding = sys.getfilesystemencoding()
+    output = result.stdout
+    names: list[str] = []
+    offset = 0
+    while True:
+        end = output.find(b"\n", offset)
+        if end == -1:
+            break
+        fields = output[offset:end].rsplit(b" ", 2)
+        offset = end + 1
+        if len(fields) != 3 or not fields[2].isdigit():
+            continue  # "<request> missing" carries no payload
+        size = int(fields[2])
+        payload = output[offset : offset + size]
+        offset += size + 1
+        if fields[1] != b"tree":
+            continue
+        oid_len = len(fields[0]) // 2  # raw oid: 20 bytes for SHA-1, 32 for SHA-256
+        pos = 0
+        while pos < len(payload):
+            nul = payload.index(b"\0", pos)
+            mode, _, name = payload[pos:nul].partition(b" ")
+            pos = nul + 1 + oid_len
+            if not mode.startswith(b"4") and name.endswith(b".md"):
+                names.append(name.decode(encoding, "surrogateescape"))
     return names
 
 
