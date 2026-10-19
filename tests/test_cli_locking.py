@@ -29,6 +29,7 @@ def repo(tmp_path):
         (("task", "create", "Draft task", "--draft"), "draft_create"),
         (("task", "edit", "TASK-1", "--title", "Updated"), "task_edit"),
         (("task", "archive", "TASK-1"), "task_archive"),
+        (("task", "renumber", "TASK-1", "TASK-5"), "task_renumber"),
         (("task", "demote", "TASK-1"), "draft_demote"),
         (("draft", "create", "Draft"), "draft_create"),
         (("decision", "create", "Decision"), "decision_create"),

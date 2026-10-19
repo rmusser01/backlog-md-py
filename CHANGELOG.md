@@ -9,6 +9,10 @@
   project write lock, so a close command such as `--if-status "In Progress"
   --append-final-summary ... --status Done` can be re-run safely: the second run
   refuses instead of appending the summary and notes again.
+- Add `task renumber TASK_ID NEW_ID`: it moves a task and its subtasks to new
+  ids (file names keep their slugs) and repoints every parent and dependency
+  reference, across active, completed and archived tasks. An id carried by
+  two files is refused, since a reference to it is ambiguous.
 
 ### Fixed
 
