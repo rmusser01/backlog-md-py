@@ -10,6 +10,9 @@
   array used to be written into the task as its Python repr). A non-string
   scalar such as `5` is now rejected with an argument error instead of being
   written as `5`.
+- Keep the blank line after a rewritten section: `task edit` writes to notes,
+  final summary, plan or description no longer join the section's END marker to
+  the next `##` heading.
 
 ## 2.1.0 - 2026-09-02
 

@@ -1301,9 +1301,11 @@ def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content
         if section_start == -1:
             return source.replace(section.raw.rstrip("\r\n"), new_section, 1)
         section_end = _section_replace_end(source, section_start + len(section.raw), _section_lookup_names(name))
-        tail = source[section_end:]
-        separator = "" if not tail or tail.startswith(("\n", "\r")) else _detect_newline(source)
-        return f"{source[:section_start]}{new_section}{separator}{tail}"
+        # The replaced span ends with the END line's own newline; put it back, or
+        # the blank line before the next heading is eaten.
+        replaced = source[section_start:section_end]
+        separator = replaced[len(replaced.rstrip("\r\n")) :]
+        return f"{source[:section_start]}{new_section}{separator}{source[section_end:]}"
     cleaned = _remove_orphan_section_marker_lines(source, _section_lookup_names(name))
     return _insert_section(cleaned, name, content)
 
