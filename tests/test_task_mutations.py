@@ -517,6 +517,57 @@ def test_section_rewrite_end_line_with_unicode_separator(tmp_path):
     assert "END -->## Final Summary" not in task_path.read_text(encoding="utf-8")
 
 
+def test_edit_task_if_status_refuses_without_writing_when_status_differs(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="TASK-1 is 'In Progress', not 'To Do'; nothing was changed"):
+        repository.edit_task("TASK-1", if_status="To Do", append_final_summary=["Closed."], status="Done")
+
+    assert _snapshot_tasks(repo) == before
+
+    edited = repository.edit_task("TASK-1", if_status="In Progress", append_final_summary=["Closed."], status="Done")
+
+    assert edited.status == "Done"
+    assert _task_file(repo).read_text(encoding="utf-8").count("Closed.") == 1
+
+
+def test_cli_task_edit_if_status_makes_a_close_command_safe_to_rerun(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    runner = CliRunner()
+    close = [
+        "--cwd", str(repo), "task", "edit", "TASK-1", "--if-status", "In Progress",
+        "--append-notes", "- PR: https://example.test/pr/1", "--append-final-summary", "Shipped.",
+        "--status", "Done", "--plain",
+    ]
+
+    first = runner.invoke(main, close)
+    assert first.exit_code == 0, first.output
+    after_first = _snapshot_tasks(repo)
+
+    second = runner.invoke(main, close)
+
+    assert second.exit_code == 1
+    assert "TASK-1 is 'Done', not 'In Progress'; nothing was changed" in second.output
+    assert _snapshot_tasks(repo) == after_first
+    text = _task_file(repo).read_text(encoding="utf-8")
+    assert text.count("Shipped.") == 1
+    assert text.count("- PR: https://example.test/pr/1") == 1
+
+
+@pytest.mark.parametrize("command", [["task", "create", "New task"], ["task", "list"], ["task", "TASK-1"]])
+def test_cli_if_status_is_rejected_outside_task_edit(tmp_path, command):
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), *command, "--if-status", "In Progress", "--plain"])
+
+    assert result.exit_code == 2
+    assert "--if-status applies to 'task edit' only." in result.output
+    assert _snapshot_tasks(repo) == before
+
+
 def test_edit_task_append_notes_canonicalizes_legacy_notes_section(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
