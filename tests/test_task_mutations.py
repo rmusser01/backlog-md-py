@@ -463,6 +463,21 @@ def test_edit_task_can_append_and_clear_final_summary(tmp_path):
     assert "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n\n<!-- SECTION:FINAL_SUMMARY:END -->" in after_clear
 
 
+def test_edit_task_section_write_keeps_blank_line_before_next_heading(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    task_path = _task_file(repo)
+    original = task_path.read_text(encoding="utf-8")
+
+    _repository(repo).edit_task("TASK-1", append_notes="- Added note.", append_final_summary=["Added summary."])
+
+    after = task_path.read_text(encoding="utf-8")
+    # Only the two sections' content changed in the body; the spacing around them did not.
+    expected = original.replace(
+        "- Keep unknown body text stable.\n", "- Keep unknown body text stable.\n- Added note.\n"
+    ).replace("No final summary yet.\n", "No final summary yet.\nAdded summary.\n")
+    assert after.split("\n---\n", 1)[1] == expected.split("\n---\n", 1)[1]
+
+
 def test_edit_task_append_notes_canonicalizes_legacy_notes_section(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)
