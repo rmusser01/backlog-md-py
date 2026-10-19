@@ -4,7 +4,7 @@
 
 ### Added
 
-- Add `task edit --if-status STATUS`: the edit changes nothing and exits 1
+- Add `task edit --if-status STATUS` (MCP `task_edit` `ifStatus`/`if_status`): the edit changes nothing and exits 1
   unless the task's current status is exactly STATUS. The check runs under the
   project write lock, so a close command such as `--if-status "In Progress"
   --append-final-summary ... --status Done` can be re-run safely: the second run
