@@ -517,7 +517,7 @@ class MutableRepository(ReadOnlyRepository):
             include_active_branch_snapshots=False,
             use_sqlite_index=False,
         )
-        self._other_checkout_task_ids: set[str] | None = None
+        self._other_checkout_files: dict[str, str] | None = None
 
     @classmethod
     def from_path(cls, cwd: Path) -> "MutableRepository":
@@ -1026,12 +1026,16 @@ class MutableRepository(ReadOnlyRepository):
         tool writes as ``<id> - <title>.md``. Explicit ids (``--id``) are still
         checked locally only.
         """
-        if self._other_checkout_task_ids is None:
-            self._other_checkout_task_ids = {
-                _id_from_filename(Path(name)).casefold()
+        return self._reserved_task_ids().union(self._other_checkout_task_files())
+
+    def _other_checkout_task_files(self) -> dict[str, str]:
+        """Casefolded id -> file name, for the task files on active branches and in other worktrees."""
+        if self._other_checkout_files is None:
+            self._other_checkout_files = {
+                _id_from_filename(Path(name)).casefold(): name
                 for name in other_checkout_task_file_names(self.project)
             }
-        return self._reserved_task_ids() | self._other_checkout_task_ids
+        return self._other_checkout_files
 
     def renumber_task(self, task_id: str, new_task_id: str) -> TaskRenumberResult:
         """Give a task and its subtasks a new id, and repoint every parent and dependency reference.
@@ -1058,10 +1062,9 @@ class MutableRepository(ReadOnlyRepository):
                 for record in records
                 if record.id.casefold() == root.id.casefold() or record.id.casefold().startswith(subtree_prefix)
             }
-        # Ids on other active branches are visible to every reader but not to this
-        # checkout's files; a rename onto one would recreate the collision.
-        visible = ReadOnlyRepository(self.project, refresh_remote_refs=False)
-        elsewhere = [*visible.list_tasks(), *visible.list_completed_tasks()]
+        # Ids on active branches and in other worktrees (uncommitted ones included)
+        # are not in this checkout's files; a rename onto one recreates the collision.
+        elsewhere = self._other_checkout_task_files()
         for old_key, target_id in renames.items():
             carriers = [record for record in records if _reference_key(record.id) == old_key]
             if len(carriers) > 1 and by_path is None:
@@ -1072,11 +1075,9 @@ class MutableRepository(ReadOnlyRepository):
                 )
             if self._task_id_is_reserved(target_id):
                 raise TaskMutationError(f"Task id already exists: {target_id}")
-            for other in elsewhere:
-                if _reference_key(other.id) == _reference_key(target_id):
-                    raise TaskMutationError(
-                        f"Task id {target_id} is on another active branch ({self._display_path(other.path)})"
-                    )
+            for other_id, name in elsewhere.items():
+                if _reference_key(other_id) == _reference_key(target_id):
+                    raise TaskMutationError(f"Task id {target_id} is on another active branch or worktree ({name})")
 
         updated_date = _current_task_timestamp(config.include_datetime_in_dates)
         updates: list[_TaskSourceUpdate] = []
