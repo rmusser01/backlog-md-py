@@ -306,6 +306,7 @@ def task_edit(
             remove_documentation=_optional_string_list(_get_alias(kwargs, "removeDocumentation", "remove_documentation")),
             modified_files=_optional_string_list(_get_alias(kwargs, "modifiedFiles", "modified_files")),
             status=_optional_string(kwargs.get("status")),
+            if_status=_optional_string(_get_alias(kwargs, "ifStatus", "if_status")),
             on_status_change=_optional_status_callback(_get_alias(kwargs, "onStatusChange", "on_status_change")),
         )
         return _task_detail(project, task)

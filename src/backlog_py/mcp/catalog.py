@@ -411,6 +411,11 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "notes": {"type": "string", "description": "Replacement implementation notes section."},
                 "appendNotes": _string_or_string_array_schema("Implementation notes text to append."),
                 "append_notes": _string_or_string_array_schema("Alias for appendNotes."),
+                "ifStatus": {
+                    "type": "string",
+                    "description": "Refuse the edit and write nothing unless the task's current status is exactly this.",
+                },
+                "if_status": {"type": "string", "description": "Alias for ifStatus."},
                 "acceptanceCriteria": _string_or_string_array_schema(
                     "Acceptance criteria to add; alias for acceptanceCriteriaAdd."
                 ),

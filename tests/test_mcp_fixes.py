@@ -69,6 +69,27 @@ def test_task_edit_unknown_status_returns_tool_error(tmp_path):
     assert response["result"]["isError"] is True
 
 
+@pytest.mark.parametrize("key", ["ifStatus", "if_status"])
+def test_task_edit_if_status_guards_the_mcp_edit(tmp_path, key):
+    project = _project(tmp_path)
+    MutableRepository(project).create_task(title="Task", status="In Progress")
+    snapshot = lambda: {p: p.read_bytes() for p in sorted((project.root / "backlog").rglob("*")) if p.is_file()}  # noqa: E731
+    before = snapshot()
+
+    refused = _call_tool(project.root, "task_edit", task_id="TASK-1", appendNotes="- dup", status="Done", **{key: "To Do"})
+
+    assert refused["result"]["isError"] is True
+    assert "nothing was changed" in _result_text(refused)
+    assert snapshot() == before
+
+    args = {"task_id": "TASK-1", "appendNotes": "- dup", "status": "Done", key: "In Progress"}
+    assert _call_tool(project.root, "task_edit", **args)["result"].get("isError") is not True
+    again = _call_tool(project.root, "task_edit", **args)
+    assert again["result"]["isError"] is True
+    notes = [p for p in project.root.rglob("task-1*.md")][0].read_text(encoding="utf-8")
+    assert notes.count("- dup") == 1
+
+
 # --- #7: unquoted dates in frontmatter crash JSON serialization -------------
 
 def test_document_view_with_unquoted_date_does_not_error(tmp_path):
