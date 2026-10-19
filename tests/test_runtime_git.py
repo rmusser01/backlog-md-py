@@ -482,3 +482,46 @@ def test_create_allocates_from_this_checkout_only_when_active_branches_are_off(t
     )
 
     assert MutableRepository(local_only).create_task(title="four").id == "TASK-2"
+
+
+def test_other_checkout_scan_uses_one_git_process_for_all_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _other_checkouts_repo(tmp_path)
+    _git(project.root, "branch", "extra")
+    calls: list[tuple[str, ...]] = []
+    real_run, real_bytes = git_module._run_git, git_module._run_git_bytes
+
+    def run(work_dir, *args, **kwargs):
+        calls.append(args)
+        return real_run(work_dir, *args, **kwargs)
+
+    def batch(work_dir, *args, stdin: bytes):
+        calls.append(args)
+        return real_bytes(work_dir, *args, stdin=stdin)
+
+    monkeypatch.setattr(git_module, "_run_git", run)
+    monkeypatch.setattr(git_module, "_run_git_bytes", batch)
+    names = git_module.other_checkout_task_file_names(project)
+
+    assert any(n.startswith("task-2 ") for n in names), "branch-only task missing"
+    assert any(n.startswith("task-3 ") for n in names), "uncommitted worktree task missing"
+    assert not [c for c in calls if "ls-tree" in c], "a git ls-tree process was forked per ref"
+    assert len([c for c in calls if "cat-file" in c]) == 1
+
+
+def test_worktree_scan_falls_back_when_list_z_is_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`git worktree list -z` needs git >= 2.36; the uncommitted-worktree half must survive older git."""
+    project = _other_checkouts_repo(tmp_path)
+    original = git_module._run_git
+
+    def without_z(work_dir, *args, **kwargs):
+        if args[:2] == ("worktree", "list") and "-z" in args:
+            return subprocess.CompletedProcess(["git", *args], 129, "", "error: unknown switch `z'")
+        return original(work_dir, *args, **kwargs)
+
+    monkeypatch.setattr(git_module, "_run_git", without_z)
+
+    assert MutableRepository(project).create_task(title="four").id == "TASK-4"
