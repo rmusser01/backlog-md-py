@@ -7,7 +7,9 @@
 - `task edit --append-notes` now accepts repeated values and appends each in
   order, like `--append-plan`; repeating it used to keep only the last value.
   MCP `task_edit` `appendNotes` likewise accepts a string or an array (an
-  array used to be written into the task as its Python repr).
+  array used to be written into the task as its Python repr). A non-string
+  scalar such as `5` is now rejected with an argument error instead of being
+  written as `5`.
 
 ## 2.1.0 - 2026-09-02
 

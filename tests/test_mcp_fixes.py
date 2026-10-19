@@ -218,6 +218,16 @@ def test_document_update_schema_declares_metadata_and_directory():
     assert {"metadata", "directory", "type", "tags"}.issubset(schema["properties"])
 
 
+def test_task_edit_schema_declares_append_notes_as_string_or_string_array():
+    properties = next(tool for tool in list_tools() if tool["name"] == "task_edit")["inputSchema"]["properties"]
+    string_or_array = [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]
+
+    assert properties["planAppend"]["oneOf"] == string_or_array
+    for name in ("appendNotes", "append_notes"):
+        assert set(properties[name]) == set(properties["planAppend"]), name
+        assert properties[name]["oneOf"] == string_or_array, name
+
+
 # --- F2: non-project path returns -32603 instead of actionable guidance -----
 
 def test_tool_call_outside_a_project_points_at_init_required(tmp_path):
