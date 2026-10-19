@@ -22,6 +22,10 @@
   `task_edit` and the browser/TUI editors, which share the path) no longer
   remove the blank line between a section's END marker and the next `##`
   heading. A section that ends the file also keeps its final newline.
+- `task create` (and draft promotion) no longer hands out an id that an active
+  branch or another `git worktree` already uses. It read only this checkout's
+  files, while `task list` showed those tasks and warned on the duplicate it had
+  just made. Follows `checkActiveBranches`; ids given with `--id` are unchanged.
 
 ## 2.1.0 - 2026-09-02
 

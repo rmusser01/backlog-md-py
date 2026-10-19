@@ -22,6 +22,7 @@ from backlog_py.runtime.git import (
     current_task_snapshot_timestamps,
     list_active_branch_task_snapshots,
     maybe_fetch_remote_refs,
+    other_checkout_task_file_names,
 )
 from backlog_py.search.simple import ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
@@ -506,6 +507,7 @@ class MutableRepository(ReadOnlyRepository):
             include_active_branch_snapshots=False,
             use_sqlite_index=False,
         )
+        self._other_checkout_task_ids: set[str] | None = None
 
     @classmethod
     def from_path(cls, cwd: Path) -> "MutableRepository":
@@ -1005,12 +1007,28 @@ class MutableRepository(ReadOnlyRepository):
         self._invalidate_task_cache()
         return _load_task(target_path)
 
+    def _allocation_reserved_ids(self) -> set[str]:
+        """Ids a new task must not take: this checkout's and every other one's.
+
+        ``task list`` shows active-branch tasks and warns when one shares a local
+        id, so allocating from local files alone handed out ids it then reported
+        as duplicates. Other checkouts' ids come from file names, which this
+        tool writes as ``<id> - <title>.md``. Explicit ids (``--id``) are still
+        checked locally only.
+        """
+        if self._other_checkout_task_ids is None:
+            self._other_checkout_task_ids = {
+                _id_from_filename(Path(name)).casefold()
+                for name in other_checkout_task_file_names(self.project)
+            }
+        return self._reserved_task_ids() | self._other_checkout_task_ids
+
     def _next_task_id(self, config: BacklogConfig | None = None) -> str:
         current_config = config or self.project.config
         max_id = 0
         prefix = current_config.task_prefix.upper()
         pattern = re.compile(rf"{re.escape(prefix)}-(\d+)", re.IGNORECASE)
-        for task_id in self._reserved_task_ids():
+        for task_id in self._allocation_reserved_ids():
             match = pattern.fullmatch(task_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
@@ -1019,7 +1037,7 @@ class MutableRepository(ReadOnlyRepository):
     def _next_child_task_id(self, parent_task_id: str) -> str:
         max_id = 0
         prefix = f"{parent_task_id}.".casefold()
-        for task_id in self._reserved_task_ids():
+        for task_id in self._allocation_reserved_ids():
             if not task_id.startswith(prefix):
                 continue
             rest = task_id[len(prefix):]
