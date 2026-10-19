@@ -517,6 +517,44 @@ def test_edit_task_append_notes_unwraps_nested_legacy_notes_section(tmp_path):
     assert "- Added nested legacy note." in after
 
 
+def test_cli_task_edit_repeated_append_notes_keeps_every_value_in_order(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(repo), "task", "edit", "TASK-1", "--append-notes", "- First.", "--append-notes", "- Second."],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "- Keep unknown body text stable.\n- First.\n- Second.\n<!-- SECTION:IMPLEMENTATION_NOTES:END -->"
+        in _task_file(repo).read_text(encoding="utf-8")
+    )
+
+
+def test_cli_task_create_still_rejects_repeated_append_notes(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(repo), "task", "create", "New", "--append-notes", "a", "--append-notes", "b"],
+    )
+
+    assert result.exit_code != 0
+    assert "These options apply to 'task edit', not 'task create': --append-notes" in result.output
+
+
+def test_mcp_task_edit_append_notes_accepts_a_list_in_order(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    task_edit(_project(repo), task_id="TASK-1", appendNotes=["- First.", "- Second."])
+
+    assert (
+        "- Keep unknown body text stable.\n- First.\n- Second.\n<!-- SECTION:IMPLEMENTATION_NOTES:END -->"
+        in _task_file(repo).read_text(encoding="utf-8")
+    )
+
+
 def test_edit_task_clear_final_summary_canonicalizes_duplicate_markers(tmp_path):
     repo = _copy_fixture(tmp_path)
     task_path = _task_file(repo)

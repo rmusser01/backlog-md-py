@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- `task edit --append-notes` now accepts repeated values and appends each in
+  order, like `--append-plan`; repeating it used to keep only the last value.
+  MCP `task_edit` `appendNotes` likewise accepts a string or an array (an
+  array used to be written into the task as its Python repr).
+
 ## 2.1.0 - 2026-09-02
 
 This release adds guided project setup, repository diagnostics, and persistent

@@ -291,7 +291,7 @@ def _reject_edit_only_create_flags(
     title: str | None,
     append_plan: tuple[str, ...],
     clear_plan: bool,
-    append_notes: str | None,
+    append_notes: tuple[str, ...],
     append_final_summary: tuple[str, ...],
     clear_final_summary: bool,
     check_ac: tuple[int, ...],
@@ -305,14 +305,13 @@ def _reject_edit_only_create_flags(
     offenders: list[str] = []
     if title is not None:
         offenders.append("--title (use the TITLE argument)")
-    if append_notes is not None:
-        offenders.append("--append-notes")
     if clear_plan:
         offenders.append("--clear-plan")
     if clear_final_summary:
         offenders.append("--clear-final-summary")
     for name, value in (
         ("--append-plan", append_plan),
+        ("--append-notes", append_notes),
         ("--append-final-summary", append_final_summary),
         ("--check-ac", check_ac),
         ("--check-dod", check_dod),
@@ -389,7 +388,7 @@ def _reject_unsupported_edit_flags(*, parent_task_id: str | None, task_id: str |
 @click.option("--ref", "references", multiple=True, help="Task reference URL or file path for create/edit.")
 @click.option("--doc", "documentation", multiple=True, help="Task documentation URL or file path for create/edit.")
 @click.option("--modified-file", "modified_files", multiple=True, help="Modified file path for create/edit.")
-@click.option("--append-notes", default=None, help="Append text to implementation notes.")
+@click.option("--append-notes", multiple=True, help="Append text to implementation notes.")
 @click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
 @click.option("--uncheck-ac", multiple=True, type=int, help="Mark acceptance criteria index incomplete.")
@@ -428,7 +427,7 @@ def task_command(
     references: tuple[str, ...],
     documentation: tuple[str, ...],
     modified_files: tuple[str, ...],
-    append_notes: str | None,
+    append_notes: tuple[str, ...],
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
     uncheck_ac: tuple[int, ...],

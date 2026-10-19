@@ -606,7 +606,7 @@ class MutableRepository(ReadOnlyRepository):
         append_plan: Sequence[str] | None = None,
         clear_plan: bool = False,
         notes: str | None = None,
-        append_notes: str | None = None,
+        append_notes: Sequence[str] | None = None,
         acceptance_criteria: Sequence[str] | None = None,
         acceptance_criteria_add: Sequence[str] | None = None,
         definition_of_done_add: Sequence[str] | None = None,
@@ -674,11 +674,10 @@ class MutableRepository(ReadOnlyRepository):
         if notes is not None:
             source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", _normalize_block(notes))
             parsed = parse_task_markdown(source)
-        if append_notes is not None:
-            existing_content = _section_content_for_edit(parsed, "IMPLEMENTATION_NOTES")
-            appended = _normalize_block(append_notes)
-            notes_content = appended if not existing_content else f"{existing_content}\n{appended}"
-            source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", notes_content)
+        if isinstance(append_notes, str):  # one string is one note, not a list of characters
+            append_notes = [append_notes]
+        if append_notes:
+            source = _append_to_section(source, parsed, "IMPLEMENTATION_NOTES", append_notes)
             parsed = parse_task_markdown(source)
         if final_summary is not None:
             source = _replace_section(source, parsed, "FINAL_SUMMARY", _normalize_block(final_summary))
