@@ -2,20 +2,29 @@
 
 ## Unreleased
 
+## 2.2.0 - 2026-10-19
+
+This release adds `task renumber` and a `task edit --if-status` guard that
+makes close commands safe to re-run, and stops `task create` from handing out
+ids that other branches and worktrees already use. It also fixes two `task
+edit` rewrites: repeated `--append-notes` values and the blank line after a
+rewritten section.
+
 ### Added
 
-- Add `task edit --if-status STATUS` (MCP `task_edit` `ifStatus`/`if_status`): the edit changes nothing and exits 1
-  unless the task's current status is exactly STATUS. The check runs under the
-  project write lock, so a close command such as `--if-status "In Progress"
-  --append-final-summary ... --status Done` can be re-run safely: the second run
-  refuses instead of appending the summary and notes again.
+- Add `task edit --if-status STATUS` (MCP `task_edit` `ifStatus`/`if_status`):
+  the edit changes nothing and exits 1 unless the task's current status is
+  exactly STATUS. The check runs under the project write lock, so a close
+  command such as `--if-status "In Progress" --append-final-summary ...
+  --status Done` can be re-run safely: the second run refuses instead of
+  appending the summary and notes again. (#195)
 - Add `task renumber TASK_ID NEW_ID`: it moves a task and its subtasks to new
   ids (file names keep their slugs) and repoints every parent and dependency
   reference, across active, completed, archived and draft tasks. An id carried
   by two files is refused, since a reference to it is ambiguous; name one of
   the files instead (`task renumber <file> NEW_ID`) and only that file moves.
   An id already used on another active branch or in another `git worktree`
-  (committed or not) is refused too.
+  (committed or not) is refused too. (#193)
 
 ### Fixed
 
@@ -24,15 +33,16 @@
   MCP `task_edit` `appendNotes` likewise accepts a string or an array (an
   array used to be written into the task as its Python repr). A non-string
   scalar such as `5` is now rejected with an argument error instead of being
-  written as `5`.
+  written as `5`. (#191)
 - Keep the blank line after a rewritten section: `task edit` (and MCP
   `task_edit` and the browser/TUI editors, which share the path) no longer
   remove the blank line between a section's END marker and the next `##`
-  heading. A section that ends the file also keeps its final newline.
+  heading. A section that ends the file also keeps its final newline. (#192)
 - `task create` (and draft promotion) no longer hands out an id that an active
   branch or another `git worktree` already uses. It read only this checkout's
   files, while `task list` showed those tasks and warned on the duplicate it had
   just made. Follows `checkActiveBranches`; ids given with `--id` are unchanged.
+  (#194)
 
 ## 2.1.0 - 2026-09-02
 
