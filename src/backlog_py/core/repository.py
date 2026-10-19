@@ -1305,6 +1305,10 @@ def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content
         # the blank line before the next heading is eaten.
         replaced = source[section_start:section_end]
         separator = replaced[len(replaced.rstrip("\r\n")) :]
+        if not separator and section_end < len(source):
+            # END line closed by a non-CR/LF terminator (U+2028, \f, ...) that
+            # str.splitlines honours: still keep it apart from the next line.
+            separator = _detect_newline(source)
         return f"{source[:section_start]}{new_section}{separator}{source[section_end:]}"
     cleaned = _remove_orphan_section_marker_lines(source, _section_lookup_names(name))
     return _insert_section(cleaned, name, content)

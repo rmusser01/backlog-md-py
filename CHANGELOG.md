@@ -10,9 +10,10 @@
   array used to be written into the task as its Python repr). A non-string
   scalar such as `5` is now rejected with an argument error instead of being
   written as `5`.
-- Keep the blank line after a rewritten section: `task edit` writes to notes,
-  final summary, plan or description no longer join the section's END marker to
-  the next `##` heading.
+- Keep the blank line after a rewritten section: `task edit` (and MCP
+  `task_edit` and the browser/TUI editors, which share the path) no longer
+  remove the blank line between a section's END marker and the next `##`
+  heading. A section that ends the file also keeps its final newline.
 
 ## 2.1.0 - 2026-09-02
 
