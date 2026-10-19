@@ -9,6 +9,7 @@ def test_mutation_inventory_covers_known_write_surfaces():
         "task_create",
         "task_edit",
         "task_archive",
+        "task_renumber",
         "task_complete",
         "cleanup_complete_done",
         "draft_create",

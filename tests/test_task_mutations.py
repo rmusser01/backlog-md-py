@@ -1728,3 +1728,91 @@ def test_mcp_on_status_change_rejects_true_without_command(tmp_path):
 
     with pytest.raises(TypeError, match="command string"):
         task_create(project, title="Bad callback", onStatusChange=True)
+
+
+def test_renumber_task_moves_subtasks_and_rewrites_references(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    original_body = repository.get_task("TASK-1").parsed.body
+    child = repository.create_task(title="First child task", parent_task_id="TASK-1")
+    grandchild = repository.create_task(title="Grandchild task", parent_task_id=child.id)
+    dependent = repository.create_task(title="Dependent task", dependencies=["TASK-1", child.id])
+
+    result = _repository(repo).renumber_task("1", "task-7")
+
+    assert result.renamed == (
+        ("TASK-1", "TASK-7"),
+        ("TASK-1.1", "TASK-7.1"),
+        ("TASK-1.1.1", "TASK-7.1.1"),
+    )
+    assert result.updated_references == (dependent.id,)
+    assert grandchild.id == "TASK-1.1.1"
+    task_dir = repo / "backlog" / "tasks"
+    assert sorted(path.name for path in task_dir.glob("*.md")) == [
+        "task-2 - Dependent-task.md",
+        "task-7 - Example-task.md",
+        "task-7.1 - First-child-task.md",
+        "task-7.1.1 - Grandchild-task.md",
+    ]
+    reread = _repository(repo)
+    assert reread.get_task("TASK-7").parsed.body == original_body
+    assert reread.get_task("TASK-7.1").parsed.frontmatter["parent_task_id"] == "TASK-7"
+    assert reread.get_task("TASK-7.1.1").parsed.frontmatter["parent_task_id"] == "TASK-7.1"
+    assert reread.get_task("TASK-2").parsed.frontmatter["dependencies"] == ["TASK-7", "TASK-7.1"]
+    with pytest.raises(NotFoundError):
+        reread.get_task("TASK-1")
+
+
+def test_renumber_task_refuses_a_taken_or_duplicated_id_without_writing(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _repository(repo).create_task(title="Second task")
+    before = _snapshot_backlog_markdown(repo)
+
+    with pytest.raises(TaskMutationError, match="already exists: TASK-2"):
+        _repository(repo).renumber_task("TASK-1", "TASK-2")
+    with pytest.raises(TaskMutationError, match="already has id"):
+        _repository(repo).renumber_task("TASK-1", "TASK-001")
+    assert _snapshot_backlog_markdown(repo) == before
+
+    duplicate = repo / "backlog" / "tasks" / "task-1 - Duplicate.md"
+    duplicate.write_text(_task_file(repo).read_text(encoding="utf-8").replace("Example task", "Duplicate"), "utf-8")
+    before = _snapshot_backlog_markdown(repo)
+
+    with pytest.raises(TaskMutationError, match="TASK-1 is on 2 files"):
+        _repository(repo).renumber_task("TASK-1", "TASK-9")
+    assert _snapshot_backlog_markdown(repo) == before
+
+
+def test_renumber_task_restores_every_file_when_a_write_fails(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    repository.create_task(title="First child task", parent_task_id="TASK-1")
+    repository.create_task(title="Dependent task", dependencies=["TASK-1"])
+    before = _snapshot_backlog_markdown(repo)
+
+    from backlog_py.core import repository as repository_module
+
+    real_write = repository_module._atomic_write_text
+    writes = []
+
+    def fail_third_write(path, content, base=None):
+        writes.append(path)
+        if len(writes) == 3:
+            raise OSError("disk full")
+        real_write(path, content, base=base)
+
+    monkeypatch.setattr(repository_module, "_atomic_write_text", fail_third_write)
+
+    with pytest.raises(OSError, match="disk full"):
+        _repository(repo).renumber_task("TASK-1", "TASK-7")
+    assert _snapshot_backlog_markdown(repo) == before
+
+
+def test_cli_task_renumber_prints_each_move(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    _repository(repo).create_task(title="First child task", parent_task_id="TASK-1")
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "task", "renumber", "TASK-1", "TASK-5", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "TASK-1 -> TASK-5\nTASK-1.1 -> TASK-5.1\n"

@@ -59,6 +59,12 @@ MUTATION_SURFACES: tuple[MutationSurface, ...] = (
         "Moves active task markdown into the project archive tree.",
     ),
     MutationSurface(
+        "task_renumber",
+        ("backlog_py.cli.main",),
+        "project",
+        "Renames a task and its subtasks to new ids and rewrites parent and dependency references to them.",
+    ),
+    MutationSurface(
         "task_complete",
         ("backlog_py.mcp.tools",),
         "project",

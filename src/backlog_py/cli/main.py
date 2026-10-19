@@ -123,7 +123,7 @@ class _EditorConflictError(click.ClickException):
 
 _TASK_USAGE = (
     "Usage: task <task-id> | task list | task create TITLE | "
-    "task edit TASK_ID | task archive TASK_ID | task demote TASK_ID"
+    "task edit TASK_ID | task archive TASK_ID | task demote TASK_ID | task renumber TASK_ID NEW_ID"
 )
 
 
@@ -452,6 +452,15 @@ def task_command(
             raise click.UsageError("Usage: task archive TASK_ID")
         task_record = _locked_write(ctx, "task_archive", lambda: _mutable_repository(ctx).archive_task(args[1]))
         click.echo(f"{_format_task_line(task_record, plain=plain)} archived")
+        return
+    if args and args[0] == "renumber":
+        if len(args) != 3:
+            raise click.UsageError("Usage: task renumber TASK_ID NEW_ID")
+        result = _locked_write(ctx, "task_renumber", lambda: _mutable_repository(ctx).renumber_task(args[1], args[2]))
+        for old_id, new_id in result.renamed:
+            click.echo(f"{old_id} -> {new_id}")
+        if result.updated_references:
+            click.echo("Updated references in: " + ", ".join(result.updated_references))
         return
     if args and args[0] == "demote":
         if len(args) != 2:
