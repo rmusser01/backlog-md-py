@@ -260,7 +260,7 @@ def task_edit(
             append_plan=_optional_string_list(_get_alias(kwargs, "planAppend", "append_plan")),
             clear_plan=_coerce_bool(_get_alias(kwargs, "planClear", "clear_plan")) or False,
             notes=_optional_string(kwargs.get("notes")),
-            append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
+            append_notes=_optional_string_list(_get_alias(kwargs, "appendNotes", "append_notes")),
             acceptance_criteria=_optional_string_list(
                 _get_alias(kwargs, "acceptanceCriteriaSet", "acceptance_criteria_set")
             ),

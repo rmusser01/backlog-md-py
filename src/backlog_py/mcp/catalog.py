@@ -409,8 +409,8 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 "planClear": {"type": "boolean", "description": "Clear the implementation plan section."},
                 "clear_plan": {"type": "boolean", "description": "Alias for planClear."},
                 "notes": {"type": "string", "description": "Replacement implementation notes section."},
-                "appendNotes": {"type": "string", "description": "Implementation notes text to append."},
-                "append_notes": {"type": "string", "description": "Alias for appendNotes."},
+                "appendNotes": _string_or_string_array_schema("Implementation notes text to append."),
+                "append_notes": _string_or_string_array_schema("Alias for appendNotes."),
                 "acceptanceCriteria": _string_or_string_array_schema(
                     "Acceptance criteria to add; alias for acceptanceCriteriaAdd."
                 ),
