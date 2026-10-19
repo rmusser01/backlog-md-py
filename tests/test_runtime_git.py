@@ -12,6 +12,7 @@ disabled and an explicit identity. Without that, an ambient ``~/.gitconfig``
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 from math import inf
@@ -20,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from backlog_py.core.init import init_project
+from backlog_py.core.repository import MutableRepository
 from backlog_py.runtime import git as git_module
 from backlog_py.runtime.git import current_task_snapshot_timestamps
 
@@ -439,3 +441,44 @@ def test_branch_snapshots_read_each_shared_blob_once(
     assert len(snapshots) == 3, "each branch should still contribute its own snapshot"
     assert len(requested) == 1, "content must be read in one cat-file process for the whole scan"
     assert len(requested[0].split()) == 1, "the shared blob was requested more than once"
+
+
+def _other_checkouts_repo(tmp_path: Path):
+    """main holds TASK-1; branch `other` commits TASK-2 and TASK-1.1; worktree `wt` has an uncommitted TASK-3."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    MutableRepository(project).create_task(title="one")
+    _commit(repo, "seed")
+    _git(repo, "checkout", "-qb", "other")
+    MutableRepository(project).create_task(title="two")
+    MutableRepository(project).create_task(title="child", parent_task_id="TASK-1")
+    _commit(repo, "two")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), "-b", "wt")
+    (tmp_path / "wt" / "backlog" / "tasks" / "task-3 - three.md").write_text(
+        "---\nid: TASK-3\ntitle: three\nstatus: To Do\ncreated_date: '2026-01-01'\n---\n",
+        encoding="utf-8",
+    )
+    return project
+
+
+def test_create_skips_ids_other_branches_and_worktrees_use(tmp_path: Path) -> None:
+    """`task list` shows those tasks and warns on a shared id, so create must not reuse one.
+
+    TASK-3 is uncommitted in another worktree: on no ref, so only its files show it.
+    """
+    project = _other_checkouts_repo(tmp_path)
+
+    assert MutableRepository(project).create_task(title="four").id == "TASK-4"
+    assert MutableRepository(project).create_task(title="child", parent_task_id="TASK-1").id == "TASK-1.2"
+
+
+def test_create_allocates_from_this_checkout_only_when_active_branches_are_off(tmp_path: Path) -> None:
+    project = _other_checkouts_repo(tmp_path)
+    local_only = dataclasses.replace(
+        project, config=dataclasses.replace(project.config, check_active_branches=False)
+    )
+
+    assert MutableRepository(local_only).create_task(title="four").id == "TASK-2"

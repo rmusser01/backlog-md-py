@@ -282,6 +282,49 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     return snapshots
 
 
+def other_checkout_task_file_names(project: BacklogProject) -> list[str]:
+    """Names of the task files on active branches and in other ``git worktree`` checkouts.
+
+    Names only, because an id reservation needs no content: this skips the
+    per-ref log walk and the blob reads that make the full branch scan slow. An
+    uncommitted task in another worktree is on no ref, so the worktree
+    directories are listed too. Follows ``checkActiveBranches``.
+    """
+    if not project.config.check_active_branches or not _is_git_worktree(project.root):
+        return []
+    backlog_path = _relative_backlog_path(project)
+    if backlog_path is None:
+        return []
+    buckets = ("tasks", "completed", "archive/tasks")
+    names: list[str] = []
+    for ref in _recent_branch_refs(project):
+        result = _run_git(
+            project.root,
+            "-c",
+            "core.quotePath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            ref,
+            "--",
+            *(f"{backlog_path}/{bucket}" for bucket in buckets),
+        )
+        if result.returncode == 0:
+            names.extend(posixpath.basename(path) for path in result.stdout.splitlines() if path.endswith(".md"))
+    result = _run_git(project.root, "worktree", "list", "--porcelain", "-z")
+    if result.returncode != 0:
+        return names
+    prefix = _repository_prefix(project.root)
+    own = project.backlog_dir.resolve()
+    for field in result.stdout.split("\0"):
+        if not field.startswith("worktree "):
+            continue
+        backlog_dir = Path(field.removeprefix("worktree ")) / prefix / backlog_path
+        if backlog_dir.resolve() != own:
+            names.extend(path.name for bucket in buckets for path in (backlog_dir / bucket).glob("*.md"))
+    return names
+
+
 def _blob_contents(work_dir: Path, oids: Collection[str]) -> dict[str, str]:
     """Read every blob id in one ``git cat-file --batch`` process.
 
