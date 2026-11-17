@@ -1401,6 +1401,112 @@ def test_browser_task_edit_endpoint_updates_owned_fields_under_project_lock(tmp_
     assert "Preserve completed acceptance criteria raw line" not in edited_source
 
 
+@pytest.mark.parametrize("has_criteria_markers", [True, False])
+def test_browser_task_edit_form_omits_unchanged_acceptance_criteria(tmp_path, has_criteria_markers):
+    repo = _copy_fixture_repo(tmp_path)
+    path = _task_file(repo)
+    source = path.read_text(encoding="utf-8")
+    if not has_criteria_markers:
+        source = source.replace("<!-- AC:BEGIN -->\n", "").replace("<!-- AC:END -->\n", "")
+        path.write_text(source, encoding="utf-8")
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        endpoint = f"{service.root_url}/api/tasks/TASK-1"
+        detail = _get_json(endpoint)
+        payload = _run_board_javascript_harness(
+            f"""
+const task = {json.dumps(detail)};
+let payload;
+globalThis.fetch = async (url, options) => {{
+  if (url.endsWith("/edit")) payload = JSON.parse(options.body);
+  return {{ok: true, json: async () => task}};
+}};
+await openTaskEdit("TASK-1");
+taskEditForm.elements.title.value = "New title";
+taskEditForm.elements.status.value = task.status;
+taskEditForm._data = Object.fromEntries(
+  Object.entries(taskEditForm.elements).map(([name, field]) => [name, field.value]),
+);
+await taskEditForm.listeners.submit({{preventDefault() {{}}, currentTarget: taskEditForm}});
+return payload;
+""",
+            task_edit_dom=True,
+        )
+        response = _post_json_response(f"{endpoint}/edit", payload)
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["task"]["title"] == "New title"
+    assert response["body"]["task"]["acceptanceCriteria"] == detail["acceptanceCriteria"]
+    assert "acceptanceCriteria" not in payload
+    after_source = _task_file(repo).read_text(encoding="utf-8")
+    assert after_source.split("## Acceptance Criteria", 1)[1].split("## Implementation Notes", 1)[0] == (
+        source.split("## Acceptance Criteria", 1)[1].split("## Implementation Notes", 1)[0]
+    )
+
+
+def test_browser_task_edit_preserves_check_state_for_retained_acceptance_criteria(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    path = _task_file(repo)
+    source = path.read_text(encoding="utf-8")
+    path.write_text(
+        source.replace("- [x] #1 Preserve completed acceptance criteria raw line\n"
+                       "- [ ] #2 Preserve incomplete acceptance criteria raw line\n"
+                       "- [ ] Plain checklist item without an id\n",
+                       "- [ ] #1 First duplicate\n- [x] #2 First duplicate\n"
+                       "- [x] #3 Keep me\n- [x] #4 Remove me\n"),
+        encoding="utf-8",
+    )
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        endpoint = f"{service.root_url}/api/tasks/TASK-1"
+        response = _post_json_response(
+            f"{endpoint}/edit",
+            {"acceptanceCriteria": ["Keep me", "First duplicate", "First duplicate", "First duplicate", "New"]},
+        )
+        detail = _get_json(endpoint)
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["task"]["acceptanceCriteria"] == detail["acceptanceCriteria"] == [
+        {"checked": True, "itemId": "1", "text": "Keep me"},
+        {"checked": False, "itemId": "2", "text": "First duplicate"},
+        {"checked": True, "itemId": "3", "text": "First duplicate"},
+        {"checked": False, "itemId": "4", "text": "First duplicate"},
+        {"checked": False, "itemId": "5", "text": "New"},
+    ]
+
+
+def test_browser_edit_preserves_retained_criterion_after_multiline_input(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import _retain_acceptance_checks, _task_edit_kwargs_from_payload
+    from backlog_py.core.repository import MutableRepository
+
+    repository = MutableRepository(project)
+    existing = repository.get_task("TASK-1")
+    retained = existing.parsed.checklists["AC"][0].text
+    edits = _task_edit_kwargs_from_payload({"acceptanceCriteria": ["New\n- [ ] Extra", retained]})
+    _retain_acceptance_checks(existing, edits)
+
+    updated = repository.edit_task(existing.id, **edits)
+
+    assert [(item.text, item.checked) for item in updated.parsed.checklists["AC"]] == [
+        ("New", False), ("Extra", False), (retained, True),
+    ]
+
+
 def test_browser_task_edit_endpoint_updates_rich_markdown_sections_under_project_lock(tmp_path, monkeypatch):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -2453,6 +2559,31 @@ def test_browser_config_settings_update_refreshes_server_project(tmp_path):
 
     assert board["statuses"][:3] == ["Ready", "In Progress", "Done"]
     assert '<option value="Ready" selected>Ready</option>' in html
+
+
+@pytest.mark.parametrize("status", ["🚀 Release", "Before\u0085After", "Before\u007fAfter"])
+def test_browser_config_status_with_unicode_round_trips_and_renders(tmp_path, status):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    statuses = ["To Do", "In Progress", "Done", status]
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        settings_url = f"{service.root_url}/api/settings/config"
+        response = _post_json(settings_url, {"settings": {"statuses": statuses, "defaultStatus": status}})
+
+        assert response["settings"]["statuses"] == statuses
+        assert response["settings"]["defaultStatus"] == status
+        assert _get_json(settings_url)["settings"]["statuses"] == statuses
+        assert _get_json(f"{service.root_url}/api/board")["statuses"] == statuses
+        assert f'<option value="{status}" selected>{status}</option>' in _get_text(service.root_url)
+    finally:
+        service.shutdown()
+
+    written = yaml.safe_load(project.config_path.read_text(encoding="utf-8"))
+    assert written["statuses"] == statuses
 
 
 def test_browser_config_status_pair_trims_and_canonicalizes_submitted_values(tmp_path):
@@ -5876,7 +6007,7 @@ def _copy_fixture_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _run_board_javascript_harness(test_source: str, *, status_dom: bool = False) -> object:
+def _run_board_javascript_harness(test_source: str, *, status_dom: bool = False, task_edit_dom: bool = False) -> object:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for executable browser JavaScript contracts")
@@ -5884,6 +6015,7 @@ def _run_board_javascript_harness(test_source: str, *, status_dom: bool = False)
         {
             "boardSource": Path("src/backlog_py/browser/assets/board.js").read_text(encoding="utf-8"),
             "statusDom": status_dom,
+            "taskEditDom": task_edit_dom,
             "testSource": test_source,
         }
     )
@@ -5970,6 +6102,12 @@ const fakeConfigSettingsDialog = {
   showModal() { this.open = true; },
   setAttribute(name) { if (name === "open") this.open = true; },
 };
+const fakeTaskEditForm = fakeElement("form");
+fakeTaskEditForm.querySelectorAll = () => [];
+fakeTaskEditForm.elements = Object.fromEntries([
+  "title", "status", "priority", "milestone", "assignees", "labels", "description",
+  "acceptanceCriteria", "implementationNotes", "finalSummary",
+].map((name) => [name, fakeElement("input")]));
 const document = {
   get activeElement() { return activeElement; },
   createElement: (tagName) => fakeElement(tagName),
@@ -5981,6 +6119,7 @@ const document = {
     "config-settings-dialog": fakeConfigSettingsDialog,
     "config-settings-form": payload.statusDom ? fakeConfigSettingsForm : null,
     "config-status-rows": payload.statusDom ? fakeConfigStatusRows : null,
+    "task-edit-form": payload.taskEditDom ? fakeTaskEditForm : null,
   })[id] || null,
   querySelector: (selector) => selector === "[data-board-revision]"
     ? {dataset: {boardRevision: "", mermaidUrl: "", mermaidSri: ""}}
@@ -6248,9 +6387,9 @@ def test_browser_board_payload_scans_the_project_once(tmp_path, monkeypatch):
     scanned: list[str] = []
     real_load = repository_module._load_tasks_from_dir
 
-    def counting(task_dir):
+    def counting(task_dir, **kwargs):
         scanned.append(str(task_dir))
-        return real_load(task_dir)
+        return real_load(task_dir, **kwargs)
 
     monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
     payload = build_board_payload(project)
@@ -6277,9 +6416,9 @@ def test_task_detail_endpoint_scans_the_project_once(tmp_path, monkeypatch):
         scanned: list[str] = []
         real_load = repository_module._load_tasks_from_dir
 
-        def counting(task_dir):
+        def counting(task_dir, **kwargs):
             scanned.append(str(task_dir))
-            return real_load(task_dir)
+            return real_load(task_dir, **kwargs)
 
         monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
         detail = _get_json(f"{service.root_url}/api/tasks/TASK-1")
@@ -6308,9 +6447,9 @@ def test_repeat_board_requests_do_not_rescan_an_unchanged_project(tmp_path, monk
         scanned: list[str] = []
         real_load = repository_module._load_tasks_from_dir
 
-        def counting(task_dir):
+        def counting(task_dir, **kwargs):
             scanned.append(str(task_dir))
-            return real_load(task_dir)
+            return real_load(task_dir, **kwargs)
 
         monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
         second = _get_json(f"{service.root_url}/api/board")

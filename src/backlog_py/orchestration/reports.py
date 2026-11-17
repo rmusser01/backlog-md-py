@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Sequence
 
-from backlog_py.core.repository import ReadOnlyRepository, TaskRecord
+from backlog_py.core.repository import ReadOnlyRepository, TaskRecord, _reference_key
 from backlog_py.orchestration.history import parse_run_history
 from backlog_py.orchestration.models import (
     OrchestrationPolicy,
@@ -24,14 +24,14 @@ def list_eligible_tasks(
 ) -> list[TaskRecord]:
     active_policy = policy or OrchestrationPolicy.default()
     current_time = _coerce_now(now)
-    complete_ids = _complete_task_ids(repository)
+    complete_keys = _complete_task_keys(repository)
     return [
         task
         for task in repository.list_tasks()
         if active_policy.is_claimable(effective_status_key(task))
         and not validate_orchestration(task, active_policy)
         and not _has_active_lease(task, current_time)
-        and _dependencies_complete(task, complete_ids)
+        and _dependencies_complete(task, complete_keys)
     ]
 
 
@@ -79,15 +79,15 @@ def queue_report(
 ) -> OrchestrationQueueReport:
     active_policy = policy or OrchestrationPolicy.default()
     current_time = _coerce_now(now)
-    complete_ids = _complete_task_ids(repository)
+    complete_keys = _complete_task_keys(repository)
     tasks = list(repository.list_tasks())
     if include_completed:
         tasks.extend(repository.list_completed_tasks())
     items = [
-        categorize_task(
+        _categorize_task(
             task,
             policy=active_policy,
-            complete_task_ids=complete_ids,
+            complete_keys=complete_keys,
             now=current_time,
             run_history_issues=_run_history_validation_issues(task),
             project_root=repository.project.root,
@@ -108,6 +108,25 @@ def categorize_task(
     run_history_issues: Sequence[ValidationIssue],
     project_root: object | None = None,
 ) -> OrchestrationQueueItem:
+    return _categorize_task(
+        task,
+        policy=policy,
+        complete_keys={_reference_key(task_id) for task_id in complete_task_ids},
+        now=now,
+        run_history_issues=run_history_issues,
+        project_root=project_root,
+    )
+
+
+def _categorize_task(
+    task: TaskRecord,
+    *,
+    policy: OrchestrationPolicy,
+    complete_keys: set[str],
+    now: datetime,
+    run_history_issues: Sequence[ValidationIssue],
+    project_root: object | None,
+) -> OrchestrationQueueItem:
     status_key = effective_status_key(task)
     orchestration = parse_orchestration(task)
     version = orchestration.version if orchestration is not None and orchestration.version is not None else 0
@@ -127,7 +146,7 @@ def categorize_task(
         category = "claimed"
     elif _has_stale_lease(task, now):
         category = "stale_claim"
-    elif policy.is_claimable(status_key) and not _dependencies_complete(task, complete_task_ids):
+    elif policy.is_claimable(status_key) and not _dependencies_complete(task, complete_keys):
         category = "blocked_by_dependencies"
     elif policy.is_claimable(status_key):
         category = "eligible"
@@ -165,9 +184,9 @@ def _display_path(task: TaskRecord, project_root: object | None) -> str:
     return task.path.as_posix()
 
 
-def _complete_task_ids(repository: ReadOnlyRepository) -> set[str]:
+def _complete_task_keys(repository: ReadOnlyRepository) -> set[str]:
     return {
-        task.id.upper()
+        _reference_key(task.id)
         for task in repository.search_tasks("")
         if _is_complete_status(task.status) or "completed" in task.path.parts
     }
@@ -185,9 +204,9 @@ def _run_history_validation_issues(task: TaskRecord) -> list[ValidationIssue]:
     ]
 
 
-def _dependencies_complete(task: TaskRecord, complete_ids: set[str]) -> bool:
+def _dependencies_complete(task: TaskRecord, complete_keys: set[str]) -> bool:
     dependencies = _frontmatter_string_list(task.parsed.frontmatter.get("dependencies"))
-    return all(dependency.strip().upper() in complete_ids for dependency in dependencies if dependency.strip())
+    return all(_reference_key(dependency) in complete_keys for dependency in dependencies if dependency.strip())
 
 
 def _has_active_lease(task: TaskRecord, now: datetime) -> bool:

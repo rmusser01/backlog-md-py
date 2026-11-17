@@ -460,10 +460,10 @@ def test_board_snapshot_reuses_the_repository_it_was_given(tmp_path, monkeypatch
     scans = 0
     real_load = repository_module._load_tasks_from_dir
 
-    def counting(task_dir):
+    def counting(task_dir, **kwargs):
         nonlocal scans
         scans += 1
-        return real_load(task_dir)
+        return real_load(task_dir, **kwargs)
 
     monkeypatch.setattr(repository_module, "_load_tasks_from_dir", counting)
     snapshot = board_snapshot_from_local(project, board, source="local", repository=repository)

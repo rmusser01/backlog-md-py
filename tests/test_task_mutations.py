@@ -414,6 +414,48 @@ def test_edit_task_sets_appends_and_clears_plan_without_rewriting_unowned_body(t
     assert "## Implementation Plan" not in _task_file(repo).read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_clear_plan_preserves_text_and_whitespace_outside_the_markers(tmp_path, newline):
+    repo = _copy_fixture(tmp_path)
+    task = _repository(repo).edit_task("TASK-1", plan="Remove this plan")
+    original = task.raw_source.replace(
+        "## Implementation Plan\n\n",
+        "## Implementation Plan\n\nText before the plan markers.  \n\n",
+    ).replace(
+        "<!-- SECTION:PLAN:END -->\n",
+        "<!-- SECTION:PLAN:END -->\n\n    Indented unowned text.  \n",
+    )
+    task.path.write_bytes(original.replace("\n", newline).encode())
+    task = _repository(repo).get_task(task.id)
+
+    cleared = _repository(repo).edit_task(task.id, clear_plan=True)
+
+    assert cleared.body == task.body.replace(task.parsed.sections["PLAN"].raw, "", 1)
+
+
+@pytest.mark.parametrize(
+    ("bucket", "filename", "frontmatter"),
+    [
+        ("tasks", "renamed.md", "---\nid: TASK-009 # existing task\ntitle: Imported\n---\n"),
+        ("tasks", "quoted.md", '---\n"id": TASK-009\ntitle: Imported\n---\n'),
+        ("tasks", "invalid-id.yml.md", "---\nid:TASK-009\ntitle: Imported\n---\n"),
+        ("archive/tasks", "task-9 - Damaged.md", "---\ntitle: [unclosed\n---\n"),
+    ],
+)
+def test_task_create_reserves_the_id_of_a_malformed_file(tmp_path, bucket, filename, frontmatter):
+    repo = _copy_fixture(tmp_path)
+    broken = repo / "backlog" / bucket / filename
+    broken.parent.mkdir(parents=True, exist_ok=True)
+    original = frontmatter + "<!-- AC:BEGIN -->\n"
+    broken.write_text(original, encoding="utf-8")
+    repository = _repository(repo)
+
+    with pytest.raises(TaskMutationError, match="Task id already exists: TASK-9"):
+        repository.create_task(title="Explicit collision", task_id="TASK-9")
+    assert repository.create_task(title="Automatic ID").id == "TASK-10"
+    assert broken.read_text(encoding="utf-8") == original
+
+
 def test_edit_task_can_uncheck_acceptance_criteria_and_definition_of_done(tmp_path):
     repo = _copy_fixture(tmp_path)
 
@@ -1882,6 +1924,42 @@ def test_renumber_task_restores_every_file_when_a_write_fails(tmp_path, monkeypa
     with pytest.raises(OSError, match="disk full"):
         _repository(repo).renumber_task("TASK-1", "TASK-7")
     assert _snapshot_backlog_markdown(repo) == before
+
+
+@pytest.mark.parametrize("parent_already_removed", [False, True])
+def test_renumber_restores_originals_and_references_when_removing_a_source_fails(
+    tmp_path, monkeypatch, parent_already_removed
+):
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    child = repository.create_task(title="Child task", parent_task_id="TASK-1")
+    repository.create_task(title="Dependent task", dependencies=["TASK-1"])
+    parent_path = _task_file(repo)
+    parent_path.write_bytes(b"\xef\xbb\xbf" + parent_path.read_bytes())
+    before = _snapshot_backlog_markdown(repo)
+    original_unlink = Path.unlink
+
+    def fail_to_remove_child(path, *args, **kwargs):
+        if path == child.path:
+            raise PermissionError("cannot remove old child file")
+        if path == parent_path and parent_already_removed:
+            original_unlink(path)
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_to_remove_child)
+    with pytest.raises(PermissionError, match="cannot remove old child file"):
+        repository.renumber_task("TASK-1", "TASK-7")
+
+    assert _snapshot_backlog_markdown(repo) == before
+    assert repository.get_task("TASK-1").id == "TASK-1"
+    with pytest.raises(NotFoundError):
+        repository.get_task("TASK-7")
+
+    monkeypatch.undo()
+    assert repository.renumber_task("TASK-1", "TASK-7").renamed == (
+        ("TASK-1", "TASK-7"),
+        ("TASK-1.1", "TASK-7.1"),
+    )
 
 
 def test_cli_task_renumber_prints_each_move(tmp_path):

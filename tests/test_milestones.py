@@ -10,6 +10,7 @@ from loguru import logger
 
 import backlog_py.core.milestones as milestones_module
 from backlog_py.cli.main import main
+from backlog_py.core.drafts import DraftService
 from backlog_py.core.errors import NotFoundError
 from backlog_py.core.milestones import MilestoneMutationError, MilestoneService
 from backlog_py.mcp.tools import (
@@ -245,6 +246,50 @@ def test_id_allocator_never_reuses_archived_id(tmp_path):
 
     assert created.id == "m-1"
     assert next_created.id == "m-2"
+
+
+@pytest.mark.parametrize(
+    ("bucket", "reference"),
+    [("tasks", "m-1"), ("completed", "1"), ("archive/tasks", "M-1"), ("drafts", "m-1"), ("archive/drafts", "m-1")],
+)
+def test_id_allocator_reserves_ids_still_referenced_after_removal(tmp_path, bucket, reference):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    service.add_milestone("Previous release")
+    if bucket.endswith("drafts"):
+        path = DraftService(_project(repo)).create_draft(title="Release draft", milestone=reference).path
+    else:
+        _set_task_milestone(repo, reference)
+        path = _task_path(repo)
+    bucket_path = repo / "backlog" / bucket
+    if path.parent != bucket_path:
+        bucket_path.mkdir(parents=True)
+        path = path.rename(bucket_path / path.name)
+    original_source = path.read_bytes()
+
+    service.remove_milestone("Previous release", clear_tasks=False)
+    replacement = service.add_milestone("Next release")
+
+    assert replacement.id == "m-2"
+    assert path.read_bytes() == original_source
+    with pytest.raises(NotFoundError):
+        service.resolve_milestone(reference)
+
+
+def test_id_allocator_reserves_milestone_in_task_with_damaged_body(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    service = _service(repo)
+    milestone = service.add_milestone("Previous release")
+    _set_task_milestone(repo, milestone.id)
+    path = _task_path(repo)
+    damaged = path.read_text(encoding="utf-8").replace("<!-- AC:END -->", "")
+    path.write_text(damaged, encoding="utf-8")
+
+    service.remove_milestone(milestone.id)
+    replacement = service.add_milestone("Next release")
+
+    assert replacement.id == "m-2"
+    assert path.read_text(encoding="utf-8") == damaged
 
 
 @pytest.mark.parametrize(

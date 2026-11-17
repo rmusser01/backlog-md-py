@@ -1,4 +1,4 @@
-"""One project scan, shared for as long as the task files are unchanged.
+"""Share one project scan while its task files and Git refs are unchanged.
 
 Every surface that renders a board -- the TUI, the browser service, the MCP
 tools -- used to re-read and re-parse every task file for each request or tool
@@ -24,12 +24,13 @@ from typing import Callable, TypeVar, cast
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository
 from backlog_py.indexing.sqlite import _file_signature
+from backlog_py.runtime.git import read_index_git_freshness
 
 _T = TypeVar("_T")
 
 
 class ProjectScanCache:
-    """Reuse one project scan across requests while the task files are unchanged.
+    """Reuse one project scan across requests while task files and refs are unchanged.
 
     Every request rebuilt the board from nothing: 2310 task files parsed for a
     board, and again for a single task card. Stat-ing those files instead costs
@@ -46,6 +47,7 @@ class ProjectScanCache:
         self._signature: str | None = None
         self._repository: ReadOnlyRepository | None = None
         self._board_payload: object | None = None
+        self._board_policy_signature: dict[str, object] | None = None
 
     def repository(self, project: BacklogProject) -> ReadOnlyRepository:
         """A repository whose scan is current for `project`."""
@@ -53,14 +55,28 @@ class ProjectScanCache:
             return self._refresh_locked(project)
 
     def board_payload(
-        self, project: BacklogProject, build: Callable[[ReadOnlyRepository], _T]
+        self,
+        project: BacklogProject,
+        build: Callable[[ReadOnlyRepository], _T],
+        *,
+        is_current: Callable[[_T], bool] | None = None,
     ) -> _T:
-        """The unfiltered board payload, built at most once per project state."""
+        """Reuse a board payload until its inputs or time-sensitive state change."""
         with self._lock:
             repository = self._refresh_locked(project)
-            if self._board_payload is None:
-                self._board_payload = build(repository)
-            return cast(_T, self._board_payload)
+            policy_signature = _file_signature(
+                project.root, project.backlog_dir / "orchestration.yml", now_ns=time.time_ns()
+            )
+            payload = cast(_T | None, self._board_payload)
+            if (
+                payload is None
+                or policy_signature != self._board_policy_signature
+                or (is_current is not None and not is_current(payload))
+            ):
+                payload = build(repository)
+                self._board_payload = payload
+                self._board_policy_signature = policy_signature
+            return payload
 
     def _refresh_locked(self, project: BacklogProject) -> ReadOnlyRepository:
         signature = _project_signature(project)
@@ -78,7 +94,7 @@ class ProjectScanCache:
 
 
 def _project_signature(project: BacklogProject) -> str:
-    """A cheap fingerprint of files that affect cached repositories and boards."""
+    """A cheap fingerprint of files and Git inputs used by a cached scan."""
     now_ns = time.time_ns()
     signatures: list[dict[str, object]] = []
     if project.config_path.is_file():
@@ -97,7 +113,7 @@ def _project_signature(project: BacklogProject) -> str:
         for path in sorted(directory.glob("*.md")):
             signatures.append(_file_signature(project.root, path, now_ns=now_ns))
     return json.dumps(
-        {"config": asdict(project.config), "files": signatures},
+        {"config": asdict(project.config), "files": signatures, "git": read_index_git_freshness(project)},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -135,8 +151,7 @@ def read_repository(project: BacklogProject, *, now: float | None = None) -> Rea
     For a long-lived process answering many requests about one project --
     the MCP stdio server and the singleton daemon -- rebuilding the repository
     per call means re-parsing every task file per call. The cache is keyed by
-    project root and rebuilt whenever the files change, so a caller never sees
-    state older than its own last write.
+    project root and rebuilt whenever the files or relevant Git refs change.
 
     It is bounded in both directions: at most `MAX_CACHED_PROJECTS` projects are
     held, and any project untouched for `IDLE_EVICTION_SECONDS` is dropped. A

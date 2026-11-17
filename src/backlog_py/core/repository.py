@@ -4,11 +4,11 @@ import os
 import re
 import tempfile
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from math import inf, isfinite
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Iterator, Sequence
 
 import yaml
 from loguru import logger
@@ -17,7 +17,7 @@ from backlog_py.core.errors import NotFoundError
 from backlog_py.core.ids import format_child_task_id, format_numbered_id, ids_equivalent, numeric_id_key
 from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMarkdown, TaskMarkdownSection
 from backlog_py.core.status_callback import execute_status_callback
-from backlog_py.markdown.task_parser import parse_task_markdown
+from backlog_py.markdown.task_parser import parse_task_markdown, read_task_frontmatter, salvage_frontmatter_id
 from backlog_py.runtime.git import (
     current_task_snapshot_timestamps,
     list_active_branch_task_snapshots,
@@ -116,6 +116,7 @@ class ReadOnlyRepository:
         self._visible_task_records: dict[str, list[TaskRecord]] | None = None
         self._lookup_task_records: list[TaskRecord] | None = None
         self._task_dir_records: dict[Path, list[TaskRecord]] = {}
+        self._unparsed_task_paths: set[Path] = set()
 
     @classmethod
     def from_path(cls, cwd: Path) -> "ReadOnlyRepository":
@@ -195,9 +196,26 @@ class ReadOnlyRepository:
         """
         cached = self._task_dir_records.get(directory)
         if cached is None:
-            cached = _load_tasks_from_dir(directory)
+            cached = _load_tasks_from_dir(directory, unparsed_paths=self._unparsed_task_paths)
             self._task_dir_records[directory] = cached
         return cached
+
+    def _local_task_frontmatters(self) -> Iterator[tuple[Path, str, dict[str, object]]]:
+        """Read task and draft metadata even when an owned body section is damaged."""
+        for directory in (
+            *self._task_lookup_dirs(),
+            self.project.backlog_dir / "drafts",
+            self.project.backlog_dir / "archive" / "drafts",
+        ):
+            for record in self._task_dir_records_cached(directory):
+                yield record.path, record.id, record.parsed.frontmatter
+        for path in self._unparsed_task_paths:
+            try:
+                frontmatter = read_task_frontmatter(path)
+            except (OSError, ValueError):
+                continue
+            if frontmatter:
+                yield path, str(frontmatter.get("id") or _id_from_filename(path)), frontmatter
 
     def _all_known_task_records(self) -> list[TaskRecord]:
         """Active, completed, and archived tasks — everything ``get_task`` can resolve.
@@ -214,9 +232,13 @@ class ReadOnlyRepository:
         return records
 
     def _reserved_task_ids(self) -> set[str]:
-        """Casefolded ids of every task in any bucket (active, completed, archived)."""
+        """Casefolded ids in all task buckets, including unreadable files."""
         ids = {task.id.casefold() for task in self.list_tasks()}
         ids.update(task.id.casefold() for task in self._lookup_task_records_cached())
+        for path in self._unparsed_task_paths:
+            ids.add(_id_from_filename(path).casefold())
+            if salvaged := salvage_frontmatter_id(path):
+                ids.add(salvaged.casefold())
         return ids
 
     def _task_id_is_reserved(self, candidate: str) -> bool:
@@ -233,6 +255,7 @@ class ReadOnlyRepository:
         self._visible_task_records = None
         self._lookup_task_records = None
         self._task_dir_records.clear()
+        self._unparsed_task_paths.clear()
 
     def _safe_task_path(self, candidate: Path) -> Path:
         """Assert a task file lives under the backlog directory.
@@ -431,7 +454,7 @@ def _sqlite_index_enabled() -> bool:
     return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
-def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
+def _load_tasks_from_dir(task_dir: Path, *, unparsed_paths: set[Path] | None = None) -> list[TaskRecord]:
     if not task_dir.is_dir():
         return []
     # Anchor on the directory as it actually resolves, so relocating the whole
@@ -465,6 +488,8 @@ def _load_tasks_from_dir(task_dir: Path) -> list[TaskRecord]:
         except (ValueError, OSError) as exc:
             # A single unparsable file must not make the whole repository
             # unreadable; skip it (as branch snapshots already do) and warn.
+            if unparsed_paths is not None:
+                unparsed_paths.add(path)
             logger.warning("Skipping unreadable task file {}: {}", path, exc)
     return records
 
@@ -517,7 +542,6 @@ class MutableRepository(ReadOnlyRepository):
             include_active_branch_snapshots=False,
             use_sqlite_index=False,
         )
-        self._other_checkout_files: dict[str, str] | None = None
 
     @classmethod
     def from_path(cls, cwd: Path) -> "MutableRepository":
@@ -1030,12 +1054,10 @@ class MutableRepository(ReadOnlyRepository):
 
     def _other_checkout_task_files(self) -> dict[str, str]:
         """Casefolded id -> file name, for the task files on active branches and in other worktrees."""
-        if self._other_checkout_files is None:
-            self._other_checkout_files = {
-                _id_from_filename(Path(name)).casefold(): name
-                for name in other_checkout_task_file_names(self.project)
-            }
-        return self._other_checkout_files
+        return {
+            _id_from_filename(Path(name)).casefold(): name
+            for name in other_checkout_task_file_names(self.project)
+        }
 
     def renumber_task(self, task_id: str, new_task_id: str) -> TaskRenumberResult:
         """Give a task and its subtasks a new id, and repoint every parent and dependency reference.
@@ -1171,14 +1193,15 @@ class MutableRepository(ReadOnlyRepository):
 
     def _next_child_task_id(self, parent_task_id: str) -> str:
         max_id = 0
-        prefix = f"{parent_task_id}.".casefold()
-        for task_id in self._allocation_reserved_ids():
-            if not task_id.startswith(prefix):
-                continue
-            rest = task_id[len(prefix):]
-            first_segment = rest.split(".", 1)[0]
-            if first_segment.isdigit():
-                max_id = max(max_id, int(first_segment))
+        if (parent_key := numeric_id_key(parent_task_id)) is not None:
+            parent_prefix, parent_segments = parent_key
+            depth = len(parent_segments)
+            for task_id in self._allocation_reserved_ids():
+                if (key := numeric_id_key(task_id)) is None:
+                    continue
+                prefix, segments = key
+                if prefix == parent_prefix and len(segments) > depth and segments[:depth] == parent_segments:
+                    max_id = max(max_id, segments[depth])
         return format_child_task_id(parent_task_id, max_id + 1, self.project.config.zero_padded_ids)
 
     def _task_path(self, task_id: str, title: str, *, base_dir: Path | None = None) -> Path:
@@ -1200,41 +1223,32 @@ def _write_task_source_batch(
         if target != safe_path and target.exists():
             raise TaskMutationError(f"Task path already exists: {target.name}")
         if update.updated_source != update.original_source or target != safe_path:
-            prepared.append((update, safe_path, target))
+            # Parsed task sources omit a UTF-8 BOM that a rollback must keep.
+            with safe_path.open("r", encoding="utf-8", newline="") as original:
+                prepared.append((replace(update, original_source=original.read()), safe_path, target))
 
     completed: list[tuple[_TaskSourceUpdate, Path, Path]] = []
+    removed: set[Path] = set()
     try:
         for update, path, target in prepared:
             _atomic_write_text(target, update.updated_source, base=repository.project.backlog_dir)
             completed.append((update, path, target))
+        for _, path, target in prepared:
+            if target != path:
+                path.unlink(missing_ok=True)
+                removed.add(path)
     except Exception:
         for update, path, target in reversed(completed):
             try:
+                if path == target or path in removed:
+                    _atomic_write_text(path, update.original_source, base=repository.project.backlog_dir)
+                # Keep the published copy if restoring the original failed.
                 if target != path:
                     target.unlink()
-                else:
-                    _atomic_write_text(path, update.original_source, base=repository.project.backlog_dir)
             except Exception as rollback_error:
-                if target != path:
-                    logger.warning(
-                        "Failed to remove {} while rolling back {}: {}",
-                        target,
-                        update.task_id,
-                        rollback_error,
-                    )
-                else:
-                    logger.warning(
-                        "Failed to roll back task {} at {}: {}",
-                        update.task_id,
-                        path,
-                        rollback_error,
-                    )
+                logger.warning("Failed to roll back task {} at {}: {}", update.task_id, path, rollback_error)
         repository._invalidate_task_cache()
         raise
-
-    for _, path, target in prepared:
-        if target != path:
-            path.unlink()
     if prepared:
         repository._invalidate_task_cache()
     return [update.task_id for update, _, _ in prepared]
@@ -1514,20 +1528,10 @@ def _remove_section(source: str, parsed: ParsedTaskMarkdown, name: str) -> str:
     section_start = _section_offset(source, section)
     if section_start == -1:
         return source
-    heading = _heading_for_section(name)
-    heading_start = source.rfind(heading, 0, section_start)
-    remove_start = heading_start if heading_start != -1 else section_start
-    remove_end = section_start + len(section.raw)
-    while remove_end < len(source) and source[remove_end] in "\r\n":
-        remove_end += 1
-    newline = _detect_newline(source)
-    before = source[:remove_start].rstrip()
-    after = source[remove_end:].lstrip()
-    if before and after:
-        return f"{before}{newline * 2}{after}"
-    if before:
-        return f"{before}{newline}"
-    return after
+    heading = re.escape(_heading_for_section(name))
+    adjacent_heading = re.search(rf"(?m)^{heading}[ \t]*\r?\n(?:[ \t]*\r?\n)*\Z", source[:section_start])
+    remove_start = adjacent_heading.start() if adjacent_heading else section_start
+    return source[:remove_start] + source[section_start + len(section.raw):]
 
 
 def _section_offset(source: str, section: TaskMarkdownSection) -> int:
