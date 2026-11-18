@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from collections.abc import Mapping
@@ -164,7 +165,7 @@ def set_config_values(project: BacklogProject, updates: Mapping[str, str]) -> Ba
     for key, value in updates.items():
         _apply_config_value(raw, key, value)
     config = _config_from_raw(raw, project.config_path)
-    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).strip()
+    yaml_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=False).strip()
     _atomic_write_text(project.config_path, f"{yaml_text}\n", base=project.root)
     return config
 
@@ -207,6 +208,14 @@ def _load_raw_config(path: Path) -> dict[Any, Any]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Backlog config must contain a mapping: {path}")
+    if isinstance(statuses := raw.get("statuses"), list):
+        # Older browser saves stored non-BMP statuses as separate JSON surrogate halves in YAML.
+        raw["statuses"] = [
+            status.encode("utf-16", "surrogatepass").decode("utf-16", "surrogatepass")
+            if isinstance(status, str) and not status.isascii()
+            else status
+            for status in statuses
+        ]
     return raw
 
 
@@ -367,6 +376,15 @@ def _parse_config_value(normalized_key: str | None, value: str) -> Any:
         return _parse_int_config_value(normalized_key, value)
     if normalized_key == "definition_of_done":
         return _parse_definition_of_done_config_value(value)
+    if normalized_key == "statuses":
+        # Browser requests encode the list as JSON, whose Unicode escapes differ from YAML.
+        try:
+            statuses = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(statuses, list) and all(isinstance(status, str) for status in statuses):
+                return statuses
     if normalized_key in _LIST_CONFIG_KEYS:
         return _parse_list_config_value(value)
     if normalized_key == "on_status_change":

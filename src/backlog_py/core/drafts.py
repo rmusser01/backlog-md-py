@@ -19,6 +19,7 @@ from backlog_py.core.repository import (
     _atomic_write_text,
     _current_task_timestamp,
     _definition_of_done_for_create,
+    _frontmatter_string_list,
     _load_task,
     _mutation_path,
     _new_task_source,
@@ -29,6 +30,7 @@ from backlog_py.core.repository import (
     _reject_missing_dependencies,
     _replace_frontmatter_values,
     _slug_title,
+    _task_ids_equal,
     normalize_ordinal_value,
 )
 from backlog_py.markdown.task_parser import parse_task_markdown
@@ -169,11 +171,22 @@ class DraftService:
         # Local working tree only: an active-branch snapshot could otherwise
         # write another branch's content into the new draft (and unlink the
         # local file), losing local edits.
-        task = ReadOnlyRepository(
+        repository = ReadOnlyRepository(
             self.project,
             refresh_remote_refs=False,
             include_active_branch_snapshots=False,
-        ).get_task(task_id)
+        )
+        task = repository.get_task(task_id)
+        task_prefix = self.project.config.task_prefix
+        for path, record_id, frontmatter in repository._local_task_frontmatters():
+            if path == task.path:
+                continue
+            parent = frontmatter.get("parent_task_id")
+            dependencies = _frontmatter_string_list(frontmatter.get("dependencies"))
+            references = [str(parent)] if parent is not None else []
+            references.extend(dependency for value in dependencies for dependency in value.split(","))
+            if any(_task_ids_equal(reference, task.id, task_prefix) for reference in references):
+                raise TaskMutationError(f"Cannot demote {task.id}: {record_id} still references it")
         draft_id = self._next_draft_id()
         target = self._draft_path(draft_id, task.title)
         if target.exists():

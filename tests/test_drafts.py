@@ -5,11 +5,13 @@ import shutil
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 from loguru import logger
 
 from backlog_py.cli.main import main
 from backlog_py.core.drafts import DraftService
+from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.storage.config import replace_definition_of_done_defaults, set_config_value
 from backlog_py.storage.project import discover_project
 
@@ -185,6 +187,34 @@ def test_demote_task_moves_to_drafts_with_new_draft_id_and_status(tmp_path):
     assert "id: draft-1" in written
     assert "status: Draft" in written
     assert "Unowned body content before acceptance criteria must be preserved." in written
+
+
+@pytest.mark.parametrize("reference", ["child", "archived_dependency", "draft_dependency", "damaged_dependency"])
+def test_demote_refuses_to_free_a_task_id_still_referenced_by_other_records(tmp_path, reference):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    service = DraftService(project)
+    repository = MutableRepository(project)
+    task = repository.get_task("TASK-1")
+    if reference == "child":
+        dependent = repository.create_task(title="Child", parent_task_id="TASK-1")
+    elif reference == "draft_dependency":
+        dependent = service.create_draft(title="Draft dependency", dependencies=["TASK-001"])
+    else:
+        dependent = repository.create_task(title="Archived dependency", dependencies=["TASK-001"])
+        if reference == "damaged_dependency":
+            dependent.path.write_text(dependent.raw_source.replace("<!-- AC:END -->", ""), encoding="utf-8")
+        else:
+            dependent = repository.archive_task(dependent.id)
+    before = sorted((repo / "backlog").rglob("*.md"))
+    original = dependent.path.read_bytes()
+
+    with pytest.raises(TaskMutationError, match=f"{dependent.id} still references"):
+        service.demote_task(task.id)
+
+    assert sorted((repo / "backlog").rglob("*.md")) == before
+    assert task.path.read_text(encoding="utf-8") == task.raw_source
+    assert dependent.path.read_bytes() == original
 
 
 def test_archive_draft_moves_to_archive_drafts(tmp_path):

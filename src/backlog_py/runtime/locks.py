@@ -6,13 +6,13 @@ import json
 import os
 import secrets
 import time
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping, TextIO, TypeVar
 
 from backlog_py.core.models import BacklogProject
-from backlog_py.runtime.git import maybe_auto_commit, prepare_auto_commit
+from backlog_py.runtime.git import maybe_auto_commit, prepare_auto_commit, task_allocation_lock_scope
 from backlog_py.runtime.state import ensure_state_layout
 
 T = TypeVar("T")
@@ -21,6 +21,15 @@ T = TypeVar("T")
 # Prune only long-idle pairs: a week of inactivity keeps the window in which a
 # waiter could be poised on a lock we are about to unlink vanishingly small.
 DEFAULT_LOCK_PRUNE_AGE_SECONDS = 7 * 24 * 60 * 60
+_TASK_ID_OPERATIONS = frozenset({
+    "task_create",
+    "mcp_task_create",
+    "browser_task_create",
+    "tui_task_create",
+    "draft_promote",
+    "task_renumber",
+    "orchestration_split_task",
+})
 
 
 class LockTimeoutError(TimeoutError):
@@ -83,7 +92,14 @@ def init_lock_key(target_root: Path) -> str:
 
 def with_project_write_lock(project: BacklogProject, operation: str, fn: Callable[[], T]) -> T:
     """Run a callback while holding the project write lock."""
-    with ProjectWriteLock(project.root, operation=operation).acquire():
+    with ProjectWriteLock(project.root, operation=operation).acquire(), ExitStack() as locks:
+        if operation in _TASK_ID_OPERATIONS and (scope := task_allocation_lock_scope(project)) is not None:
+            # Allocation reads sibling worktrees, whose project locks are independent.
+            common_dir, backlog_path = scope
+            digest = hashlib.sha256(os.fsencode(common_dir) + b"\0" + os.fsencode(backlog_path)).hexdigest()
+            locks.enter_context(_RuntimeFileLock(
+                key=f"task-allocation-{digest}", kind="task-allocation", operation=operation
+            ).acquire())
         auto_commit_context = prepare_auto_commit(project)
         result = fn()
         maybe_auto_commit(project, operation, auto_commit_context)

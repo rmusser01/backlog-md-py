@@ -15,8 +15,11 @@ from __future__ import annotations
 import dataclasses
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from math import inf
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -24,6 +27,11 @@ from backlog_py.core.init import init_project
 from backlog_py.core.repository import MutableRepository
 from backlog_py.runtime import git as git_module
 from backlog_py.runtime.git import current_task_snapshot_timestamps
+from backlog_py.runtime.locks import with_project_write_lock
+from backlog_py.storage.project import discover_project
+from backlog_py.tui.data import LocalBoardDataSource
+from backlog_py.tui.models import CreateTaskInput
+from backlog_py.runtime.scan_cache import ProjectScanCache
 
 # Config sources git consults implicitly. Each of these can change command
 # output (core.autocrlf, core.quotePath), block a commit (commit.gpgsign), or
@@ -400,6 +408,48 @@ def test_branch_snapshots_still_return_content_and_timestamps(tmp_path: Path) ->
         assert snapshot.committed_at > 0, "snapshot carries no commit timestamp"
 
 
+@pytest.mark.parametrize("change", ["move", "delete", "age"])
+@pytest.mark.parametrize("use_index", [False, True])
+def test_warm_scan_tracks_active_branch_tips(tmp_path, monkeypatch, change, use_index):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(git_module, "datetime", Clock)
+    monkeypatch.setenv("BACKLOG_PY_SQLITE_INDEX", str(int(use_index)))
+    project = init_project(tmp_path / "repo").project
+    _git_init(project.root)
+    _commit(project.root, "seed")
+    _git(project.root, "checkout", "--detach")
+    task = _task(project, "task-1 - branch.md")
+    when = int(now.timestamp())
+    _commit(project.root, "initial branch task", when)
+    _git(project.root, "branch", "active")
+    task.write_text(task.read_text(encoding="utf-8").replace("title: T", "title: Changed"), encoding="utf-8")
+    _commit(project.root, "updated branch task in the same second", when)
+    _git(project.root, "tag", "next-tip")
+    _git(project.root, "checkout", "main")
+    _git(project.root, "pack-refs", "--all")
+    cache = ProjectScanCache()
+
+    first = cache.repository(project)
+    assert [task.title for task in first.list_tasks()] == ["T"]
+    assert cache.repository(project) is first
+
+    if change == "move":
+        _git(project.root, "update-ref", "refs/heads/active", "next-tip")
+    elif change == "delete":
+        _git(project.root, "branch", "-D", "active")
+    else:
+        now += timedelta(days=project.config.active_branch_days, seconds=1)
+
+    expected_titles = ["Changed"] if change == "move" else []
+    assert [task.title for task in cache.repository(project).list_tasks()] == expected_titles
+
+
 def test_branch_snapshots_read_each_shared_blob_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -473,6 +523,62 @@ def test_create_skips_ids_other_branches_and_worktrees_use(tmp_path: Path) -> No
 
     assert MutableRepository(project).create_task(title="four").id == "TASK-4"
     assert MutableRepository(project).create_task(title="child", parent_task_id="TASK-1").id == "TASK-1.2"
+
+
+@pytest.mark.parametrize("project_path", [Path("."), Path("packages/nested")])
+def test_concurrent_task_creates_in_linked_worktrees_reserve_distinct_ids(tmp_path, monkeypatch, project_path):
+    base = tmp_path / "repo"
+    (base / project_path).mkdir(parents=True)
+    _git_init(base)
+    project = init_project(base / project_path).project
+    MutableRepository(project).create_task(title="Seed")
+    _commit(base, "seed")
+    sibling = tmp_path / "linked"
+    _git(base, "worktree", "add", "-qb", "linked", str(sibling))
+
+    first_read = Event()
+    second_read = Event()
+    original = MutableRepository._allocation_reserved_ids
+
+    def synchronize_after_read(repository):
+        reserved = original(repository)
+        if repository.project.root == project.root:
+            first_read.set()
+            second_read.wait(2)
+        else:
+            second_read.set()
+        return reserved
+
+    monkeypatch.setattr(MutableRepository, "_allocation_reserved_ids", synchronize_after_read)
+
+    first_repository = MutableRepository(project)
+    second_board = LocalBoardDataSource(discover_project(sibling / project_path))
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(
+            with_project_write_lock, project, "task_create", lambda: first_repository.create_task(title="First task")
+        )
+        assert first_read.wait(5)
+        second = workers.submit(second_board.create_task, CreateTaskInput(title="Second task"))
+        assert first.result(timeout=10).id == "TASK-2"
+        assert second.result(timeout=10).id == "TASK-3"
+
+
+def test_create_skips_child_ids_with_different_padding_in_linked_worktrees(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git_init(root)
+    project = init_project(root).project
+    repository = MutableRepository(project)
+    repository.create_task(title="Parent", task_id="TASK-009")
+    _commit(root, "seed")
+    sibling = tmp_path / "linked"
+    _git(root, "worktree", "add", "-qb", "linked", str(sibling))
+    sibling_repository = MutableRepository.from_path(sibling)
+    sibling_repository.create_task(title="First child", task_id="TASK-9.1", parent_task_id="TASK-9")
+
+    second_child = repository.create_task(title="Second child", parent_task_id="TASK-009")
+
+    assert second_child.id == "TASK-009.2"
 
 
 def test_create_allocates_from_this_checkout_only_when_active_branches_are_off(tmp_path: Path) -> None:

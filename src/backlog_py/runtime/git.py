@@ -249,14 +249,14 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     if backlog_path is None:
         return []
 
-    refs = _recent_branch_refs(project)
+    refs = _recent_branch_tips(project, _current_branch_name(work_dir))
     entries: list[tuple[str, str, str, float]] = []
-    for index, ref in enumerate(refs, start=1):
+    for index, (ref, tip) in enumerate(refs, start=1):
         # This walk takes minutes on a project with many active branches, and
         # said nothing at all while it ran.
         progress.report(f"Reading branch {index}/{len(refs)}: {ref.rsplit('/', 1)[-1]}")
         for relative_path, (oid, committed_at) in _task_entries_for_ref(
-            work_dir, ref, backlog_path
+            work_dir, tip, backlog_path
         ).items():
             entries.append((ref, relative_path, oid, committed_at))
 
@@ -282,6 +282,19 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
     return snapshots
 
 
+def task_allocation_lock_scope(project: BacklogProject) -> tuple[Path, str] | None:
+    """Identify a backlog across all linked worktrees of one Git repository."""
+    backlog_path = _relative_backlog_path(project)
+    if backlog_path is None or not _is_git_worktree(project.root):
+        return None
+    result = _run_git(project.root, "rev-parse", "--git-common-dir")
+    common_dir = result.stdout.rstrip("\r\n")
+    if result.returncode != 0 or not common_dir:
+        return None
+    repository_path = posixpath.normpath(f"{_repository_prefix(project.root)}{backlog_path}")
+    return (project.root / common_dir).resolve(), repository_path
+
+
 def other_checkout_task_file_names(project: BacklogProject) -> list[str]:
     """Names of the task files on active branches and in other ``git worktree`` checkouts.
 
@@ -300,8 +313,8 @@ def other_checkout_task_file_names(project: BacklogProject) -> list[str]:
     names = _tree_file_names(
         project.root,
         [
-            f"{ref}:{prefix}{backlog_path}/{bucket}"
-            for ref in _recent_branch_refs(project)
+            f"{tip}:{prefix}{backlog_path}/{bucket}"
+            for _, tip in _recent_branch_tips(project, _current_branch_name(project.root))
             for bucket in buckets
         ],
     )
@@ -425,7 +438,7 @@ def _run_git_bytes(work_dir: Path, *args: str, stdin: bytes) -> subprocess.Compl
 
 
 def read_index_git_freshness(project: BacklogProject) -> dict[str, object]:
-    """Return git inputs that affect disposable read-index freshness."""
+    """Return git inputs that affect cached task visibility and ordering."""
     work_dir = project.root
     freshness: dict[str, object] = {
         "remote_operations": project.config.remote_operations,
@@ -438,18 +451,9 @@ def read_index_git_freshness(project: BacklogProject) -> dict[str, object]:
 
     head = _run_git(work_dir, "rev-parse", "HEAD")
     freshness["head"] = head.stdout.strip() if head.returncode == 0 else ""
-    freshness["current_branch"] = _current_branch_name(work_dir)
-    if not project.config.check_active_branches:
-        freshness["active_refs"] = []
-        return freshness
-
-    freshness["active_refs"] = [
-        {
-            "ref": ref,
-            "timestamp": _ref_commit_timestamp(work_dir, ref),
-        }
-        for ref in _recent_branch_refs(project)
-    ]
+    current = _current_branch_name(work_dir)
+    freshness["current_branch"] = current
+    freshness["active_refs"] = _recent_branch_tips(project, current) if project.config.check_active_branches else []
     return freshness
 
 
@@ -527,7 +531,8 @@ def _relative_backlog_path(project: BacklogProject) -> str | None:
         return None
 
 
-def _recent_branch_refs(project: BacklogProject) -> list[str]:
+def _recent_branch_tips(project: BacklogProject, current: str) -> list[tuple[str, str]]:
+    """Return active ref names and their tip OIDs, ordered by timestamp and name."""
     days = max(project.config.active_branch_days, 0)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
     namespaces = ["refs/heads"]
@@ -536,39 +541,28 @@ def _recent_branch_refs(project: BacklogProject) -> list[str]:
     result = _run_git(
         project.root,
         "for-each-ref",
-        "--format=%(refname)\t%(refname:short)\t%(committerdate:unix)",
+        "--format=%(refname)\t%(objectname)\t%(committerdate:unix)",
         *namespaces,
     )
     if result.returncode != 0:
         return []
-    current = _current_branch_name(project.root)
-    refs: list[tuple[float, str]] = []
-    for line in result.stdout.splitlines():
-        refname, short_name, timestamp = _split_ref_line(line)
-        if refname is None or short_name is None or timestamp is None:
+    refs: list[tuple[int, str, str]] = []
+    for line in result.stdout.split("\n"):
+        fields = line.split("\t")
+        if len(fields) != 3 or not fields[2].isdigit():
             continue
-        if short_name == current or short_name.endswith("/HEAD"):
+        refname, oid, timestamp = fields[0], fields[1], int(fields[2])
+        if refname == f"refs/heads/{current}" or refname.endswith("/HEAD"):
             continue
         if timestamp < cutoff:
             continue
-        refs.append((timestamp, refname))
-    return [ref for _, ref in sorted(refs)]
+        refs.append((timestamp, refname, oid))
+    return [(ref, oid) for _, ref, oid in sorted(refs)]
 
 
 def _current_branch_name(work_dir: Path) -> str:
     result = _run_git(work_dir, "branch", "--show-current")
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def _split_ref_line(line: str) -> tuple[str | None, str | None, float | None]:
-    parts = line.split("\t")
-    if len(parts) != 3:
-        return None, None, None
-    try:
-        timestamp = float(parts[2])
-    except ValueError:
-        return None, None, None
-    return parts[0].strip(), parts[1].strip(), timestamp
+    return result.stdout.removesuffix("\n") if result.returncode == 0 else ""
 
 
 def _task_entries_for_ref(

@@ -1207,7 +1207,9 @@
       taskEditForm.elements.assignees.value = (task.assignees || []).join(", ");
       taskEditForm.elements.labels.value = (task.labels || []).join(", ");
       taskEditForm.elements.description.value = task.description || "";
-      taskEditForm.elements.acceptanceCriteria.value = checklistText(task.acceptanceCriteria);
+      const criteria = taskEditForm.elements.acceptanceCriteria;
+      criteria.defaultValue = checklistText(task.acceptanceCriteria);
+      criteria.value = criteria.defaultValue;
       taskEditForm.elements.implementationNotes.value = task.implementationNotes || "";
       taskEditForm.elements.finalSummary.value = task.finalSummary || "";
       resetMarkdownEditors(taskEditForm);
@@ -1555,10 +1557,10 @@
       if (!taskId) return;
       syncAllRichEditors(taskEditForm);
       const data = new FormData(form);
-      const criteria = String(data.get("acceptanceCriteria") || "")
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean);
+      const criteria = form.elements.acceptanceCriteria;
+      const changedCriteria = criteria.value === criteria.defaultValue
+        ? undefined
+        : criteria.value.split("\n").map((item) => item.trim()).filter(Boolean);
       const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/edit`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -1570,7 +1572,7 @@
           assignees: metadataList(data.get("assignees")),
           labels: metadataList(data.get("labels")),
           description: String(data.get("description") || ""),
-          acceptanceCriteria: criteria,
+          acceptanceCriteria: changedCriteria,
           implementationNotes: String(data.get("implementationNotes") || ""),
           finalSummary: String(data.get("finalSummary") || ""),
         }),

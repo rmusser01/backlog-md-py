@@ -4,11 +4,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from backlog_py.core.repository import ReadOnlyRepository
-from backlog_py.core.repository import TaskRecord
+from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
 from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.orchestration import (
     OrchestrationPolicy,
+    OrchestrationService,
     OrchestrationValidationError,
     ValidationIssue,
     WorkflowStatePolicy,
@@ -321,6 +321,21 @@ def test_list_eligible_tasks_blocks_active_leases_and_incomplete_dependencies(tm
     assert [task.id for task in eligible] == ["TASK-1"]
 
 
+def test_queue_accepts_unpadded_dependency_on_done_padded_task(tmp_path):
+    repo = _repo_with_tasks(tmp_path, {})
+    repository = MutableRepository.from_path(repo)
+    repository.create_task(title="Prerequisite", task_id="TASK-009", status="Done")
+    dependent = repository.create_task(title="Dependent", task_id="TASK-10", dependencies=["TASK-9"])
+
+    report = OrchestrationService(repository.project).queue(repository=repository)
+
+    assert [(item.task_id, item.category) for item in report.items] == [
+        ("TASK-009", "terminal"),
+        ("TASK-10", "eligible"),
+    ]
+    assert [task.id for task in list_eligible_tasks(repository)] == [dependent.id]
+
+
 def test_lease_reports_split_active_and_stale_claims(tmp_path):
     repo = _repo_with_tasks(
         tmp_path,
@@ -438,6 +453,12 @@ def test_summarize_orchestration_counts_effective_statuses(tmp_path):
         (
             {"id": "TASK-6", "title": "Eligible", "status": "To Do"},
             set(),
+            (),
+            "eligible",
+        ),
+        (
+            {"id": "TASK-8", "title": "Eligible", "status": "To Do", "dependencies": ["TASK-9"]},
+            {"TASK-009"},
             (),
             "eligible",
         ),

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -183,3 +184,20 @@ def test_set_config_value_keeps_requested_alias_return_with_duplicates(project: 
     assert result == ("defaultStatus", "Ready")
     assert written["default_status"] == "Ready"
     assert written["defaultStatus"] == "Ready"
+
+
+def test_load_config_recovers_emoji_statuses_saved_by_older_browser(tmp_path):
+    path = tmp_path / "config.yml"
+    source = 'statuses:\n  - To Do\n  - "\\uD83D\\uDE80 Release"\n'
+    path.write_text(source, encoding="utf-8")
+
+    assert load_config(path).statuses == ["To Do", "🚀 Release"]
+    assert path.read_text(encoding="utf-8") == source
+
+
+@pytest.mark.parametrize("status", ["Before\u0085After", "Before\u007fAfter"])
+def test_batch_status_save_keeps_unicode_codepoints(project, status):
+    saved = config_module.set_config_values(project, {"statuses": json.dumps(["To Do", status])})
+
+    assert saved.statuses == ["To Do", status]
+    assert load_config(project.config_path).statuses == saved.statuses

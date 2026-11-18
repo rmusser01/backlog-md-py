@@ -42,13 +42,16 @@ from backlog_py.core.repository import (
     TaskRecord,
     normalize_ordinal_value,
 )
+from backlog_py.markdown.task_parser import _parse_checklist_items
 from backlog_py.orchestration import (
     OrchestrationQueueItem,
+    OrchestrationQueueReport,
     OrchestrationService,
     OrchestrationRunEvent,
     ValidationIssue,
     parse_run_history,
 )
+from backlog_py.orchestration.reports import _parse_datetime
 from backlog_py.runtime.locks import with_project_write_lock
 from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback
 from backlog_py.storage.config import (
@@ -131,6 +134,11 @@ class _MilestoneEditKwargs(TypedDict, total=False):
 class _CachedBoardPayload:
     payload: dict[str, object]
     milestones: tuple[MilestoneRecord, ...]
+    built_at: datetime
+    next_lease_expiry: datetime | None
+
+    def is_current(self, now: datetime) -> bool:
+        return self.built_at <= now and (self.next_lease_expiry is None or now < self.next_lease_expiry)
 
 
 @dataclass(frozen=True)
@@ -246,6 +254,7 @@ def build_board_payload(
         snapshot = cache.board_payload(
             project,
             lambda repository: _build_cached_board_payload(project, repository),
+            is_current=lambda snapshot: snapshot.is_current(datetime.now(timezone.utc)),
         )
     else:
         repository = ReadOnlyRepository(project, refresh_remote_refs=False)
@@ -264,9 +273,21 @@ def _build_cached_board_payload(
     repository: ReadOnlyRepository,
 ) -> _CachedBoardPayload:
     milestones = tuple(MilestoneService(project).list_milestones(include_archived=True))
+    now = datetime.now(timezone.utc)
+    queue_report = OrchestrationService(project, now=lambda: now).queue(repository=repository)
+    next_lease_expiry = min(
+        (
+            expires_at
+            for item in queue_report.items
+            if item.category == "claimed" and (expires_at := _parse_datetime(item.lease_expires_at)) is not None
+        ),
+        default=None,
+    )
     return _CachedBoardPayload(
-        payload=_board_payload_body(project, repository, milestones=milestones),
+        payload=_board_payload_body(project, repository, milestones=milestones, queue_report=queue_report),
         milestones=milestones,
+        built_at=now,
+        next_lease_expiry=next_lease_expiry,
     )
 
 
@@ -275,13 +296,11 @@ def _board_payload_body(
     repository: ReadOnlyRepository,
     *,
     milestones: Sequence[MilestoneRecord],
+    queue_report: OrchestrationQueueReport,
 ) -> dict[str, object]:
     """Build the unfiltered board payload from one repository scan."""
     board = repository.board()
     board.setdefault(project.config.default_status, [])
-    # Reuse the scan just done: the queue would otherwise build its own
-    # repository and parse every task file a second time, on every request.
-    queue_report = OrchestrationService(project).queue(repository=repository)
     queue_items = {item.task_id.casefold(): item for item in queue_report.items}
     local_tasks = repository._task_dir_records_cached(project.backlog_dir / "tasks")
     local_task_signatures = {_task_record_signature(task) for task in local_tasks}
@@ -938,6 +957,8 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
                 def edit_task() -> TaskRecord:
                     repository = _mutable_browser_task_repository(self.server.project, edit_task_id)
+                    if "acceptance_criteria" in edit_kwargs:
+                        _retain_acceptance_checks(repository.get_task(edit_task_id), edit_kwargs)
                     return repository.edit_task(edit_task_id, **edit_kwargs)
 
                 task = with_project_write_lock(
@@ -2614,6 +2635,29 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
     if not edit_kwargs:
         raise ValueError("Request body must include at least one editable field")
     return edit_kwargs
+
+
+def _retain_acceptance_checks(task: TaskRecord, edits: dict[str, object]) -> None:
+    criteria = edits.get("acceptance_criteria")
+    if not isinstance(criteria, list):
+        return
+    existing = task.parsed.checklists.get("AC", [])
+    if criteria == [item.text for item in existing]:
+        del edits["acceptance_criteria"]
+        return
+
+    # Pair duplicate criteria by occurrence, including unchecked copies.
+    checks_by_text: dict[str, deque[bool]] = {}
+    for item in existing:
+        checks_by_text.setdefault(item.text, deque()).append(item.checked)
+    checked = []
+    index = 1
+    for text in criteria:
+        if (previous := checks_by_text.get(text)) and previous.popleft():
+            checked.append(index)
+        index += 1 + len(_parse_checklist_items(text.splitlines()[1:]))
+    if checked:
+        edits["check_ac"] = checked
 
 
 def _task_checklist_kwargs_from_payload(payload: object) -> dict[str, object]:

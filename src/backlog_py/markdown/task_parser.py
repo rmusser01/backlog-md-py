@@ -199,27 +199,45 @@ def _parse_checklist_items(lines: list[str]) -> list[ChecklistItem]:
 _RAW_ID_LINE_RE = re.compile(r"^id:(?P<value>.*)$")
 
 
-def salvage_frontmatter_id(path: Path) -> str | None:
-    """Best-effort id of a file that failed to parse, read straight off its frontmatter.
+def _read_frontmatter_source(path: Path) -> str:
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as source_file:
+        opening = source_file.readline()
+        if opening.rstrip("\r\n") != "---":
+            return ""
+        lines = [opening]
+        for line in source_file:
+            lines.append(line)
+            if line.rstrip("\r\n") == "---":
+                break
+    return "".join(lines)
 
-    A full parse is exactly what just failed, so this reads only the leading
-    ``---`` block line by line and takes the first top-level ``id:``. Reserving
-    an id that turns out not to be one only leaves a harmless gap in numbering;
-    missing one hands the same id to a second file, which is the bug this exists
-    to prevent. Scanning the whole file would let a stray ``id:`` in a body or a
-    code block inflate allocation, so the scan stops at the closing fence.
-    """
+
+def read_task_frontmatter(path: Path) -> dict[str, Any]:
+    """Read a task's YAML header independently of its Markdown body."""
+    _, frontmatter, _ = _split_frontmatter(_read_frontmatter_source(path))
+    return frontmatter
+
+
+def salvage_frontmatter_id(path: Path) -> str | None:
+    """Reserve the id of a file whose frontmatter or body failed to parse."""
     try:
-        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as source_file:
-            if source_file.readline().rstrip("\r\n") != "---":
-                return None
-            for raw_line in source_file:
-                line = raw_line.rstrip("\r\n")
-                if line == "---":
-                    return None
-                match = _RAW_ID_LINE_RE.match(line)
-                if match is not None:
-                    return match.group("value").strip().strip("\"'").strip() or None
+        source = _read_frontmatter_source(path)
     except OSError as exc:
         logger.warning("Could not recover an id from unreadable file {}: {}", path, exc)
-    return None
+        return None
+
+    try:
+        _, frontmatter, _ = _split_frontmatter(source)
+    except TaskMarkdownParseError:
+        # A malformed header can still contain one usable, top-level id.
+        for line in source.splitlines()[1:]:
+            if match := _RAW_ID_LINE_RE.match(line):
+                raw_value = match.group("value").strip()
+                try:
+                    value = yaml.safe_load(raw_value)
+                except yaml.YAMLError:
+                    value = raw_value.strip("\"'").strip()
+                return None if value is None else str(value).strip() or None
+        return None
+    value = frontmatter.get("id")
+    return None if value is None else str(value).strip() or None

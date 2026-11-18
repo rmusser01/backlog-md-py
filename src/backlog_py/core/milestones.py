@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -343,6 +344,19 @@ class MilestoneService:
                 raw_id = frontmatter.get("id")
                 if "name" not in frontmatter and isinstance(raw_id, str) and _CURRENT_ID_RE.fullmatch(raw_id):
                     reserved.add(int(raw_id[2:]))
+
+        # Removing a milestone can leave local task and draft references in place.
+        local_repository = ReadOnlyRepository(self.project, refresh_remote_refs=False, include_active_branch_snapshots=False)
+        for _, _, frontmatter in local_repository._local_task_frontmatters():
+            raw_reference = frontmatter.get("milestone")
+            if isinstance(raw_reference, bool) or not isinstance(raw_reference, (str, int)):
+                continue
+            reference = str(raw_reference).strip()
+            if _CURRENT_ID_RE.fullmatch(reference):
+                reference = reference[2:]
+            if reference.isascii() and reference.isdecimal():
+                with suppress(ValueError):
+                    reserved.add(int(reference))
         return f"m-{max(reserved, default=0) + 1}"
 
     def _archive_path(self, filename: str) -> Path:
