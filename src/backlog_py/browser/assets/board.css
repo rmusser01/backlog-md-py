@@ -675,6 +675,9 @@
       color: var(--muted);
       min-height: 1.25em;
     }
+    #task-edit-message {
+      margin: 0 auto 0 0;
+    }
     .form-actions {
       display: flex;
       justify-content: flex-end;

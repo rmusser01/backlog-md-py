@@ -4,6 +4,8 @@
     const taskCreateForm = document.getElementById("task-create-form");
     const taskEditDialog = document.getElementById("task-edit-dialog");
     const taskEditForm = document.getElementById("task-edit-form");
+    const taskEditMessage = document.getElementById("task-edit-message");
+    let taskEditBaseline;
     const taskArchiveDialog = document.getElementById("task-archive-dialog");
     const taskArchiveConfirm = document.getElementById("task-archive-confirm");
     const configSettingsDialog = document.getElementById("config-settings-dialog");
@@ -38,6 +40,7 @@
     let configDefaultStatusKey = "";
     let configSettingsLoadGeneration = 0;
     let statusAddInFlight = false;
+    const richEditorSources = new WeakMap();
 
     function setText(id, value) {
       const element = document.getElementById(id);
@@ -1075,7 +1078,10 @@
       const editor = markdownEditor(textarea);
       const rich = markdownRichPanel(textarea);
       if (!textarea || !editor || !rich || editor.dataset.markdownMode !== "rich") return;
-      textarea.value = richHtmlToMarkdown(rich);
+      const source = richEditorSources.get(rich);
+      const markdown = source && rich.innerHTML === source.html ? source.markdown : richHtmlToMarkdown(rich);
+      if (markdown === textarea.value) return;
+      textarea.value = markdown;
       textarea.dispatchEvent(new Event("input", {bubbles: true}));
     }
 
@@ -1135,7 +1141,9 @@
       if (!textarea) return;
       const rich = markdownRichPanel(textarea);
       if (!rich) return;
-      rich.innerHTML = markdownToRichHtml(textarea.value || "");
+      const markdown = textarea.value || "";
+      rich.innerHTML = markdownToRichHtml(markdown);
+      richEditorSources.set(rich, {html: rich.innerHTML, markdown});
       setMarkdownEditorMode(textarea, "rich");
       rich.focus();
     }
@@ -1200,6 +1208,7 @@
       const task = await response.json();
       if (!taskEditForm) return;
       taskEditForm.dataset.taskId = task.id;
+      taskEditForm.dataset.revision = task.revision;
       taskEditForm.elements.title.value = task.title || "";
       selectTaskStatus(task);
       taskEditForm.elements.priority.value = task.priority || "";
@@ -1207,12 +1216,12 @@
       taskEditForm.elements.assignees.value = (task.assignees || []).join(", ");
       taskEditForm.elements.labels.value = (task.labels || []).join(", ");
       taskEditForm.elements.description.value = task.description || "";
-      const criteria = taskEditForm.elements.acceptanceCriteria;
-      criteria.defaultValue = checklistText(task.acceptanceCriteria);
-      criteria.value = criteria.defaultValue;
+      taskEditForm.elements.acceptanceCriteria.value = checklistText(task.acceptanceCriteria);
       taskEditForm.elements.implementationNotes.value = task.implementationNotes || "";
       taskEditForm.elements.finalSummary.value = task.finalSummary || "";
       resetMarkdownEditors(taskEditForm);
+      taskEditBaseline = new FormData(taskEditForm);
+      if (taskEditMessage) taskEditMessage.textContent = "";
       setText("task-edit-title", `${task.id} - Edit task`);
       if (taskEditDialog && taskEditDialog.showModal) taskEditDialog.showModal();
       else if (taskEditDialog) taskEditDialog.setAttribute("open", "open");
@@ -1556,32 +1565,35 @@
       const taskId = form.dataset.taskId;
       if (!taskId) return;
       syncAllRichEditors(taskEditForm);
-      const data = new FormData(form);
-      const criteria = form.elements.acceptanceCriteria;
-      const changedCriteria = criteria.value === criteria.defaultValue
-        ? undefined
-        : criteria.value.split("\n").map((item) => item.trim()).filter(Boolean);
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/edit`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          title: String(data.get("title") || ""),
-          status: String(data.get("status") || ""),
-          priority: String(data.get("priority") || ""),
-          milestone: String(data.get("milestone") || ""),
-          assignees: metadataList(data.get("assignees")),
-          labels: metadataList(data.get("labels")),
-          description: String(data.get("description") || ""),
-          acceptanceCriteria: changedCriteria,
-          implementationNotes: String(data.get("implementationNotes") || ""),
-          finalSummary: String(data.get("finalSummary") || ""),
-        }),
-      });
-      if (!response.ok) {
-        console.error(await response.text());
+      const changes = {};
+      for (const [name, value] of new FormData(form)) {
+        if (value === taskEditBaseline.get(name)) continue;
+        if (name === "assignees" || name === "labels") {
+          changes[name] = metadataList(value);
+        } else if (name === "acceptanceCriteria") {
+          changes[name] = value.split("\n").map((item) => item.trim()).filter(Boolean);
+        } else if (name === "priority" && !value.trim()) {
+          changes.clearPriority = true;
+        } else {
+          changes[name] = value;
+        }
+      }
+      if (!Object.keys(changes).length) {
+        taskEditDialog?.close();
         return;
       }
-      window.location.reload();
+      if (taskEditMessage) taskEditMessage.textContent = "";
+      try {
+        const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/edit`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({...changes, revision: form.dataset.revision}),
+        });
+        if (!response.ok) throw new Error(await responseErrorMessage(response, "Unable to save task"));
+        window.location.reload();
+      } catch (error) {
+        if (taskEditMessage) taskEditMessage.textContent = error instanceof Error ? error.message : "Unable to save task";
+      }
     }
 
     async function submitTaskChecklistState(event) {

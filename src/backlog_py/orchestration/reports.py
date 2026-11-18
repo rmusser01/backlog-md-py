@@ -24,11 +24,13 @@ def list_eligible_tasks(
 ) -> list[TaskRecord]:
     active_policy = policy or OrchestrationPolicy.default()
     current_time = _coerce_now(now)
-    complete_keys = _complete_task_keys(repository)
+    tasks = repository.list_tasks()
+    complete_keys = _complete_task_keys(tasks, repository.list_completed_tasks(), active_policy)
     return [
         task
-        for task in repository.list_tasks()
-        if active_policy.is_claimable(effective_status_key(task))
+        for task in tasks
+        if active_policy.is_claimable(status_key := effective_status_key(task))
+        and not _is_terminal_status(task, status_key, active_policy)
         and not validate_orchestration(task, active_policy)
         and not _has_active_lease(task, current_time)
         and _dependencies_complete(task, complete_keys)
@@ -79,10 +81,13 @@ def queue_report(
 ) -> OrchestrationQueueReport:
     active_policy = policy or OrchestrationPolicy.default()
     current_time = _coerce_now(now)
-    complete_keys = _complete_task_keys(repository)
-    tasks = list(repository.list_tasks())
+    tasks = repository.list_tasks()
+    completed_tasks = repository.list_completed_tasks()
+    complete_keys = _complete_task_keys(tasks, completed_tasks, active_policy)
+    completed_paths = set()
     if include_completed:
-        tasks.extend(repository.list_completed_tasks())
+        tasks.extend(completed_tasks)
+        completed_paths = {task.path for task in completed_tasks}
     items = [
         _categorize_task(
             task,
@@ -91,6 +96,7 @@ def queue_report(
             now=current_time,
             run_history_issues=_run_history_validation_issues(task),
             project_root=repository.project.root,
+            in_completed_bucket=task.path in completed_paths,
         )
         for task in tasks
     ]
@@ -115,6 +121,7 @@ def categorize_task(
         now=now,
         run_history_issues=run_history_issues,
         project_root=project_root,
+        in_completed_bucket=task.path.parent.name == "completed",
     )
 
 
@@ -126,6 +133,7 @@ def _categorize_task(
     now: datetime,
     run_history_issues: Sequence[ValidationIssue],
     project_root: object | None,
+    in_completed_bucket: bool,
 ) -> OrchestrationQueueItem:
     status_key = effective_status_key(task)
     orchestration = parse_orchestration(task)
@@ -140,7 +148,7 @@ def _categorize_task(
 
     if validation_issues:
         category = "invalid"
-    elif policy.is_terminal(status_key) or _is_complete_status(task.status) or "completed" in task.path.parts:
+    elif in_completed_bucket or _is_terminal_status(task, status_key, policy):
         category = "terminal"
     elif _has_active_lease(task, now):
         category = "claimed"
@@ -184,12 +192,18 @@ def _display_path(task: TaskRecord, project_root: object | None) -> str:
     return task.path.as_posix()
 
 
-def _complete_task_keys(repository: ReadOnlyRepository) -> set[str]:
-    return {
+def _complete_task_keys(
+    tasks: Sequence[TaskRecord],
+    completed_tasks: Sequence[TaskRecord],
+    policy: OrchestrationPolicy,
+) -> set[str]:
+    keys = {_reference_key(task.id) for task in completed_tasks}
+    keys.update(
         _reference_key(task.id)
-        for task in repository.search_tasks("")
-        if _is_complete_status(task.status) or "completed" in task.path.parts
-    }
+        for task in tasks
+        if _is_terminal_status(task, effective_status_key(task), policy)
+    )
+    return keys
 
 
 def _run_history_validation_issues(task: TaskRecord) -> list[ValidationIssue]:
@@ -269,6 +283,10 @@ def _coerce_now(now: datetime | None) -> datetime:
 
 
 _COMPLETE_STATUS_KEYS = {"done", "complete", "completed"}
+
+
+def _is_terminal_status(task: TaskRecord, status_key: str, policy: OrchestrationPolicy) -> bool:
+    return policy.is_terminal(status_key) or _is_complete_status(task.status)
 
 
 def _is_complete_status(status: str) -> bool:
