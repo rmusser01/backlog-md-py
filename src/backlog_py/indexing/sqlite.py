@@ -77,6 +77,7 @@ def build_project_fingerprint(
     now_ns = time.time_ns()
     payload = {
         "schema_version": SCHEMA_VERSION,
+        "task_source_version": 1,  # Invalidate rows from rebuilds that reused stale Markdown.
         "project_root": str(project.root.resolve()),
         "backlog_dir": str(project.backlog_dir.resolve()),
         "config_path": str(project.config_path.resolve()),

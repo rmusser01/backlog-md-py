@@ -1401,8 +1401,48 @@ def test_browser_task_edit_endpoint_updates_owned_fields_under_project_lock(tmp_
     assert "Preserve completed acceptance criteria raw line" not in edited_source
 
 
+def test_browser_task_edit_rejects_a_stale_revision(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        endpoint = f"{service.root_url}/api/tasks/TASK-1"
+        original = _get_json(endpoint)
+        result = CliRunner().invoke(
+            main, ["--cwd", str(repo), "task", "edit", "TASK-1", "--append-notes", "New CLI notes"]
+        )
+        assert result.exit_code == 0, result.output
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _post_json_response(
+                f"{endpoint}/edit",
+                {
+                    "revision": original.get("revision", "original-revision"),
+                    "title": "Stale title edit",
+                    "implementationNotes": original["implementationNotes"],
+                },
+            )
+        assert exc.value.code == 409
+        with exc.value as response:
+            assert "changed" in json.load(response)["error"]
+        current = _get_json(endpoint)
+        assert current["title"] == original["title"]
+        assert "New CLI notes" in current["implementationNotes"]
+        response = _post_json_response(
+            f"{endpoint}/edit", {"revision": current["revision"], "title": "Fresh title edit"}
+        )
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["task"]["title"] == "Fresh title edit"
+    assert "New CLI notes" in response["body"]["task"]["implementationNotes"]
+
+
 @pytest.mark.parametrize("has_criteria_markers", [True, False])
-def test_browser_task_edit_form_omits_unchanged_acceptance_criteria(tmp_path, has_criteria_markers):
+def test_browser_task_edit_form_omits_unchanged_fields(tmp_path, has_criteria_markers):
     repo = _copy_fixture_repo(tmp_path)
     path = _task_file(repo)
     source = path.read_text(encoding="utf-8")
@@ -1417,33 +1457,36 @@ def test_browser_task_edit_form_omits_unchanged_acceptance_criteria(tmp_path, ha
     try:
         endpoint = f"{service.root_url}/api/tasks/TASK-1"
         detail = _get_json(endpoint)
-        payload = _run_board_javascript_harness(
+        submission = _run_board_javascript_harness(
             f"""
 const task = {json.dumps(detail)};
 let payload;
 globalThis.fetch = async (url, options) => {{
-  if (url.endsWith("/edit")) payload = JSON.parse(options.body);
+  if (url.endsWith("/edit")) {{
+    payload = JSON.parse(options.body);
+    return {{ok: false, json: async () => ({{error: "This task changed."}})}};
+  }}
   return {{ok: true, json: async () => task}};
 }};
 await openTaskEdit("TASK-1");
 taskEditForm.elements.title.value = "New title";
-taskEditForm.elements.status.value = task.status;
-taskEditForm._data = Object.fromEntries(
-  Object.entries(taskEditForm.elements).map(([name, field]) => [name, field.value]),
-);
 await taskEditForm.listeners.submit({{preventDefault() {{}}, currentTarget: taskEditForm}});
-return payload;
+return {{payload, message: taskEditMessage.textContent, title: taskEditForm.elements.title.value}};
 """,
             task_edit_dom=True,
         )
-        response = _post_json_response(f"{endpoint}/edit", payload)
+        response = _post_json_response(f"{endpoint}/edit", submission["payload"])
     finally:
         service.shutdown()
 
     assert response["status"] == 200
     assert response["body"]["task"]["title"] == "New title"
     assert response["body"]["task"]["acceptanceCriteria"] == detail["acceptanceCriteria"]
-    assert "acceptanceCriteria" not in payload
+    assert submission == {
+        "payload": {"revision": detail["revision"], "title": "New title"},
+        "message": "This task changed.",
+        "title": "New title",
+    }
     after_source = _task_file(repo).read_text(encoding="utf-8")
     assert after_source.split("## Acceptance Criteria", 1)[1].split("## Implementation Notes", 1)[0] == (
         source.split("## Acceptance Criteria", 1)[1].split("## Implementation Notes", 1)[0]
@@ -1614,6 +1657,44 @@ def test_browser_task_edit_endpoint_clears_milestone_with_empty_string(tmp_path)
     assert "milestone:" not in _task_file(repo).read_text(encoding="utf-8")
 
 
+def test_browser_task_edit_endpoint_clears_priority_with_empty_string(tmp_path):
+    repo = _copy_fixture_repo(tmp_path)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+
+    from backlog_py.browser.service import start_browser_service
+
+    service = start_browser_service(project, host="127.0.0.1", port=0)
+    try:
+        endpoint = f"{service.root_url}/api/tasks/TASK-1"
+        _post_json_response(f"{endpoint}/edit", {"priority": "high"})
+        legacy = _post_json_response(f"{endpoint}/edit", {"title": "Existing client", "priority": ""})
+        task = legacy["body"]["task"]
+        assert task["priority"] == "high"
+        payload = _run_board_javascript_harness(
+            f"""
+const task = {json.dumps(task)};
+let payload;
+globalThis.fetch = async (url, options) => {{
+  if (url.endsWith("/edit")) payload = JSON.parse(options.body);
+  return {{ok: true, json: async () => task}};
+}};
+await openTaskEdit("TASK-1");
+taskEditForm.elements.priority.value = "";
+await taskEditForm.listeners.submit({{preventDefault() {{}}, currentTarget: taskEditForm}});
+return payload;
+""",
+            task_edit_dom=True,
+        )
+        assert payload == {"revision": task["revision"], "clearPriority": True}
+        response = _post_json_response(f"{endpoint}/edit", payload)
+    finally:
+        service.shutdown()
+
+    assert response["status"] == 200
+    assert response["body"]["task"]["priority"] is None
+    assert "priority:" not in _task_file(repo).read_text(encoding="utf-8")
+
+
 def test_browser_task_edit_endpoint_rejects_invalid_payload_without_mutation(tmp_path):
     repo = _copy_fixture_repo(tmp_path)
     project = discover_project(Path.cwd(), explicit_cwd=repo)
@@ -1718,10 +1799,6 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
         '<div class="form-actions">',
         maxsplit=1,
     )[0]
-    edit_submit = html.split("async function submitTaskEdit", maxsplit=1)[1].split(
-        "async function submitTaskChecklistState",
-        maxsplit=1,
-    )[0]
     assert 'name="title"' in html
     assert 'name="status"' in html
     assert 'name="description"' in html
@@ -1738,12 +1815,7 @@ def test_browser_board_html_exposes_task_edit_dialog(tmp_path):
     assert "taskEditForm.elements.labels.value" in html
     assert "taskEditForm.elements.priority.value" in html
     assert "taskEditForm.elements.milestone.value" in html
-    assert "implementationNotes: String(data.get(\"implementationNotes\") || \"\")" in edit_submit
-    assert "finalSummary: String(data.get(\"finalSummary\") || \"\")" in edit_submit
-    assert "assignees: metadataList(data.get(\"assignees\"))" in edit_submit
-    assert "labels: metadataList(data.get(\"labels\"))" in edit_submit
-    assert "priority: String(data.get(\"priority\") || \"\")" in edit_submit
-    assert "milestone: String(data.get(\"milestone\") || \"\")" in edit_submit
+    assert 'id="task-edit-message" role="alert"' in html
     assert "submitTaskEdit" in html
     assert "/api/tasks/" in html
 
@@ -1841,6 +1913,33 @@ def test_browser_board_html_syncs_markdown_rich_editor_before_submit_and_preview
     assert "syncAllRichEditors(taskEditForm);" in html
     preview_block = html[html.index("function showMarkdownPreview(textarea)") : html.index("function showMarkdownEdit(textarea)")]
     assert "syncRichEditorToTextarea(textarea);" in preview_block
+
+
+def test_browser_viewing_rich_markdown_preserves_original_source():
+    markdown = "First line  \nSecond line"
+    result = _run_board_javascript_harness(
+        f"""
+const source = {json.dumps(markdown)};
+const textarea = {{value: source, dispatchEvent() {{}}}};
+const editor = {{dataset: {{}}, querySelectorAll: () => []}};
+const rich = {{innerHTML: "", focus() {{}}}};
+markdownEditor = () => editor;
+markdownRichPanel = () => rich;
+markdownPreviewPanel = () => ({{}});
+markdownToRichHtml = () => "<p>First line Second line</p>";
+richHtmlToMarkdown = () => rich.innerHTML.slice(3, -4);
+showMarkdownRich(textarea);
+syncRichEditorToTextarea(textarea);
+const unchanged = textarea.value;
+rich.innerHTML = "<p>Edited</p>";
+syncRichEditorToTextarea(textarea);
+const edited = textarea.value;
+rich.innerHTML = "<p>First line Second line</p>";
+syncRichEditorToTextarea(textarea);
+return {{unchanged, edited, restored: textarea.value}};
+"""
+    )
+    assert result == {"unchanged": markdown, "edited": "Edited", "restored": markdown}
 
 
 def test_browser_task_archive_endpoint_archives_task_under_project_lock(tmp_path, monkeypatch):
@@ -6025,6 +6124,7 @@ const vm = require("node:vm");
 const payload = JSON.parse(fs.readFileSync(0, "utf8"));
 const milestoneStatus = {textContent: ""};
 const configStatus = {textContent: ""};
+const taskEditStatus = {textContent: ""};
 let activeElement = null;
 function setActiveElement(element) {
   if (activeElement) activeElement.focused = false;
@@ -6120,6 +6220,7 @@ const document = {
     "config-settings-form": payload.statusDom ? fakeConfigSettingsForm : null,
     "config-status-rows": payload.statusDom ? fakeConfigStatusRows : null,
     "task-edit-form": payload.taskEditDom ? fakeTaskEditForm : null,
+    "task-edit-message": payload.taskEditDom ? taskEditStatus : null,
   })[id] || null,
   querySelector: (selector) => selector === "[data-board-revision]"
     ? {dataset: {boardRevision: "", mermaidUrl: "", mermaidSri: ""}}
@@ -6147,8 +6248,13 @@ const context = vm.createContext({
   HTMLSelectElement: class {},
   HTMLTextAreaElement: class {},
   FormData: class {
-    constructor(form) { this.form = form; }
-    get(name) { return this.form._data[name] ?? null; }
+    constructor(form) {
+      this.fields = Object.entries(form._data ?? Object.fromEntries(
+        Object.entries(form.elements).map(([name, field]) => [name, field.value]),
+      ));
+    }
+    [Symbol.iterator]() { return this.fields[Symbol.iterator](); }
+    get(name) { return this.fields.find(([key]) => key === name)?.[1] ?? null; }
   },
   Event: class {},
   Node: {TEXT_NODE: 3, ELEMENT_NODE: 1},

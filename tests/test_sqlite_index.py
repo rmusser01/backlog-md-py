@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
 import shutil
 import sqlite3
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from backlog_py.core.errors import NotFoundError
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository
 from backlog_py.indexing import sqlite as sqlite_index
@@ -363,6 +365,88 @@ def test_sqlite_index_does_not_cache_a_rebuild_that_raced_a_task_edit(tmp_path, 
 
     assert rebuilds == ["rebuilt"]
     assert [source.source for source in second] == [original_text]
+
+
+def test_sqlite_index_rebuild_retry_reads_edited_markdown(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = _copy_fixture_repo(tmp_path)
+    project = _project(repo)
+    task_path = repo / TASK_RELATIVE_PATH
+    settled_ns = time.time_ns() - ONE_HOUR_NS
+    _set_mtime_ns(task_path, settled_ns)
+    updated_title = "Task updated during rebuild"
+    updated_source = task_path.read_text(encoding="utf-8").replace("title: Example task", f"title: {updated_title}")
+    reader = ReadOnlyRepository(project, use_sqlite_index=True, include_active_branch_snapshots=False)
+    rebuild = reader._build_indexed_task_sources
+    raced = False
+
+    def rebuild_with_edit():
+        nonlocal raced
+        sources = rebuild()
+        if not raced:
+            raced = True
+            task_path.write_text(updated_source, encoding="utf-8")
+            _set_mtime_ns(task_path, settled_ns)
+        return sources
+
+    monkeypatch.setattr(reader, "_build_indexed_task_sources", rebuild_with_edit)
+
+    rebuilt_task = reader.get_task("TASK-1")
+    fresh_reader = ReadOnlyRepository(project, use_sqlite_index=True, include_active_branch_snapshots=False)
+
+    assert fresh_reader.get_task("TASK-1").title == updated_title
+    assert rebuilt_task.title == updated_title
+
+
+def test_sqlite_index_rebuild_does_not_leave_renamed_task_in_lookup_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = _copy_fixture_repo(tmp_path)
+    project = _project(repo)
+    task_path = repo / TASK_RELATIVE_PATH
+    renamed_path = task_path.with_name("task-2 - Example-task.md")
+    renamed_source = task_path.read_text(encoding="utf-8").replace("id: TASK-1", "id: TASK-2")
+    reader = ReadOnlyRepository(project, use_sqlite_index=True, include_active_branch_snapshots=False)
+    peer = ReadOnlyRepository(project, use_sqlite_index=True, include_active_branch_snapshots=False)
+    rebuild = reader._build_indexed_task_sources
+
+    def rebuild_with_peer_update():
+        sources = rebuild()
+        if task_path.exists():
+            task_path.unlink()
+            renamed_path.write_text(renamed_source, encoding="utf-8")
+            _set_mtime_ns(renamed_path, time.time_ns() - ONE_HOUR_NS)
+            assert _task_ids(peer) == ["TASK-2"]
+        return sources
+
+    monkeypatch.setattr(reader, "_build_indexed_task_sources", rebuild_with_peer_update)
+
+    assert _task_ids(reader) == ["TASK-2"]
+    with pytest.raises(NotFoundError, match="TASK-1"):
+        reader.get_task("TASK-1")
+
+
+def test_sqlite_index_rebuilds_stale_rows_written_by_older_versions(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = _copy_fixture_repo(tmp_path)
+    project = _project(repo)
+    task_path = repo / TASK_RELATIVE_PATH
+    stale_source = task_path.read_text(encoding="utf-8")
+    task_path.write_text(stale_source.replace("title: Example task", "title: Updated task"), encoding="utf-8")
+    _set_mtime_ns(task_path, time.time_ns() - ONE_HOUR_NS)
+    fingerprint = json.loads(sqlite_index.build_project_fingerprint(project, include_active_branch_snapshots=False))
+    fingerprint.pop("task_source_version", None)
+    legacy_fingerprint = json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(sqlite_index, "build_project_fingerprint", lambda *_args, **_kwargs: legacy_fingerprint)
+        sqlite_index.load_task_sources(
+            project,
+            include_active_branch_snapshots=False,
+            rebuild=lambda: [_indexed_source(stale_source)],
+        )
+
+    reader = ReadOnlyRepository(project, use_sqlite_index=True, include_active_branch_snapshots=False)
+    assert reader.get_task("TASK-1").title == "Updated task"
 
 
 def test_sqlite_index_fingerprint_does_not_hash_settled_task_files(tmp_path, monkeypatch):

@@ -886,6 +886,87 @@ def test_edit_task_preserves_crlf_when_toggling_checklists(tmp_path):
     assert "\n" not in after.replace("\r\n", "")
 
 
+@pytest.mark.parametrize(
+    ("changes", "before", "after"),
+    [
+        ({"check_ac": [2]}, "- [ ] #2 Preserve incomplete", "- [x] #2 Preserve incomplete"),
+        ({"uncheck_ac": [1]}, "- [x] #1 Preserve completed", "- [ ] #1 Preserve completed"),
+        ({"remove_ac": [3]}, "- [ ] Plain checklist item without an id\n", ""),
+        ({"acceptance_criteria_add": ["New item"]}, "<!-- AC:END -->", "- [ ] #4 New item\n<!-- AC:END -->"),
+        (
+            {"acceptance_criteria": ["Replacement"]},
+            "- [x] #1 Preserve completed acceptance criteria raw line\n"
+            "- [ ] #2 Preserve incomplete acceptance criteria raw line\n"
+            "- [ ] Plain checklist item without an id\n",
+            "- [ ] #1 Replacement\n",
+        ),
+    ],
+    ids=["check", "uncheck", "remove", "append", "replace"],
+)
+def test_edit_checklist_ignores_inline_marker_examples(tmp_path, changes, before, after):
+    repo = _copy_fixture(tmp_path)
+    path = _task_file(repo)
+    heading = "## Acceptance Criteria\n"
+    prefix, _, rest = path.read_text(encoding="utf-8").partition(heading)
+    prefix += "An example uses `<!-- AC:BEGIN -->` and `<!-- AC:END -->`.\n\n"
+    path.write_text(prefix + heading + rest, encoding="utf-8")
+
+    edited = _repository(repo).edit_task("TASK-1", **changes)
+
+    assert edited.body == prefix.partition("\n---\n")[2] + heading + rest.replace(before, after, 1)
+
+
+def test_edit_checklist_uses_first_parsed_block_even_if_example_is_identical(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = _task_file(repo)
+    source = path.read_text(encoding="utf-8")
+    block_start = source.index("<!-- AC:BEGIN -->")
+    block_end = source.index("\n", source.index("<!-- AC:END -->")) + 1
+    block = source[block_start:block_end]
+    before = source[:block_start].replace(
+        "<!-- SECTION:DESCRIPTION:END -->", block + "<!-- SECTION:DESCRIPTION:END -->"
+    )
+    later = "\n## More criteria\n" + block
+    path.write_text(before + block + source[block_end:] + later, encoding="utf-8")
+
+    edited = _repository(repo).edit_task("TASK-1", check_ac=[2])
+
+    assert edited.body == (
+        before.partition("\n---\n")[2] + block.replace("- [ ] #2", "- [x] #2") + source[block_end:] + later
+    )
+
+
+def test_edit_checklist_reports_missing_block_when_only_an_example_exists(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = _task_file(repo)
+    source = path.read_text(encoding="utf-8")
+    before = re.sub(
+        r"(?ms)^<!-- AC:BEGIN -->.*?^<!-- AC:END -->",
+        "An example uses `<!-- AC:BEGIN -->` and `<!-- AC:END -->`.",
+        source,
+    )
+    path.write_text(before, encoding="utf-8")
+
+    with pytest.raises(TaskMutationError, match="Missing AC checklist section"):
+        _repository(repo).edit_task("TASK-1", acceptance_criteria=["New item"])
+
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_edit_plan_inserts_after_the_parsed_acceptance_criteria_block(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    path = _task_file(repo)
+    source = path.read_text(encoding="utf-8")
+    example = "An example uses `<!-- AC:BEGIN -->` and `<!-- AC:END -->`.\n\n"
+    path.write_text(source.replace("## Acceptance Criteria\n", example + "## Acceptance Criteria\n"), encoding="utf-8")
+
+    _repository(repo).edit_task("TASK-1", plan="Verify")
+
+    after = path.read_text(encoding="utf-8")
+    assert example + "## Acceptance Criteria\n" in after
+    assert "<!-- AC:END -->\n\n## Implementation Plan\n" in after
+
+
 def test_invalid_checklist_index_is_rejected_before_write(tmp_path):
     repo = _copy_fixture(tmp_path)
     before = _snapshot_tasks(repo)
@@ -1813,6 +1894,44 @@ def test_renumber_task_moves_subtasks_and_rewrites_references(tmp_path):
         reread.get_task("TASK-1")
     assert "TASK-7" in draft_path.read_text(encoding="utf-8")
     assert "TASK-1\n" not in draft_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("parent_id", "child_id", "new_parent_id", "new_child_id"),
+    [
+        ("TASK-002", "TASK-2.01", "TASK-9", "TASK-9.01"),
+        ("TASK-002.003", "TASK-2.3.01.002", "TASK-9.4", "TASK-9.4.01.002"),
+    ],
+)
+def test_renumber_task_moves_subtasks_with_differently_padded_ids(
+    tmp_path, parent_id, child_id, new_parent_id, new_child_id
+):
+    repository = _repository(_copy_fixture(tmp_path))
+    repository.create_task(title="Parent", task_id=parent_id)
+    child = repository.create_task(title="Child", task_id=child_id, parent_task_id=parent_id)
+
+    result = repository.renumber_task(parent_id, new_parent_id)
+
+    assert result.renamed == ((parent_id, new_parent_id), (child_id, new_child_id))
+    assert not child.path.exists()
+    assert repository.get_task(new_child_id).parsed.frontmatter["parent_task_id"] == new_parent_id
+
+
+def test_renumber_task_rewrites_archived_draft_references(tmp_path):
+    from backlog_py.core.drafts import DraftService
+
+    repo = _copy_fixture(tmp_path)
+    drafts = DraftService(_project(repo))
+    draft = drafts.create_draft(title="Follow-up", parent_task_id="TASK-1", dependencies=["TASK-1"])
+    archived = drafts.archive_draft(draft.id)
+
+    result = _repository(repo).renumber_task("TASK-1", "TASK-9")
+
+    assert result.updated_references == (draft.id,)
+    archived_source = archived.path.read_text(encoding="utf-8")
+    assert "parent_task_id: TASK-9" in archived_source
+    assert "- TASK-9" in archived_source
+    assert f"id: {draft.id}" in archived_source
 
 
 def test_renumber_task_refuses_a_taken_or_duplicated_id_without_writing(tmp_path):

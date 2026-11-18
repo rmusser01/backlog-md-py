@@ -45,7 +45,7 @@ def parse_task_markdown(source: str) -> ParsedTaskMarkdown:
     source = source.lstrip("﻿")
     raw_frontmatter, frontmatter, body = _split_frontmatter(source)
     body_offset = len(source) - len(body)
-    sections, checklists = _parse_body(body, body_offset)
+    sections, checklists, checklist_spans = _parse_body(body, body_offset)
     return ParsedTaskMarkdown(
         raw_source=source,
         raw_frontmatter=raw_frontmatter,
@@ -53,6 +53,7 @@ def parse_task_markdown(source: str) -> ParsedTaskMarkdown:
         body=body,
         sections=sections,
         checklists=checklists,
+        checklist_spans=checklist_spans,
     )
 
 
@@ -97,9 +98,10 @@ def _split_frontmatter(source: str) -> tuple[str | None, dict[str, Any], str]:
 
 def _parse_body(
     body: str, body_offset: int = 0
-) -> tuple[dict[str, TaskMarkdownSection], dict[str, list[ChecklistItem]]]:
+) -> tuple[dict[str, TaskMarkdownSection], dict[str, list[ChecklistItem]], dict[str, tuple[int, int]]]:
     sections: dict[str, TaskMarkdownSection] = {}
     checklists: dict[str, list[ChecklistItem]] = {}
+    checklist_spans: dict[str, tuple[int, int]] = {}
     open_marker: _OpenMarker | None = None
     cursor = body_offset
 
@@ -141,6 +143,10 @@ def _parse_body(
                     checklists.setdefault(
                         open_marker.section_name, _parse_checklist_items(open_marker.content_lines)
                     )
+                    # Keep the closing marker's line break outside the edit span.
+                    checklist_spans.setdefault(
+                        open_marker.section_name, (open_marker.start, line_start + len(line.splitlines()[0]))
+                    )
                 open_marker = None
                 continue
             open_marker.content_lines.append(line)
@@ -153,7 +159,7 @@ def _parse_body(
             section_name=open_marker.section_name,
         )
 
-    return sections, checklists
+    return sections, checklists, checklist_spans
 
 
 def _match_begin(line: str) -> tuple[str, str] | None:

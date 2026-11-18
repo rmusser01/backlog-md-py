@@ -348,8 +348,15 @@ class ReadOnlyRepository:
     def _build_indexed_task_sources(self) -> list["IndexedTaskSource"]:
         from backlog_py.indexing.sqlite import IndexedTaskSource
 
+        # Keep transient rebuild records separate from later task lookups.
+        snapshot = ReadOnlyRepository(
+            self.project,
+            refresh_remote_refs=False,
+            include_active_branch_snapshots=self._include_active_branch_snapshots,
+            use_sqlite_index=False,
+        )
         sources: list[IndexedTaskSource] = []
-        candidates = self._visible_task_candidates_from_markdown()
+        candidates = snapshot._visible_task_candidates_from_markdown()
         for bucket in ("tasks", "completed"):
             for candidate in candidates[bucket]:
                 try:
@@ -728,7 +735,7 @@ class MutableRepository(ReadOnlyRepository):
             source = _replace_section(source, parsed, "FINAL_SUMMARY", "")
             parsed = parse_task_markdown(source)
         if acceptance_criteria is not None:
-            source = _replace_checklist_items(source, "AC", acceptance_criteria)
+            source = _replace_checklist_items(source, parsed, "AC", acceptance_criteria)
             parsed = parse_task_markdown(source)
         if check_ac:
             source = _set_checklist_indexes(source, parsed, "AC", check_ac, checked=True)
@@ -1073,17 +1080,16 @@ class MutableRepository(ReadOnlyRepository):
         by_path = self._task_record_for_path(task_id, records)
         root = by_path if by_path is not None else self.get_task(task_id)
         new_root = _normalize_task_id(new_task_id, config.task_prefix)
-        if _reference_key(new_root) == _reference_key(root.id):
+        root_key = _reference_key(root.id)
+        if _reference_key(new_root) == root_key:
             raise TaskMutationError(f"{root.id} already has id {new_root}")
-        subtree_prefix = f"{root.id}.".casefold()
-        if by_path is not None:
-            renames = {_reference_key(root.id): new_root}
-        else:
-            renames = {
-                _reference_key(record.id): new_root + record.id[len(root.id):]
-                for record in records
-                if record.id.casefold() == root.id.casefold() or record.id.casefold().startswith(subtree_prefix)
-            }
+        renames = {root_key: new_root}
+        if by_path is None:
+            depth = root.id.count(".") + 1
+            for record in records:
+                parts = record.id.strip().split(".", depth)
+                if len(parts) > depth and ids_equivalent(".".join(parts[:depth]), root.id):
+                    renames[_reference_key(record.id)] = f"{new_root}.{parts[-1]}"
         # Ids on active branches and in other worktrees (uncommitted ones included)
         # are not in this checkout's files; a rename onto one recreates the collision.
         elsewhere = self._other_checkout_task_files()
@@ -1106,12 +1112,17 @@ class MutableRepository(ReadOnlyRepository):
         renamed: list[tuple[str, str]] = []
         updated_references: list[str] = []
         # Drafts carry the same parent/dependency fields; their draft-N ids never move.
-        drafts = [] if by_path is not None else _load_tasks_from_dir(self.project.backlog_dir / "drafts")
+        drafts = [] if by_path is not None else [
+            record
+            for directory in ("drafts", "archive/drafts")
+            for record in _load_tasks_from_dir(self.project.backlog_dir / directory)
+        ]
+        task_dirs = self._task_lookup_dirs()
         for record in [*records, *drafts]:
             frontmatter = record.parsed.frontmatter
             changes: dict[str, object] = {}
             target_path = None
-            new_id = renames.get(_reference_key(record.id))
+            new_id = renames.get(_reference_key(record.id)) if record.path.parent in task_dirs else None
             if by_path is not None and record.path != root.path:
                 new_id = None
             if new_id is not None:
@@ -1504,7 +1515,8 @@ def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content
 def _replace_or_insert_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
     if name in parsed.sections:
         return _replace_section(source, parsed, name, content)
-    return _insert_section(source, name, content)
+    acceptance_span = parsed.checklist_spans.get("AC") if name == "PLAN" else None
+    return _insert_section(source, name, content, after=acceptance_span[1] if acceptance_span else None)
 
 
 def _append_to_structured_section(
@@ -1612,16 +1624,11 @@ def _section_end_line_pattern(names: Sequence[str]) -> re.Pattern[str]:
     return re.compile(rf"<!-- SECTION:(?:{alternatives}):END -->[ \t]*(?:\r?\n|$)")
 
 
-def _insert_section(source: str, name: str, content: str) -> str:
+def _insert_section(source: str, name: str, content: str, *, after: int | None = None) -> str:
     newline = _detect_newline(source)
     block = f"{_heading_for_section(name)}{newline * 2}{_render_section_markers(name, content, newline)}"
-    if name == "PLAN":
-        try:
-            acceptance_block = _extract_marker_block(source, "AC")
-        except TaskMutationError:
-            acceptance_block = ""
-        if acceptance_block:
-            return source.replace(acceptance_block, f"{acceptance_block.rstrip()}{newline * 2}{block}", 1)
+    if after is not None:
+        return f"{source[:after]}{newline * 2}{block}{source[after:]}"
     if name == "FINAL_SUMMARY":
         return _insert_section_before_heading(source, "## Definition of Done", block)
     return source.rstrip() + f"{newline * 2}{block}{newline}"
@@ -1665,10 +1672,9 @@ def _append_checklist_items(
     normalized_items = [_normalize_block(item) for item in items if _normalize_block(item)]
     if not normalized_items:
         return source
-    raw = _extract_marker_block(source, marker)
+    start, end = _require_checklist_span(parsed, marker)
+    raw = source[start:end]
     lines = raw.splitlines(keepends=True)
-    if not lines:
-        raise TaskMutationError(f"Missing {marker} checklist section")
     newline = _detect_newline(raw)
     prefix = "".join(lines[:-1])
     if prefix and not prefix.endswith(("\n", "\r\n")):
@@ -1678,22 +1684,24 @@ def _append_checklist_items(
         f"- [ ] #{index} {item}{newline}"
         for index, item in enumerate(normalized_items, start=start_index)
     )
-    return source.replace(raw, f"{prefix}{appended}{lines[-1]}", 1)
+    return f"{source[:start]}{prefix}{appended}{lines[-1]}{source[end:]}"
 
 
 def _replace_checklist_items(
     source: str,
+    parsed: ParsedTaskMarkdown,
     marker: str,
     items: Sequence[str],
 ) -> str:
     normalized_items = [_normalize_block(item) for item in items if _normalize_block(item)]
-    raw = _extract_marker_block(source, marker)
+    start, end = _require_checklist_span(parsed, marker)
+    raw = source[start:end]
+    lines = raw.splitlines(keepends=True)
     newline = _detect_newline(raw)
     rendered_items = _render_checklist(normalized_items)
     if newline == "\r\n":
         rendered_items = rendered_items.replace("\n", "\r\n")
-    replacement = f"<!-- {marker}:BEGIN -->{newline}{rendered_items}<!-- {marker}:END -->"
-    return source.replace(raw, replacement, 1)
+    return f"{source[:start]}{lines[0]}{rendered_items}{lines[-1]}{source[end:]}"
 
 
 def _remove_checklist_indexes(
@@ -1704,8 +1712,8 @@ def _remove_checklist_indexes(
 ) -> str:
     _reject_checklist_indexes(marker, indexes, len(parsed.checklists.get(marker, [])))
     remove_indexes = set(indexes)
-    raw = _extract_marker_block(source, marker)
-    lines = raw.splitlines(keepends=True)
+    start, end = _require_checklist_span(parsed, marker)
+    lines = source[start:end].splitlines(keepends=True)
     item_number = 0
     rendered: list[str] = []
     for line in lines:
@@ -1715,7 +1723,7 @@ def _remove_checklist_indexes(
             if item_number in remove_indexes:
                 continue
         rendered.append(line)
-    return source.replace(raw, "".join(rendered), 1)
+    return source[:start] + "".join(rendered) + source[end:]
 
 
 def _set_checklist_indexes(
@@ -1728,8 +1736,8 @@ def _set_checklist_indexes(
 ) -> str:
     items = parsed.checklists.get(marker, [])
     _reject_checklist_indexes(marker, indexes, len(items))
-    raw = _extract_marker_block(source, marker)
-    lines = raw.splitlines(keepends=True)
+    start, end = _require_checklist_span(parsed, marker)
+    lines = source[start:end].splitlines(keepends=True)
     item_number = 0
     rendered: list[str] = []
     for line in lines:
@@ -1739,7 +1747,7 @@ def _set_checklist_indexes(
             if item_number in indexes:
                 line = _set_checklist_line(line, checked=checked)
         rendered.append(line)
-    return source.replace(raw, "".join(rendered), 1)
+    return source[:start] + "".join(rendered) + source[end:]
 
 
 def _reject_checklist_indexes(marker: str, indexes: Sequence[int], item_count: int) -> None:
@@ -1766,15 +1774,11 @@ def _replace_frontmatter_values(
     return f"---{newline}{yaml_text}{newline}---{newline}{body}"
 
 
-def _extract_marker_block(source: str, marker: str) -> str:
-    pattern = re.compile(
-        rf"<!-- {re.escape(marker)}:BEGIN -->.*?<!-- {re.escape(marker)}:END -->",
-        re.DOTALL,
-    )
-    match = pattern.search(source)
-    if match is None:
+def _require_checklist_span(parsed: ParsedTaskMarkdown, marker: str) -> tuple[int, int]:
+    span = parsed.checklist_spans.get(marker)
+    if span is None:
         raise TaskMutationError(f"Missing {marker} checklist section")
-    return match.group(0)
+    return span
 
 
 def _set_checklist_line(line: str, *, checked: bool) -> str:

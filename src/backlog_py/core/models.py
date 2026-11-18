@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -69,3 +69,4 @@ class ParsedTaskMarkdown:
     body: str
     sections: dict[str, TaskMarkdownSection]
     checklists: dict[str, list[ChecklistItem]]
+    checklist_spans: dict[str, tuple[int, int]] = field(default_factory=dict)

@@ -953,12 +953,19 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "Forbidden"})
                 return
             try:
-                edit_kwargs = _task_edit_kwargs_from_payload(self._read_json_body())
+                payload = _require_json_object(self._read_json_body())
+                edit_kwargs = _task_edit_kwargs_from_payload(payload)
+                revision = _required_string_field(payload, "revision") if "revision" in payload else None
 
                 def edit_task() -> TaskRecord:
                     repository = _mutable_browser_task_repository(self.server.project, edit_task_id)
+                    current = repository.get_task(edit_task_id)
+                    if revision is not None and revision != _task_revision(current):
+                        raise _BrowserConflictError(
+                            "This task changed while you were editing. Reopen it to see the latest version."
+                        )
                     if "acceptance_criteria" in edit_kwargs:
-                        _retain_acceptance_checks(repository.get_task(edit_task_id), edit_kwargs)
+                        _retain_acceptance_checks(current, edit_kwargs)
                     return repository.edit_task(edit_task_id, **edit_kwargs)
 
                 task = with_project_write_lock(
@@ -966,6 +973,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                     "browser_task_edit",
                     edit_task,
                 )
+            except _BrowserConflictError as exc:
+                self._send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
+                return
             except KeyError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": f"Task not found: {edit_task_id}"})
                 return
@@ -1859,6 +1869,10 @@ def _task_record_signature(task: TaskRecord) -> tuple[str, Path, str]:
     return task.id, task.path, task.raw_source
 
 
+def _task_revision(task: TaskRecord) -> str:
+    return hashlib.sha256(os.fsencode(task.path) + b"\0" + task.raw_source.encode("utf-8")).hexdigest()
+
+
 def _task_record_is_mutable(
     task: TaskRecord,
     local_task_signatures: set[tuple[str, Path, str]],
@@ -1971,6 +1985,7 @@ def _task_detail_payload(
     run_history = parse_run_history(task.raw_source)
     payload.update(
         {
+            "revision": _task_revision(task),
             "description": description,
             "descriptionHtml": _markdown_to_html(description) if description else "",
             "implementationNotes": implementation_notes,
@@ -2622,6 +2637,12 @@ def _task_edit_kwargs_from_payload(payload: object) -> dict[str, object]:
         value = _optional_string_field(payload, "priority")
         if value is not None:
             edit_kwargs["priority"] = value
+    if "clearPriority" in payload:
+        clear_priority = payload["clearPriority"]
+        if not isinstance(clear_priority, bool):
+            raise ValueError("Request body field clearPriority must be a boolean")
+        if clear_priority:
+            edit_kwargs["clear_priority"] = True
     if "milestone" in payload:
         value = payload.get("milestone")
         if value is None:

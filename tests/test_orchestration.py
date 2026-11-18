@@ -17,6 +17,7 @@ from backlog_py.orchestration import (
     list_eligible_tasks,
     list_stale_leases,
     parse_orchestration,
+    queue_report,
     summarize_orchestration,
     validate_orchestration,
     validate_policy,
@@ -334,6 +335,70 @@ def test_queue_accepts_unpadded_dependency_on_done_padded_task(tmp_path):
         ("TASK-10", "eligible"),
     ]
     assert [task.id for task in list_eligible_tasks(repository)] == [dependent.id]
+
+
+def test_completed_workflow_task_unblocks_its_dependent(tmp_path):
+    repo = _repo_with_tasks(tmp_path, {"TASK-1": {}, "TASK-2": {"dependencies": ["TASK-1"]}})
+    repository = MutableRepository.from_path(repo)
+    service = OrchestrationService(repository.project, now=lambda: _utc("2026-05-13T00:00:00Z"))
+
+    claim = service.claim_task("TASK-1", actor="agent", expected_version=0)
+    review = service.transition_task("TASK-1", "review", actor="agent", expected_version=claim.version)
+    service.transition_task("TASK-1", "complete", actor="agent", expected_version=review.version)
+
+    assert repository.get_task("TASK-1").status == "To Do"
+    assert [(item.task_id, item.category) for item in service.queue().items] == [
+        ("TASK-1", "terminal"),
+        ("TASK-2", "eligible"),
+    ]
+    assert [task.id for task in list_eligible_tasks(repository)] == ["TASK-2"]
+
+
+def test_policy_terminal_status_unblocks_its_dependent(tmp_path):
+    repo = _repo_with_tasks(
+        tmp_path,
+        {
+            "TASK-1": {"orchestration": {"status_key": "shipped"}},
+            "TASK-2": {"dependencies": ["TASK-1"]},
+            "TASK-3": {"status": "Done", "orchestration": {"status_key": "todo"}},
+        },
+    )
+    repository = ReadOnlyRepository.from_path(repo)
+    policy = OrchestrationPolicy(
+        states={"todo": WorkflowStatePolicy(claimable=True), "shipped": WorkflowStatePolicy(terminal=True)},
+        transitions={"todo": ("shipped",), "shipped": ()},
+    )
+
+    assert [(item.task_id, item.category) for item in queue_report(repository, policy).items] == [
+        ("TASK-1", "terminal"),
+        ("TASK-2", "eligible"),
+        ("TASK-3", "terminal"),
+    ]
+    assert [task.id for task in list_eligible_tasks(repository, policy)] == ["TASK-2"]
+
+
+def test_queue_uses_the_projects_completed_task_bucket(tmp_path):
+    repo = _repo_with_tasks(
+        tmp_path / "completed",
+        {
+            "TASK-1": {},
+            "TASK-2": {"dependencies": ["TASK-1"]},
+            "TASK-3": {},
+            "TASK-4": {"dependencies": ["TASK-3"]},
+        },
+    )
+    completed = repo / "backlog" / "completed"
+    completed.mkdir()
+    (repo / "backlog" / "tasks" / "task-3 - Task-TASK-3.md").rename(completed / "task-3.md")
+    repository = ReadOnlyRepository.from_path(repo)
+
+    assert [(item.task_id, item.category) for item in queue_report(repository, include_completed=True).items] == [
+        ("TASK-1", "eligible"),
+        ("TASK-2", "blocked_by_dependencies"),
+        ("TASK-3", "terminal"),
+        ("TASK-4", "eligible"),
+    ]
+    assert [task.id for task in list_eligible_tasks(repository)] == ["TASK-1", "TASK-4"]
 
 
 def test_lease_reports_split_active_and_stale_claims(tmp_path):
