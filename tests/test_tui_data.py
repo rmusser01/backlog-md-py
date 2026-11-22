@@ -639,3 +639,33 @@ class _FakeMcpDaemon:
 class _RawToolText:
     def __init__(self, text):
         self.text = text
+
+
+def test_local_data_source_search_reuses_one_scan_until_the_project_changes(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    project = discover_project(Path.cwd(), explicit_cwd=repo)
+    MutableRepository(project).create_task(title="Shared needle task")
+    source = LocalBoardDataSource(project)
+    built = []
+    real_init = ReadOnlyRepository.__init__
+
+    def counting_init(self, *args, **kwargs):
+        built.append(kwargs)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(ReadOnlyRepository, "__init__", counting_init)
+
+    # The search dialog queries once per keystroke.
+    for query in ("n", "ne", "nee", "need", "needle"):
+        assert "Shared needle task" in [result.title for result in source.search(query, limit=10)]
+
+    assert len(built) == 1
+    # Search lists this checkout only, as it did before the scan was shared.
+    assert built[0]["include_active_branch_snapshots"] is False
+    assert built[0]["refresh_remote_refs"] is False
+
+    monkeypatch.setattr(ReadOnlyRepository, "__init__", real_init)
+    added = MutableRepository(project).create_task(title="Second needle task")
+
+    assert [result.identifier for result in source.search("second needle", limit=10)] == [added.id]

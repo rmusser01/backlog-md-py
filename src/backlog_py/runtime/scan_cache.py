@@ -40,9 +40,14 @@ class ProjectScanCache:
     Correctness rests on `backlog_py.indexing.sqlite._file_signature`, which
     already solves the hard part: a file touched within the last moment cannot be
     ruled out by size and mtime alone, so its content is hashed instead.
+
+    Args:
+        include_active_branch_snapshots: Passed through to the repository; turn
+            it off for a view that only shows tasks present in this checkout.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, include_active_branch_snapshots: bool = True) -> None:
+        self._include_active_branch_snapshots = include_active_branch_snapshots
         self._lock = threading.Lock()
         self._signature: str | None = None
         self._repository: ReadOnlyRepository | None = None
@@ -84,7 +89,11 @@ class ProjectScanCache:
             self._signature = signature
             # refresh_remote_refs stays off: a cached scan must not fire network
             # calls on a request path.
-            self._repository = ReadOnlyRepository(project, refresh_remote_refs=False)
+            self._repository = ReadOnlyRepository(
+                project,
+                refresh_remote_refs=False,
+                include_active_branch_snapshots=self._include_active_branch_snapshots,
+            )
             self._board_payload = None
             # Warm the visible-record cache while still holding the lock, so two
             # concurrent requests cannot both pay for the same scan. `get_task`

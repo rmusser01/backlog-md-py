@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
+from backlog_py.storage.project import discover_project
 
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
@@ -220,3 +221,14 @@ def test_repository_search_filters_by_status_priority_and_modified_files(tmp_pat
     assert [task.id for task in repository.search_tasks("task", priority="HIGH")] == ["TASK-1"]
     assert [task.id for task in repository.search_tasks(modified_files=["components/button"])] == ["TASK-1"]
     assert [task.id for task in repository.search_tasks(modified_files=["SERVER"])] == ["TASK-2"]
+
+
+def test_task_search_text_is_prepared_once_per_record(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, repo)
+    repository = ReadOnlyRepository(discover_project(Path.cwd(), explicit_cwd=repo))
+    task = repository.get_task("TASK-1")
+
+    assert task.search_text is task.search_text
+    assert repository.search_tasks("example")[0].search_text is task.search_text
+    assert [found.id for found in repository.search_tasks(task.title)] == [task.id]
