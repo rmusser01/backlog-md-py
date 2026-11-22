@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- Make search fast on large projects. Results and their order are unchanged.
+  Searching used to compare every query word against every word of every task
+  with a fuzzy matcher; on a 2,000-task project one `search` or MCP
+  `task_search` query took 9–35 seconds once the tasks were loaded. Each
+  distinct word is now compared once per query, and a task held by a
+  long-running process (MCP server, daemon, TUI) keeps its prepared search
+  text, so the same queries take 15–90 ms. Document and decision search use
+  the same matcher and are about 15 times faster.
+- The TUI search dialog no longer re-reads every task file on each keystroke.
+  It reuses one scan until a task file, the config or the Git state changes.
+
 ## 2.2.0 - 2026-10-19
 
 This release adds `task renumber` and a `task edit --if-status` guard that

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 from urllib.parse import urlparse
@@ -13,6 +13,7 @@ from backlog_py.core.models import BacklogConfig, BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository
 from backlog_py.daemon.lifecycle import DaemonNotRunningError, daemon_status
 from backlog_py.runtime.locks import with_project_write_lock
+from backlog_py.runtime.scan_cache import ProjectScanCache
 from backlog_py.security.paths import assert_path_within_base
 from backlog_py.storage.config import (
     get_definition_of_done_defaults,
@@ -36,6 +37,12 @@ from backlog_py.tui.models import (
     task_view_from_mcp_payload,
     task_view_from_record,
 )
+
+
+def _search_scan_cache() -> ProjectScanCache:
+    # Search lists what this checkout holds, not tasks that exist only on
+    # other active branches.
+    return ProjectScanCache(include_active_branch_snapshots=False)
 
 
 class BoardDataSource(Protocol):
@@ -86,6 +93,7 @@ class BoardDataSource(Protocol):
 class LocalBoardDataSource:
     project: BacklogProject
     source_name: BoardSourceName = "local"
+    _search_scan: ProjectScanCache = field(default_factory=_search_scan_cache, init=False, repr=False, compare=False)
 
     def load_board(self) -> BoardSnapshot:
         repository = ReadOnlyRepository(self.project)
@@ -96,7 +104,7 @@ class LocalBoardDataSource:
         )
 
     def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
-        return _search_project(self.project, query, limit=limit)
+        return _search_project(self.project, query, limit=limit, scan=self._search_scan)
 
     def load_settings(self) -> SettingsView:
         return settings_view_from_config(load_config(self.project.config_path))
@@ -220,6 +228,7 @@ class DaemonBoardDataSource:
     endpoint: str
     token: str
     source_name: BoardSourceName = "daemon"
+    _search_scan: ProjectScanCache = field(default_factory=_search_scan_cache, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _validate_loopback_http_endpoint(self.endpoint)
@@ -258,7 +267,7 @@ class DaemonBoardDataSource:
             raise DaemonReadError(str(exc)) from exc
 
     def search(self, query: str, limit: int = 20) -> tuple[SearchResultView, ...]:
-        return _search_project(self.project, query, limit=limit)
+        return _search_project(self.project, query, limit=limit, scan=self._search_scan)
 
     def load_settings(self) -> SettingsView:
         return settings_view_from_config(load_config(self.project.config_path))
@@ -350,18 +359,23 @@ def create_board_data_source(project: BacklogProject) -> BoardDataSource:
     return DaemonBoardDataSource(project, endpoint=status.record.endpoint, token=status.record.token)
 
 
-def _search_project(project: BacklogProject, query: str, *, limit: int) -> tuple[SearchResultView, ...]:
+def _search_project(
+    project: BacklogProject,
+    query: str,
+    *,
+    limit: int,
+    scan: ProjectScanCache | None = None,
+) -> tuple[SearchResultView, ...]:
     text = query.strip()
     if not text or limit <= 0:
         return ()
 
     results: list[SearchResultView] = []
 
-    repository = ReadOnlyRepository(
-        project,
-        refresh_remote_refs=False,
-        include_active_branch_snapshots=False,
-    )
+    # The search dialog queries on every keystroke. Without a shared scan each
+    # one re-read and re-parsed every task file; with it an unchanged project
+    # costs a freshness check, and the tasks keep their prepared search text.
+    repository = (scan or _search_scan_cache()).repository(project)
     for task in repository.search_tasks(text):
         results.append(
             SearchResultView(

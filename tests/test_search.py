@@ -13,9 +13,18 @@ pinned below:
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
+
 import pytest
 
-from backlog_py.search.simple import contains_query, query_score, ranked_matches
+from backlog_py.search.simple import (
+    _is_ordered_subsequence,
+    _TokenScorer,
+    contains_query,
+    prepare_search_text,
+    query_score,
+    ranked_matches,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -269,3 +278,87 @@ def test_ranked_matches_finds_non_ascii_items():
     assert [item[0] for item in ranked_matches(items, "Задача", text_for_item)] == ["cyrillic"]
     assert [item[0] for item in ranked_matches(items, "cafe", text_for_item)] == ["accented"]
     assert [item[0] for item in ranked_matches(items, "Refactor", text_for_item)] == ["ascii"]
+
+
+# --------------------------------------------------------------------------- #
+# Prepared text and per-query memoisation: speed-ups that must not move a score.
+# --------------------------------------------------------------------------- #
+
+
+def _reference_token_score(query_token: str, text_token: str) -> int | None:
+    """The scoring tiers as originally written, one pair at a time, no shortcuts."""
+    if query_token == text_token:
+        return 1000
+    if text_token.startswith(query_token):
+        return 900 - min(len(text_token) - len(query_token), 100)
+    if query_token in text_token:
+        return 800 - min(text_token.index(query_token), 100)
+    if len(query_token) >= 3 and _is_ordered_subsequence(query_token, text_token):
+        return 650 - min(len(text_token) - len(query_token), 100)
+    if len(query_token) >= 4 and SequenceMatcher(None, query_token, text_token).ratio() >= 0.78:
+        return 500
+    return None
+
+
+_SCORING_SAMPLES = (
+    "parse parser reparse parkside parsr sparse prase pares parsed parsing parses par pa p "
+    "fingerprint fingerprnt fingerprints finger print footprint blueprint "
+    "abcd abdc abce bcda abcde xabcd abcdabcd aaaa aaab abab baba "
+    "task tasks 1500 150 15 日本語 日本 タスク задача задачи cafe"
+).split()
+
+
+def test_token_scores_match_the_unoptimised_tiers_for_every_sample_pair():
+    for query_token in _SCORING_SAMPLES:
+        for text_token in _SCORING_SAMPLES:
+            expected = _reference_token_score(query_token, text_token)
+            assert _TokenScorer(query_token).best(frozenset([text_token])) == expected, (query_token, text_token)
+
+
+def test_token_scorer_keeps_verdicts_separate_across_texts():
+    # The scorer remembers each text token it has judged; a match found in one
+    # text must not be credited to a later text that lacks that token.
+    scorer = _TokenScorer("parse")
+    assert scorer.best(frozenset(["parser", "tree"])) == 899
+    assert scorer.best(frozenset(["tree", "zzzz"])) is None
+    assert scorer.best(frozenset(["reparse", "tree"])) == 798
+    assert scorer.best(frozenset(["parser", "reparse", "parsr"])) == 899
+    assert scorer.best(frozenset(["parsr"])) == 500
+
+
+def test_prepared_text_scores_identically_to_raw_text():
+    text = "Refactor the Résumé parser\n  for 日本語のタスク — foo_bar-baz"
+    prepared = prepare_search_text(text)
+    for query in ["parser", "pars", "resume parser", "タスク", "refactor the resume", "bar baz", "zzzz", "", "!!!"]:
+        assert query_score(prepared, query) == query_score(text, query), query
+        assert contains_query(prepared, query) == contains_query(text, query), query
+
+
+def test_ranked_matches_accepts_prepared_text():
+    items = [("a", "parkside"), ("b", "parse"), ("c", "parser"), ("d", "parse"), ("e", "zzzz")]
+    ranked = ranked_matches(items, "parse", lambda item: prepare_search_text(item[1]))
+    assert [item[0] for item in ranked] == ["b", "d", "c", "a"]
+
+
+def test_repeated_query_token_counts_once_per_repetition():
+    assert query_score("parse tree", "parse parse") == 2 * 1000
+
+
+@pytest.mark.parametrize(
+    ("text", "query", "bonus"),
+    [
+        ("parse", "parse", 2000),  # whole text
+        ("parse tree", "parse", 1200),  # leading word
+        ("syntax parse", "parse", 1200),  # trailing word
+        ("a parse tree", "parse", 1200),  # interior word
+        ("a parse tree", "parse tree", 1200),  # trailing phrase
+        ("reparse tree", "parse", 700),  # inside a word only
+        ("parse the tree", "parse tree", 0),  # tokens match, phrase does not
+    ],
+)
+def test_phrase_bonus_tiers(text, query, bonus):
+    token_total = sum(
+        max(score for token in text.split() if (score := _reference_token_score(query_token, token)) is not None)
+        for query_token in query.split()
+    )
+    assert query_score(text, query) == token_total + bonus

@@ -6,6 +6,7 @@ import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
+from functools import cached_property
 from math import inf, isfinite
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
@@ -24,7 +25,7 @@ from backlog_py.runtime.git import (
     maybe_fetch_remote_refs,
     other_checkout_task_file_names,
 )
-from backlog_py.search.simple import ranked_matches
+from backlog_py.search.simple import SearchText, prepare_search_text, ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
 from backlog_py.storage.config import load_config
 from backlog_py.storage.project import discover_project
@@ -66,6 +67,18 @@ class TaskRecord:
     @property
     def raw_source(self) -> str:
         return self.parsed.raw_source
+
+    @cached_property
+    def search_text(self) -> SearchText:
+        """Everything a query is matched against, normalised and tokenised once.
+
+        Preparing a task's full source costs far more than scoring it, and a
+        record held by a cached scan is searched again and again. The record is
+        immutable, so the prepared form stays valid for as long as it lives.
+        (``cached_property`` stores into the instance ``__dict__`` directly,
+        which a frozen dataclass still allows.)
+        """
+        return prepare_search_text("\n".join([self.id, self.title, self.status, self.raw_source]))
 
 
 @dataclass(frozen=True)
@@ -2171,8 +2184,8 @@ def _id_from_filename(path: Path) -> str:
     return stem.upper()
 
 
-def _search_text(task: TaskRecord) -> str:
-    return "\n".join([task.id, task.title, task.status, task.raw_source])
+def _search_text(task: TaskRecord) -> SearchText:
+    return task.search_text
 
 
 def _statuses_from_tasks(tasks: Iterable[TaskRecord]) -> list[str]:
