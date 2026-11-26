@@ -2561,15 +2561,16 @@ def test_browser_config_status_rows_use_fresh_config_project_snapshot(tmp_path, 
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
     from backlog_py.browser import service as browser_service
+    from backlog_py.runtime.scan_cache import ProjectScanCache
 
     observed_defaults = []
-    original_repository = browser_service.MutableRepository
+    original_repository = ProjectScanCache.repository
 
-    def recording_repository(project, **kwargs):
+    def recording_repository(self, project):
         observed_defaults.append(project.config.default_status)
-        return original_repository(project, **kwargs)
+        return original_repository(self, project)
 
-    monkeypatch.setattr(browser_service, "MutableRepository", recording_repository)
+    monkeypatch.setattr(ProjectScanCache, "repository", recording_repository)
     service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
     set_config_value(project, "defaultStatus", "Ready")
     try:
@@ -2969,15 +2970,16 @@ def test_browser_config_status_pair_validation_uses_fresh_config_project_snapsho
     project = discover_project(Path.cwd(), explicit_cwd=repo)
 
     from backlog_py.browser import service as browser_service
+    from backlog_py.runtime.scan_cache import ProjectScanCache
 
     observed_defaults = []
-    original_repository = browser_service.MutableRepository
+    original_repository = ProjectScanCache.repository
 
-    def recording_repository(project, **kwargs):
+    def recording_repository(self, project):
         observed_defaults.append(project.config.default_status)
-        return original_repository(project, **kwargs)
+        return original_repository(self, project)
 
-    monkeypatch.setattr(browser_service, "MutableRepository", recording_repository)
+    monkeypatch.setattr(ProjectScanCache, "repository", recording_repository)
     service = browser_service.start_browser_service(project, host="127.0.0.1", port=0)
     set_config_value(project, "statuses", json.dumps(["Ready", "In Progress"]))
     set_config_value(project, "defaultStatus", "Ready")
@@ -4553,7 +4555,7 @@ def test_browser_milestone_list_counts_references_against_one_supplied_snapshot(
 
     from backlog_py.browser import service as browser_service
 
-    payload = browser_service._milestone_list_payload(project)
+    payload = browser_service._milestone_list_payload(project, MutableRepository(project).list_tasks())
 
     assert list_calls == [True]
     assert {item["title"]: item["taskReferenceCount"] for item in payload["milestones"]} == {

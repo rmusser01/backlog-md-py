@@ -93,3 +93,18 @@ def test_a_racy_write_does_not_rescan_once_it_ages(tmp_path, monkeypatch):
     refreshed = cache.repository(project)
     assert refreshed is not repository
     assert refreshed.get_task(task.id).title == "Stale"
+
+
+def test_polling_tabs_share_one_freshness_check(tmp_path):
+    project = init_project(tmp_path, no_git=True).project
+    MutableRepository(project).create_task(title="First", status="To Do")
+    cache = ProjectScanCache()
+
+    def titles(max_age):
+        payload = browser_service.build_board_payload(project, cache=cache, max_age=max_age)
+        return sorted(task["title"] for task in payload["columns"]["To Do"])
+
+    assert titles(60) == ["First"]
+    MutableRepository(project).create_task(title="Second", status="To Do")
+    assert titles(60) == ["First"], "a check younger than max_age was not shared"
+    assert titles(0) == ["First", "Second"]
