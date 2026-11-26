@@ -19,6 +19,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
+from math import inf
 from pathlib import Path
 from typing import Callable, TypeVar, cast
 
@@ -51,6 +52,7 @@ class ProjectScanCache:
         self._include_active_branch_snapshots = include_active_branch_snapshots
         self._lock = threading.Lock()
         self._signature: str | None = None
+        self._checked_at = -inf
         self._hashed_paths: frozenset[str] = frozenset()
         self._repository: ReadOnlyRepository | None = None
         self._board_payload: object | None = None
@@ -67,10 +69,21 @@ class ProjectScanCache:
         build: Callable[[ReadOnlyRepository], _T],
         *,
         is_current: Callable[[_T], bool] | None = None,
+        max_age: float = 0.0,
     ) -> _T:
-        """Reuse a board payload until its inputs or time-sensitive state change."""
+        """Reuse a board payload until its inputs or time-sensitive state change.
+
+        Args:
+            max_age: Seconds a freshness check stays good for. A caller that
+                polls -- every open tab, every few seconds -- can share one
+                check instead of each paying for its own; on a large repository
+                a check costs a second or more.
+        """
         with self._lock:
-            repository = self._refresh_locked(project)
+            if self._repository is not None and time.monotonic() - self._checked_at < max_age:
+                repository = self._repository
+            else:
+                repository = self._refresh_locked(project)
             policy_signature = _file_signature(
                 project.root, project.backlog_dir / "orchestration.yml", now_ns=time.time_ns()
             )
@@ -90,6 +103,7 @@ class ProjectScanCache:
         # its signature. Hash them again here, or the hash would vanish once
         # their mtime ages out of the racy window and an unchanged project
         # would be re-scanned two seconds after every write.
+        self._checked_at = time.monotonic()
         signature, hashed = _project_signature(project, hash_paths=self._hashed_paths)
         if signature != self._signature or self._repository is None:
             if self._hashed_paths:

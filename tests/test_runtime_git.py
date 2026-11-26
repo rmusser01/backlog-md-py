@@ -631,3 +631,119 @@ def test_worktree_scan_falls_back_when_list_z_is_unsupported(
     monkeypatch.setattr(git_module, "_run_git", without_z)
 
     assert MutableRepository(project).create_task(title="four").id == "TASK-4"
+
+
+def _record_log_walks(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    walks: list[tuple[str, ...]] = []
+    real_run = git_module._run_git
+
+    def recording(work_dir, *args):
+        if "log" in args and "--name-only" in args:
+            walks.append(args)
+        return real_run(work_dir, *args)
+
+    monkeypatch.setattr(git_module, "_run_git", recording)
+    return walks
+
+
+def test_a_walk_stopped_early_reports_what_a_full_walk_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading the log in pages must not credit a path to a different commit."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    _task(project, "task-1 - old.md")
+    _commit(repo, "old", when=1700000000)
+    for index in range(2, 6):
+        _task(project, f"task-{index} - newer.md")
+        _commit(repo, f"newer {index}", when=1700000000 + index * 100)
+    monkeypatch.setattr(git_module, "_FIRST_LOG_PAGE", 1)
+    tasks = project.backlog_dir.relative_to(repo).as_posix() + "/tasks"
+    old, newest = f"{tasks}/task-1 - old.md", f"{tasks}/task-5 - newer.md"
+
+    full = git_module._last_commit_timestamps(repo, [tasks])
+    paged = git_module._last_commit_timestamps(repo, [tasks], wanted={old})
+    early = git_module._last_commit_timestamps(repo, [tasks], wanted={newest})
+
+    assert full is not None and paged is not None and early is not None
+    assert paged[0][old] == full[0][old] == 1700000000
+    assert early == ({newest: full[0][newest]}, False), "the walk read past the commit it needed"
+
+
+def test_branch_walks_are_reused_until_the_branch_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _branch_snapshot_repo(tmp_path, 2)
+    walks = _record_log_walks(monkeypatch)
+
+    first = git_module.list_active_branch_task_snapshots(project)
+    assert len(walks) == 1
+    assert git_module.list_active_branch_task_snapshots(project) == first
+    assert len(walks) == 1, "a branch whose tip did not move was walked again"
+
+    repo = project.root
+    _git(repo, "checkout", "-q", "feature")
+    _task(project, "task-9 - more.md")
+    _commit(repo, "more")
+    _git(repo, "checkout", "-q", "main")
+
+    assert len(git_module.list_active_branch_task_snapshots(project)) == len(first) + 1
+    assert len(walks) == 2
+
+
+def test_history_is_walked_only_for_ids_two_files_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Commit times only settle duplicate ids; a board without any needs no walk."""
+    from backlog_py.core.repository import ReadOnlyRepository
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    _task(project, "task-1 - first.md")
+    _commit(repo, "seed")
+    walks = _record_log_walks(monkeypatch)
+
+    assert [task.title for task in ReadOnlyRepository(project).list_tasks()] == ["T"]
+    assert walks == []
+
+    second = _task(project, "task-1 - second.md")  # the same id, TASK-1, in a second file
+    _commit(repo, "duplicate")
+    ReadOnlyRepository(project).list_tasks()
+    assert len(walks) == 1
+
+    # An uncommitted copy outranks every commit: git status settles it.
+    second.write_text(second.read_text(encoding="utf-8").replace("title: T", "title: Edited"), encoding="utf-8")
+    assert [task.title for task in ReadOnlyRepository(project).list_tasks()] == ["Edited"]
+    assert len(walks) == 1, "an id an uncommitted file claims still walked the history"
+
+
+def test_one_record_per_branch_version_keeps_the_tie_break_winner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On equal commit times the later copy wins, so a version kept once must
+    stand where its later copy stood, not its first."""
+    from backlog_py.core import repository as repository_module
+
+    project = init_project(tmp_path / "plain", no_git=True).project
+    path = project.backlog_dir.relative_to(project.root).as_posix() + "/tasks/task-99 - x.md"
+    monkeypatch.setattr(
+        repository_module,
+        "list_active_branch_task_snapshots",
+        lambda project: [
+            git_module.GitTaskSnapshot(
+                ref=ref,
+                relative_path=path,
+                source=f"---\nid: TASK-99\ntitle: {title}\nstatus: To Do\n---\n",
+                committed_at=1.0,
+            )
+            for ref, title in (("a", "X"), ("b", "Y"), ("c", "X"))
+        ],
+    )
+
+    tasks = repository_module.ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
+
+    assert [task.title for task in tasks] == ["X"]

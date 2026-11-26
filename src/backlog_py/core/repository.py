@@ -20,10 +20,12 @@ from backlog_py.core.models import BacklogConfig, BacklogProject, ParsedTaskMark
 from backlog_py.core.status_callback import execute_status_callback
 from backlog_py.markdown.task_parser import parse_task_markdown, read_task_frontmatter, salvage_frontmatter_id
 from backlog_py.runtime.git import (
+    GitTaskSnapshot,
     current_task_snapshot_timestamps,
     list_active_branch_task_snapshots,
     maybe_fetch_remote_refs,
     other_checkout_task_file_names,
+    uncommitted_task_paths,
 )
 from backlog_py.search.simple import SearchText, prepare_search_text, ranked_matches
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
@@ -399,12 +401,44 @@ class ReadOnlyRepository:
         }
 
     def _visible_task_candidates_from_markdown(self) -> dict[str, list[_VisibleTaskRecord]]:
-        candidates = [
-            *self._current_branch_records("tasks", self.project.backlog_dir / "tasks"),
-            *self._current_branch_records("completed", self.project.backlog_dir / "completed"),
-        ]
-        if self._include_active_branch_snapshots:
-            candidates.extend(_load_active_branch_records(self.project))
+        local = {
+            bucket: self._task_dir_records_cached(self.project.backlog_dir / bucket)
+            for bucket in ("tasks", "completed")
+        }
+        branch_records = (
+            _load_active_branch_records(self.project) if self._include_active_branch_snapshots else []
+        )
+        # Commit times only decide between different versions of one id. Every
+        # other id resolves the same without them, and finding them is a walk of
+        # the project's history: 9 of the 14 seconds a 6,700-task board took.
+        versions: dict[str, set[tuple[Path, str]]] = {}
+        for task in [*local["tasks"], *local["completed"], *(record.task for record in branch_records)]:
+            versions.setdefault(task.id.casefold(), set()).add((task.path, task.raw_source))
+        contested = {
+            bucket: [task for task in tasks if len(versions[task.id.casefold()]) > 1]
+            for bucket, tasks in local.items()
+        }
+        # An uncommitted file is newer than any commit, so it wins its id on git
+        # status alone -- which is what parallel agents taking one id leave.
+        uncommitted = uncommitted_task_paths(
+            self.project, [task.path for tasks in contested.values() for task in tasks]
+        ) or set()
+        settled = {task.id.casefold() for tasks in contested.values() for task in tasks if task.path in uncommitted}
+        candidates: list[_VisibleTaskRecord] = []
+        for bucket, tasks in local.items():
+            # One batched git call per directory instead of three per file.
+            timestamps = current_task_snapshot_timestamps(
+                self.project, [task.path for task in contested[bucket] if task.id.casefold() not in settled]
+            )
+            for task in tasks:
+                if task.path in uncommitted:
+                    committed_at = inf
+                elif task.id.casefold() in settled:
+                    committed_at = -inf  # loses to the uncommitted file, as any commit time would
+                else:
+                    committed_at = timestamps.get(task.path, inf)
+                candidates.append(_VisibleTaskRecord(bucket, task, committed_at))
+        candidates.extend(branch_records)
 
         # Each record's sort key is carried alongside it, so a candidate is
         # keyed once no matter how many rivals it is compared against.
@@ -450,15 +484,6 @@ class ReadOnlyRepository:
                 if candidate.bucket == "completed"
             ],
         }
-
-    def _current_branch_records(self, bucket: str, task_dir: Path) -> list[_VisibleTaskRecord]:
-        tasks = self._task_dir_records_cached(task_dir)
-        # One batched git call for the whole directory instead of three per file.
-        timestamps = current_task_snapshot_timestamps(self.project, [task.path for task in tasks])
-        return [
-            _VisibleTaskRecord(bucket, task, timestamps.get(task.path, inf))
-            for task in tasks
-        ]
 
     def _ensure_remote_refs(self) -> None:
         if not self._refresh_remote_refs:
@@ -515,8 +540,20 @@ def _load_tasks_from_dir(task_dir: Path, *, unparsed_paths: set[Path] | None = N
 
 
 def _load_active_branch_records(project: BacklogProject) -> list[_VisibleTaskRecord]:
-    records: list[_VisibleTaskRecord] = []
+    # Branches overwhelmingly share task files: 154 branches of one project held
+    # 684,212 copies of 7,451 distinct files. A version contests an id with its
+    # newest copy, and on a tie the later copy wins, so keeping one record per
+    # version -- its newest copy, re-inserted at the later of tied ones -- picks
+    # every winner the full list would, for a hundredth of the parsing.
+    newest: dict[tuple[str, str], GitTaskSnapshot] = {}
     for snapshot in list_active_branch_task_snapshots(project):
+        key = (snapshot.relative_path, snapshot.source)
+        kept = newest.get(key)
+        if kept is None or snapshot.committed_at >= kept.committed_at:
+            newest.pop(key, None)
+            newest[key] = snapshot
+    records: list[_VisibleTaskRecord] = []
+    for snapshot in newest.values():
         bucket = _bucket_for_snapshot(project, snapshot.relative_path)
         if bucket is None:
             continue

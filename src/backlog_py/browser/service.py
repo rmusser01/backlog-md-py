@@ -18,7 +18,7 @@ from http import HTTPStatus
 from importlib.resources import files
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Mapping, Sequence, TypedDict
+from typing import Callable, Mapping, Sequence, TypedDict
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
@@ -95,6 +95,11 @@ _CSP_SOURCE_PATTERN = re.compile(r"(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::[0-
 _SRI_DIGEST_SOURCE = r"sha(?:256|384|512)-[A-Za-z0-9+/_-]+={0,2}(?:\?[A-Za-z0-9._~%+/=-]*)?"
 _SRI_PATTERN = re.compile(rf"{_SRI_DIGEST_SOURCE}(?: {_SRI_DIGEST_SOURCE})*")
 _BOARD_REVISION_RETRY_MS = 5000
+# Each tab asks every retry interval. A check younger than this answers every
+# tab that asks within it, so a change shows up at most this much later than it
+# would otherwise, and a single tab -- whose last check is always older -- is
+# unaffected.
+_BOARD_REVISION_CHECK_MAX_AGE_SECONDS = _BOARD_REVISION_RETRY_MS / 1000 - 1
 _BROWSER_CONFIG_SETTING_KEYS = frozenset(
     (
         "activeBranchDays",
@@ -169,6 +174,7 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
     shutdown_lock: threading.Lock
     shutdown_requested_at: str | None
     scan_cache: ProjectScanCache
+    local_scan_cache: ProjectScanCache
 
 
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
@@ -184,6 +190,9 @@ def create_browser_server(*, project: BacklogProject, host: str, port: int) -> B
     server.shutdown_requested_at = None
     server.shutdown_lock = threading.Lock()
     server.scan_cache = ProjectScanCache()
+    # Settings and milestone counts read this checkout's tasks only, as
+    # MutableRepository does; rebuilt per request they took 15s on a large board.
+    server.local_scan_cache = ProjectScanCache(include_active_branch_snapshots=False)
     return server
 
 
@@ -233,6 +242,7 @@ def build_board_payload(
     milestone_filter: str | None = None,
     label_filters: Sequence[str] | None = None,
     cache: ProjectScanCache | None = None,
+    max_age: float = 0.0,
 ) -> dict[str, object]:
     """Return a JSON-serializable board snapshot for the browser service.
 
@@ -245,6 +255,7 @@ def build_board_payload(
             requests. Without one, every call re-reads and re-renders the whole
             project, which is what a fresh CLI invocation wants and what an HTTP
             request emphatically does not.
+        max_age: Passed to `ProjectScanCache.board_payload`.
 
     Returns:
         dict: the board payload with the requested view filters applied.
@@ -255,6 +266,7 @@ def build_board_payload(
             project,
             lambda repository: _build_cached_board_payload(project, repository),
             is_current=lambda snapshot: snapshot.is_current(datetime.now(timezone.utc)),
+            max_age=max_age,
         )
     else:
         repository = ReadOnlyRepository(project, refresh_remote_refs=False)
@@ -601,7 +613,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             project = replace(self.server.project, config=config)
             self._send_json(
                 HTTPStatus.OK,
-                {"settings": _config_settings_payload(config, project=project)},
+                {"settings": _config_settings_payload(config, project=project, tasks=self._local_tasks())},
             )
             return
         if path == "/api/settings/status-key":
@@ -619,7 +631,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return
         if path in {"/api/milestones", "/api/milestones/"}:
             try:
-                milestone_payload = _milestone_list_payload(self.server.project)
+                milestone_payload = _milestone_list_payload(self.server.project, self._local_tasks())
             except Exception as exc:
                 self._send_readonly_listing_error("milestones", exc)
                 return
@@ -757,7 +769,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 def update_project() -> BacklogProject:
                     project = self.server.project
                     project = replace(project, config=load_config(project.config_path))
-                    validated_settings = _validate_status_settings(project, project.config, settings)
+                    validated_settings = _validate_status_settings(project.config, settings, self._local_tasks)
                     config = set_config_values(project, validated_settings)
                     updated_project = replace(project, config=config)
                     self.server.project = updated_project
@@ -776,7 +788,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"settings": _config_settings_payload(updated_project.config, project=updated_project)},
+                {
+                    "settings": _config_settings_payload(
+                        updated_project.config, project=updated_project, tasks=self._local_tasks()
+                    )
+                },
             )
             return
 
@@ -806,7 +822,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
                 def create_milestone() -> tuple[MilestoneRecord, int]:
                     record = MilestoneService(self.server.project).add_milestone(**milestone_create_kwargs)
-                    return record, _milestone_reference_count(self.server.project, record)
+                    return record, _milestone_reference_count(self.server.project, record, self._local_tasks())
 
                 milestone, reference_count = with_project_write_lock(
                     self.server.project,
@@ -842,7 +858,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                         if existing.format == "legacy" and "due_date" in milestone_edit_kwargs:
                             raise MilestoneMutationError("Legacy milestones do not support dueDate")
                         record = service.edit_milestone(reference, **milestone_edit_kwargs)
-                        return record, _milestone_reference_count(self.server.project, record)
+                        return record, _milestone_reference_count(self.server.project, record, self._local_tasks())
 
                     milestone, reference_count = with_project_write_lock(
                         self.server.project,
@@ -856,7 +872,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                         service = MilestoneService(self.server.project)
                         _resolve_active_milestone_api_key(service, raw_key, reference)
                         record = service.archive_milestone(reference)
-                        return record, _milestone_reference_count(self.server.project, record)
+                        return record, _milestone_reference_count(self.server.project, record, self._local_tasks())
 
                     milestone, reference_count = with_project_write_lock(
                         self.server.project,
@@ -869,7 +885,7 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                     def remove_milestone() -> tuple[MilestoneRecord, int]:
                         service = MilestoneService(self.server.project)
                         record = _resolve_active_milestone_api_key(service, raw_key, reference)
-                        count = _milestone_reference_count(self.server.project, record)
+                        count = _milestone_reference_count(self.server.project, record, self._local_tasks())
                         if count and task_handling is None:
                             raise MilestoneConflictError(
                                 "Referenced milestone removal requires taskHandling to be keep or clear"
@@ -1156,6 +1172,13 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         """
         return self.server.scan_cache.repository(_refreshed_project(self.server.project))
 
+    def _local_tasks(self) -> list[TaskRecord]:
+        """This checkout's visible tasks, as MutableRepository lists them, from a cached scan."""
+        project = _refreshed_project(self.server.project)
+        # Without branch scanning, the board's own scan holds exactly these.
+        cache = self.server.local_scan_cache if project.config.check_active_branches else self.server.scan_cache
+        return cache.repository(project).list_tasks()
+
     def _send_json(
         self,
         status: HTTPStatus,
@@ -1193,7 +1216,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
         else:
             # The revision poll runs on a timer for every open tab; without the
             # cache it rebuilt the entire board on each tick.
-            payload = build_board_payload(self.server.project, cache=self.server.scan_cache)
+            payload = build_board_payload(
+                self.server.project,
+                cache=self.server.scan_cache,
+                max_age=_BOARD_REVISION_CHECK_MAX_AGE_SECONDS,
+            )
             event = _board_revision_sse_event(str(payload.get("revision", "")))
         data = event.encode("utf-8")
         content_type = "text/event-stream; charset=utf-8"
@@ -1763,9 +1790,9 @@ def _render_task_milestone_options(choices: Sequence[Mapping[str, object]]) -> s
     return "".join(options)
 
 
-def _milestone_list_payload(project: BacklogProject) -> dict[str, object]:
+def _milestone_list_payload(project: BacklogProject, tasks: Sequence[TaskRecord]) -> dict[str, object]:
     records = MilestoneService(project).list_milestones(include_archived=True)
-    reference_counts = _milestone_reference_counts(project, records)
+    reference_counts = _milestone_reference_counts(records, tasks)
     return {
         "milestones": [
             _milestone_payload(record, task_reference_count=reference_counts.get(record.path, 0))
@@ -1790,22 +1817,20 @@ def _milestone_payload(record: MilestoneRecord, *, task_reference_count: int) ->
     }
 
 
-def _milestone_reference_count(project: BacklogProject, record: MilestoneRecord) -> int:
+def _milestone_reference_count(
+    project: BacklogProject, record: MilestoneRecord, tasks: Sequence[TaskRecord]
+) -> int:
     records = MilestoneService(project).list_milestones(include_archived=True)
-    return _milestone_reference_counts(project, records).get(record.path, 0)
+    return _milestone_reference_counts(records, tasks).get(record.path, 0)
 
 
 def _milestone_reference_counts(
-    project: BacklogProject,
     records: list[MilestoneRecord],
+    tasks: Sequence[TaskRecord],
 ) -> dict[Path, int]:
+    """How many of ``tasks`` (this checkout's, not other branches') name each milestone."""
     counts = {record.path: 0 for record in records}
-    repository = ReadOnlyRepository(
-        project,
-        refresh_remote_refs=False,
-        include_active_branch_snapshots=False,
-    )
-    for task in repository.list_tasks():
+    for task in tasks:
         raw_reference = task.parsed.frontmatter.get("milestone")
         if isinstance(raw_reference, bool) or not isinstance(raw_reference, (str, int)):
             continue
@@ -2743,8 +2768,10 @@ def _dod_defaults_items_from_payload(payload: object) -> list[str]:
     return normalize_definition_of_done_defaults(payload["items"])
 
 
-def _config_settings_payload(config: BacklogConfig, *, project: BacklogProject) -> dict[str, object]:
-    status_rows = _status_rows(project, config)
+def _config_settings_payload(
+    config: BacklogConfig, *, project: BacklogProject, tasks: Sequence[TaskRecord]
+) -> dict[str, object]:
+    status_rows = _status_rows(config, tasks)
     return {
         "activeBranchDays": config.active_branch_days,
         "autoCommit": config.auto_commit,
@@ -2769,8 +2796,7 @@ def _status_key(status: str) -> str:
     return unicodedata.normalize("NFC", status).casefold()
 
 
-def _status_rows(project: BacklogProject, config: BacklogConfig) -> list[dict[str, object]]:
-    tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
+def _status_rows(config: BacklogConfig, tasks: Sequence[TaskRecord]) -> list[dict[str, object]]:
     statuses = list(config.statuses or [])
     if not statuses:
         statuses = []
@@ -2793,9 +2819,9 @@ def _status_rows(project: BacklogProject, config: BacklogConfig) -> list[dict[st
 
 
 def _validate_status_settings(
-    project: BacklogProject,
     current: BacklogConfig,
     updates: Mapping[str, str],
+    local_tasks: Callable[[], Sequence[TaskRecord]],
 ) -> dict[str, str]:
     if "statuses" not in updates and "defaultStatus" not in updates:
         return dict(updates)
@@ -2819,7 +2845,7 @@ def _validate_status_settings(
         if "defaultStatus" in updates or canonical_default != current.default_status:
             validated["defaultStatus"] = canonical_default
 
-        tasks = MutableRepository(project, refresh_remote_refs=False).list_tasks()
+        tasks = local_tasks()
         prior_statuses = current.statuses or [*(task.status for task in tasks), current.default_status]
         prior_status_keys = {_status_key(status) for status in prior_statuses}
         for task in tasks:

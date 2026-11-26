@@ -21,6 +21,26 @@
   parsed with libyaml when PyYAML has it (about 9 times faster, same values;
   a malformed header still reports the same error), and browser task changes
   reuse the board's cached scan instead of re-reading every task file.
+- Make project scans fast on repositories with long histories and many
+  branches. Which file wins a task id is unchanged. Most of a scan was `git log`
+  walks of the whole history, one for this checkout and one per active branch,
+  repeated on every rescan. Now:
+  - commit times are only looked up for ids that two different files claim,
+    and not at all when one of them is uncommitted, since it is newer than any
+    commit;
+  - a walk's answer is kept until its branch moves, so a rescan walks only the
+    branches that changed;
+  - each distinct task file is parsed once, rather than once per branch that
+    holds a copy;
+  - walks skip rename detection, which cost up to half their time.
+
+  On a 6,700-task project the browser board went from 14 s to 5 s and the
+  Settings and Milestones dialogs from 15 s to under half a second.
+  On a project with 154 active branches, a rescan after a commit takes
+  5–11 s where it used to repeat the whole 32-minute scan, and the first scan
+  takes about 18 minutes.
+- Browser tabs open on one board share a recent freshness check instead of
+  each running its own every five seconds, and off-screen cards skip layout.
 
 ### Fixed
 

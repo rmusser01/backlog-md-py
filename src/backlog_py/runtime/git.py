@@ -36,6 +36,21 @@ _WORKTREE_CACHE: dict[str, tuple[float, bool, bool]] = {}
 # work_dir -> (probe time, path of work_dir relative to the repo root: "" or "pkg/")
 _PREFIX_CACHE: dict[str, tuple[float, str]] = {}
 
+# A commit's history never changes, so a log walk's answer is keyed by the commit
+# it started from and survives until that ref moves. Walks are what made a scan
+# slow: ~10s each on a large repository, one per active branch.
+# (work_dir, pathspecs) -> (HEAD commit, first-sighting times, walk reached the root)
+_HEAD_WALKS: dict[tuple[str, tuple[str, ...]], tuple[str, dict[str, float], bool]] = {}
+# (work_dir, backlog path) -> {branch tip: task entries}. Holds the tips of the
+# latest scan only, so a branch that moves on drops its old answer.
+# ponytail: module-global, never released for a project the process stops
+# reading; tie it to ProjectScanCache eviction if a daemon serves many repos.
+_BRANCH_WALKS: dict[tuple[str, str], dict[str, dict[str, tuple[str, float]]]] = {}
+# A walk for a few paths first reads this many commits, which answers paths
+# that changed recently; otherwise it reads the whole log, so a walk that must
+# reach the root costs one short page more than it did.
+_FIRST_LOG_PAGE = 256
+
 
 @dataclass(frozen=True)
 class AutoCommitContext:
@@ -125,42 +140,63 @@ def current_task_snapshot_timestamps(
     write lock. This resolves the whole set with one status call and one log walk.
     """
     results: dict[Path, float] = {path: inf for path in paths}
-    if not paths:
+    located = _task_git_paths(project, paths)
+    if located is None:
         return results
+    git_paths, scope = located
     work_dir = project.root
-    if not _is_git_worktree(work_dir):
-        return results
-
-    relative_paths: dict[Path, str] = {}
-    for path in paths:
-        relative = _relative_path(project.root, path)
-        if relative is not None:
-            relative_paths[path] = relative
-    if not relative_paths:
-        return results
-
-    # git reports paths relative to the REPOSITORY root, which is not necessarily
-    # the project root — `discover_project` stops at the first backlog/config.yml,
-    # so <repo>/pkg/backlog/config.yml gives project.root == <repo>/pkg. Translate
-    # into git's path-space before comparing, or every task silently reports inf.
-    prefix = _repository_prefix(work_dir)
-    git_paths = {path: f"{prefix}{relative}" for path, relative in relative_paths.items()}
-
-    # Pathspecs are resolved relative to cwd (the project root), while the output
-    # above is repo-relative — the two path-spaces must not be mixed.
-    scope = sorted({posixpath.dirname(value) or "." for value in relative_paths.values()})
     dirty = _dirty_relative_paths(work_dir, scope)
     if dirty is None:
         # Status failed: every path stays ``inf``, matching the per-file
         # implementation's fail-closed behaviour.
         return results
-    committed = _last_commit_timestamps(work_dir, scope)
+    clean = {git_path for git_path in git_paths.values() if git_path not in dirty}
+    committed = _head_commit_timestamps(work_dir, scope, clean) if clean else {}
 
     for path, git_path in git_paths.items():
         if git_path in dirty:
             continue
         results[path] = committed.get(git_path, inf)
     return results
+
+
+def uncommitted_task_paths(project: BacklogProject, paths: Sequence[Path]) -> set[Path] | None:
+    """The ``paths`` that are modified or untracked, or ``None`` when git cannot say."""
+    located = _task_git_paths(project, paths)
+    if located is None:
+        return None
+    git_paths, scope = located
+    dirty = _dirty_relative_paths(project.root, scope)
+    if dirty is None:
+        return None
+    return {path for path, git_path in git_paths.items() if git_path in dirty}
+
+
+def _task_git_paths(
+    project: BacklogProject, paths: Sequence[Path]
+) -> tuple[dict[Path, str], list[str]] | None:
+    """Each path as git names it, and the pathspecs that cover them; ``None`` outside a worktree."""
+    if not paths or not _is_git_worktree(project.root):
+        return None
+    relative_paths: dict[Path, str] = {}
+    for path in paths:
+        relative = _relative_path(project.root, path)
+        if relative is not None:
+            relative_paths[path] = relative
+    if not relative_paths:
+        return None
+
+    # git reports paths relative to the REPOSITORY root, which is not necessarily
+    # the project root — `discover_project` stops at the first backlog/config.yml,
+    # so <repo>/pkg/backlog/config.yml gives project.root == <repo>/pkg. Translate
+    # into git's path-space before comparing, or every task silently reports inf.
+    prefix = _repository_prefix(project.root)
+    git_paths = {path: f"{prefix}{relative}" for path, relative in relative_paths.items()}
+
+    # Pathspecs are resolved relative to cwd (the project root), while the output
+    # above is repo-relative — the two path-spaces must not be mixed.
+    scope = sorted({posixpath.dirname(value) or "." for value in relative_paths.values()})
+    return git_paths, scope
 
 
 def _repository_prefix(work_dir: Path) -> str:
@@ -206,35 +242,82 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
     return dirty
 
 
-def _last_commit_timestamps(work_dir: Path, scope: Sequence[str], ref: str = "HEAD") -> dict[str, float]:
-    """Most recent commit timestamp per path under ``scope``, in one log walk."""
-    log_args = ("-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only")
-    # `--name-only` prints nothing for a merge commit, so a file whose content was
-    # produced while resolving a conflict would be attributed to an older ancestor
-    # instead of the merge. Ordinary merges are simplified out of a path-limited
-    # log and so are unaffected. `--diff-merges` needs git >= 2.31; older git
-    # rejects the option outright, which would report *every* task as unknown, so
-    # fall back to the plain walk when git says it does not know the option.
-    result = _run_git(work_dir, *log_args, "--diff-merges=first-parent", ref, "--", *scope)
-    if result.returncode != 0 and "diff-merges" in (result.stderr or ""):
-        result = _run_git(work_dir, *log_args, ref, "--", *scope)
-    if result.returncode != 0:
+def _head_commit_timestamps(work_dir: Path, scope: Sequence[str], wanted: set[str]) -> dict[str, float]:
+    """`_last_commit_timestamps` at HEAD for ``wanted``, reusing an earlier walk of the same commit."""
+    head = _run_git(work_dir, "rev-parse", "--verify", "--quiet", "HEAD")
+    if head.returncode != 0:
+        return {}  # no commits yet
+    commit = head.stdout.strip()
+    key = (str(work_dir), tuple(scope))
+    cached = _HEAD_WALKS.get(key)
+    if cached is not None and cached[0] == commit and (cached[2] or wanted <= cached[1].keys()):
+        return cached[1]
+    walk = _last_commit_timestamps(work_dir, scope, commit, wanted=wanted)
+    if walk is None:
         return {}
-    timestamps: dict[str, float] = {}
-    for chunk in result.stdout.split("\0"):
-        if not chunk.strip():
-            continue
-        lines = [line for line in chunk.splitlines() if line.strip()]
-        if not lines:
-            continue
-        try:
-            committed_at = float(lines[0].strip())
-        except ValueError:
-            continue
-        for name in lines[1:]:
-            # log walks newest-first, so the first sighting is the latest commit.
-            timestamps.setdefault(name, committed_at)
-    return timestamps
+    _HEAD_WALKS[key] = (commit, *walk)
+    return walk[0]
+
+
+def _last_commit_timestamps(
+    work_dir: Path,
+    scope: Sequence[str],
+    ref: str = "HEAD",
+    *,
+    wanted: Collection[str] = (),
+) -> tuple[dict[str, float], bool] | None:
+    """Most recent commit timestamp per path under ``scope``, from one log walk.
+
+    With ``wanted``, the newest commits are read first, and the rest only if
+    some of those paths were not seen. A page is a prefix of the same
+    newest-first log, so a path's first sighting is the one a full walk reports.
+
+    Returns:
+        The timestamps and whether the walk reached the root, or ``None`` when
+        git failed.
+    """
+    # `--no-renames`: rename detection compares file contents for every commit
+    # that moves a task between directories, up to half the cost of a walk. All
+    # it changes is that a renamed-away path is also listed, as deleted. A path
+    # still present at the tip was re-added after that, and the newer commit is
+    # sighted first unless commit dates run backwards. Same answers for 33k task
+    # paths across two large repositories.
+    log_args = ("-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only", "--no-renames")
+    limit = _FIRST_LOG_PAGE if wanted else 0
+    while True:
+        page = ("-n", str(limit)) if limit else ()
+        # `--name-only` prints nothing for a merge commit, so a file whose content
+        # was produced while resolving a conflict would be attributed to an older
+        # ancestor instead of the merge. Ordinary merges are simplified out of a
+        # path-limited log and so are unaffected. `--diff-merges` needs git >= 2.31;
+        # older git rejects the option outright, which would report *every* task
+        # as unknown, so fall back to the plain walk when git says it does not
+        # know the option.
+        result = _run_git(work_dir, *log_args, *page, "--diff-merges=first-parent", ref, "--", *scope)
+        if result.returncode != 0 and "diff-merges" in (result.stderr or ""):
+            result = _run_git(work_dir, *log_args, *page, ref, "--", *scope)
+        if result.returncode != 0:
+            return None
+        timestamps: dict[str, float] = {}
+        commits = 0
+        for chunk in result.stdout.split("\0"):
+            if not chunk.strip():
+                continue
+            lines = [line for line in chunk.splitlines() if line.strip()]
+            if not lines:
+                continue
+            try:
+                committed_at = float(lines[0].strip())
+            except ValueError:
+                continue
+            commits += 1
+            for name in lines[1:]:
+                # log walks newest-first, so the first sighting is the latest commit.
+                timestamps.setdefault(name, committed_at)
+        complete = not limit or commits < limit
+        if complete or all(name in timestamps for name in wanted):
+            return timestamps, complete
+        limit = 0
 
 
 def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSnapshot]:
@@ -250,15 +333,23 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
         return []
 
     refs = _recent_branch_tips(project, _current_branch_name(work_dir))
+    walks_key = (str(work_dir), backlog_path)
+    known = _BRANCH_WALKS.get(walks_key, {})
+    walked: dict[str, dict[str, tuple[str, float]]] = {}
     entries: list[tuple[str, str, str, float]] = []
     for index, (ref, tip) in enumerate(refs, start=1):
-        # This walk takes minutes on a project with many active branches, and
-        # said nothing at all while it ran.
-        progress.report(f"Reading branch {index}/{len(refs)}: {ref.rsplit('/', 1)[-1]}")
-        for relative_path, (oid, committed_at) in _task_entries_for_ref(
-            work_dir, tip, backlog_path
-        ).items():
+        ref_entries = walked.get(tip, known.get(tip))
+        final = ref_entries is not None
+        if ref_entries is None:
+            # This walk takes minutes on a project with many active branches, and
+            # said nothing at all while it ran.
+            progress.report(f"Reading branch {index}/{len(refs)}: {ref.rsplit('/', 1)[-1]}")
+            ref_entries, final = _task_entries_for_ref(work_dir, tip, backlog_path)
+        if final:
+            walked[tip] = ref_entries
+        for relative_path, (oid, committed_at) in ref_entries.items():
             entries.append((ref, relative_path, oid, committed_at))
+    _BRANCH_WALKS[walks_key] = walked
 
     # Branches overwhelmingly share task files, and a shared file is one blob
     # with one id, so the unique-id set is a small fraction of the entry count.
@@ -567,8 +658,14 @@ def _current_branch_name(work_dir: Path) -> str:
 
 def _task_entries_for_ref(
     work_dir: Path, ref: str, backlog_path: str
-) -> dict[str, tuple[str, float]]:
-    """Blob id and last-commit timestamp for every task file at ``ref``."""
+) -> tuple[dict[str, tuple[str, float]], bool]:
+    """Blob id and last-commit timestamp for every task file at ``ref``.
+
+    Returns:
+        The entries, and whether they are final for ``ref``: not when a git call
+        failed, so a passing failure is retried by the next scan instead of
+        being remembered.
+    """
     result = _run_git(
         work_dir,
         # Without this git C-quotes any non-ASCII name, and the quoted form
@@ -583,7 +680,7 @@ def _task_entries_for_ref(
         f"{backlog_path}/completed",
     )
     if result.returncode != 0:
-        return {}
+        return {}, False
     # "<mode> <type> <oid>\t<path>"
     oids: dict[str, str] = {}
     for line in result.stdout.splitlines():
@@ -594,14 +691,17 @@ def _task_entries_for_ref(
         if len(fields) != 3 or fields[1] != "blob":
             continue
         if _is_task_markdown_path(name, backlog_path):
-            oids[name] = fields[2]
+            # Branches share nearly every name and blob, and these entries are
+            # kept for each branch: interned, they are stored once.
+            oids[sys.intern(name)] = sys.intern(fields[2])
     names = list(oids)
     if not names:
-        return {}
+        return {}, True
     # One log walk for the whole ref instead of one per task file.
-    committed = _last_commit_timestamps(
+    walk = _last_commit_timestamps(
         work_dir, [f"{backlog_path}/tasks", f"{backlog_path}/completed"], ref=ref
     )
+    committed = walk[0] if walk is not None else {}
     # A path the walk never reported (an unsimplified merge, a shallow clone)
     # falls back to the ref tip, as the per-file form did — resolved at most once.
     ref_tip: float | None = None
@@ -613,7 +713,7 @@ def _task_entries_for_ref(
                 ref_tip = _ref_commit_timestamp(work_dir, ref)
             committed_at = ref_tip
         entries[name] = (oids[name], committed_at)
-    return entries
+    return entries, walk is not None
 
 
 def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
