@@ -11,6 +11,11 @@ from loguru import logger
 from backlog_py.core.models import ChecklistItem, ParsedTaskMarkdown, TaskMarkdownSection
 
 
+# libyaml's parser with PyYAML's safe constructor: same values, ~9x faster to
+# parse, which is most of the cost of scanning a project. Falls back when PyYAML
+# was built without libyaml.
+_YAML_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
 _SECTION_BEGIN_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):BEGIN -->\s*$")
 _SECTION_END_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):END -->\s*$")
 _MARKER_BEGIN_RE = re.compile(r"^<!-- (?P<name>[A-Z0-9_]+):BEGIN -->\s*$")
@@ -81,12 +86,18 @@ def _split_frontmatter(source: str) -> tuple[str | None, dict[str, Any], str]:
     raw_frontmatter = "".join(lines[: closing_index + 1])
     yaml_source = "".join(lines[1:closing_index])
     try:
-        loaded = yaml.safe_load(yaml_source) or {}
-    except yaml.YAMLError as exc:
-        raise TaskMarkdownParseError(
-            code="invalid_frontmatter",
-            message=f"Invalid YAML frontmatter: {exc}",
-        ) from exc
+        # Always CSafeLoader or SafeLoader; bandit only accepts those by name.
+        loaded = yaml.load(yaml_source, Loader=_YAML_SAFE_LOADER) or {}  # nosec B506
+    except yaml.YAMLError:
+        # libyaml's errors quote no source snippet; the pure-Python parser's
+        # do, and it stays the reference for what parses. Errors are rare.
+        try:
+            loaded = yaml.safe_load(yaml_source) or {}
+        except yaml.YAMLError as exc:
+            raise TaskMarkdownParseError(
+                code="invalid_frontmatter",
+                message=f"Invalid YAML frontmatter: {exc}",
+            ) from exc
     if not isinstance(loaded, dict):
         raise TaskMarkdownParseError(
             code="invalid_frontmatter",

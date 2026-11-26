@@ -65,3 +65,31 @@ def test_warm_board_expires_leases_without_reparsing_tasks(tmp_path, monkeypatch
     assert next_board["queueCategories"] == ["stale_claim"]
     assert next_board["revision"] != first["revision"]
     assert cache.repository(project) is repository
+
+
+def test_a_racy_write_does_not_rescan_once_it_ages(tmp_path, monkeypatch):
+    """A file written just now is fingerprinted by content; once its mtime aged
+    out of the racy window the hash used to vanish from the fingerprint, so an
+    unchanged project was re-scanned two seconds after every write."""
+    import os
+
+    from backlog_py.indexing.sqlite import RACY_MTIME_WINDOW_NS
+    from backlog_py.runtime import scan_cache
+
+    project = init_project(tmp_path, no_git=True).project
+    task = MutableRepository(project).create_task(title="Fresh", status="To Do")
+    cache = ProjectScanCache()
+    repository = cache.repository(project)
+    stat = task.path.stat()
+
+    real_time_ns = scan_cache.time.time_ns
+    monkeypatch.setattr(scan_cache.time, "time_ns", lambda: real_time_ns() + 2 * RACY_MTIME_WINDOW_NS)
+    assert cache.repository(project) is repository, "an unchanged project was re-scanned"
+
+    # Same size, same mtime, different content: only the retained hash sees it.
+    source = task.path.read_text(encoding="utf-8")
+    task.path.write_text(source.replace("Fresh", "Stale"), encoding="utf-8")
+    os.utime(task.path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    refreshed = cache.repository(project)
+    assert refreshed is not repository
+    assert refreshed.get_task(task.id).title == "Stale"

@@ -19,11 +19,12 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Callable, TypeVar, cast
 
 from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import ReadOnlyRepository
-from backlog_py.indexing.sqlite import _file_signature
+from backlog_py.indexing.sqlite import _file_signature, _sha256
 from backlog_py.runtime.git import read_index_git_freshness
 
 _T = TypeVar("_T")
@@ -50,6 +51,7 @@ class ProjectScanCache:
         self._include_active_branch_snapshots = include_active_branch_snapshots
         self._lock = threading.Lock()
         self._signature: str | None = None
+        self._hashed_paths: frozenset[str] = frozenset()
         self._repository: ReadOnlyRepository | None = None
         self._board_payload: object | None = None
         self._board_policy_signature: dict[str, object] | None = None
@@ -84,9 +86,17 @@ class ProjectScanCache:
             return payload
 
     def _refresh_locked(self, project: BacklogProject) -> ReadOnlyRepository:
-        signature = _project_signature(project)
+        # Files that were racy when the scan was built carry a content hash in
+        # its signature. Hash them again here, or the hash would vanish once
+        # their mtime ages out of the racy window and an unchanged project
+        # would be re-scanned two seconds after every write.
+        signature, hashed = _project_signature(project, hash_paths=self._hashed_paths)
         if signature != self._signature or self._repository is None:
-            self._signature = signature
+            if self._hashed_paths:
+                # Re-key on the files racy right now, so each rebuild resets the
+                # set of files re-hashed on every check instead of growing it.
+                signature, hashed = _project_signature(project)
+            self._signature, self._hashed_paths = signature, hashed
             # refresh_remote_refs stays off: a cached scan must not fire network
             # calls on a request path.
             self._repository = ReadOnlyRepository(
@@ -102,12 +112,34 @@ class ProjectScanCache:
         return self._repository
 
 
-def _project_signature(project: BacklogProject) -> str:
-    """A cheap fingerprint of files and Git inputs used by a cached scan."""
+def _project_signature(
+    project: BacklogProject,
+    *,
+    hash_paths: frozenset[str] = frozenset(),
+) -> tuple[str, frozenset[str]]:
+    """A cheap fingerprint of files and Git inputs used by a cached scan.
+
+    Args:
+        project: The project to fingerprint.
+        hash_paths: Relative paths to content-hash even when no longer racy.
+
+    Returns:
+        The fingerprint, and the relative paths whose content it hashed.
+    """
     now_ns = time.time_ns()
     signatures: list[dict[str, object]] = []
+
+    def add(path: Path) -> None:
+        signature = _file_signature(project.root, path, now_ns=now_ns)
+        if "sha256" not in signature and signature.get("relative_path") in hash_paths:
+            try:
+                signature["sha256"] = _sha256(path)
+            except OSError:
+                signature = {"relative_path": str(path), "missing": True}
+        signatures.append(signature)
+
     if project.config_path.is_file():
-        signatures.append(_file_signature(project.root, project.config_path, now_ns=now_ns))
+        add(project.config_path)
     for bucket in (
         "tasks",
         "completed",
@@ -120,12 +152,13 @@ def _project_signature(project: BacklogProject) -> str:
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("*.md")):
-            signatures.append(_file_signature(project.root, path, now_ns=now_ns))
-    return json.dumps(
+            add(path)
+    fingerprint = json.dumps(
         {"config": asdict(project.config), "files": signatures, "git": read_index_git_freshness(project)},
         sort_keys=True,
         separators=(",", ":"),
     )
+    return fingerprint, frozenset(str(item["relative_path"]) for item in signatures if "sha256" in item)
 
 
 # A parsed repository is large, so this cache is bounded twice over: by how many

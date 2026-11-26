@@ -943,7 +943,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.CREATED,
-                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+                {
+                    "task": _task_detail_payload(
+                        task, project=self.server.project, mutable=True, repository=self._cached_repository()
+                    )
+                },
             )
             return
 
@@ -958,7 +962,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 revision = _required_string_field(payload, "revision") if "revision" in payload else None
 
                 def edit_task() -> TaskRecord:
-                    repository = _mutable_browser_task_repository(self.server.project, edit_task_id)
+                    repository = _mutable_browser_task_repository(
+                        self.server.project, edit_task_id, self.server.scan_cache
+                    )
                     current = repository.get_task(edit_task_id)
                     if revision is not None and revision != _task_revision(current):
                         raise _BrowserConflictError(
@@ -984,7 +990,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+                {
+                    "task": _task_detail_payload(
+                        task, project=self.server.project, mutable=True, repository=self._cached_repository()
+                    )
+                },
             )
             return
 
@@ -997,7 +1007,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 checklist_kwargs = _task_checklist_kwargs_from_payload(self._read_json_body())
 
                 def edit_task_checklist() -> TaskRecord:
-                    repository = _mutable_browser_task_repository(self.server.project, checklist_task_id)
+                    repository = _mutable_browser_task_repository(
+                        self.server.project, checklist_task_id, self.server.scan_cache
+                    )
                     return repository.edit_task(checklist_task_id, **checklist_kwargs)
 
                 task = with_project_write_lock(
@@ -1013,7 +1025,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+                {
+                    "task": _task_detail_payload(
+                        task, project=self.server.project, mutable=True, repository=self._cached_repository()
+                    )
+                },
             )
             return
 
@@ -1024,7 +1040,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             try:
                 def archive_task() -> TaskRecord:
-                    repository = _mutable_browser_task_repository(self.server.project, archive_task_id)
+                    repository = _mutable_browser_task_repository(
+                        self.server.project, archive_task_id, self.server.scan_cache
+                    )
                     return repository.archive_task(archive_task_id)
 
                 task = with_project_write_lock(
@@ -1040,7 +1058,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"task": _task_detail_payload(task, project=self.server.project, mutable=True)},
+                {
+                    "task": _task_detail_payload(
+                        task, project=self.server.project, mutable=True, repository=self._cached_repository()
+                    )
+                },
             )
             return
 
@@ -1056,7 +1078,9 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             status = _task_status_from_payload(self._read_json_body())
 
             def move_task() -> TaskRecord:
-                repository = _mutable_browser_task_repository(self.server.project, task_id)
+                repository = _mutable_browser_task_repository(
+                    self.server.project, task_id, self.server.scan_cache
+                )
                 return repository.move_task_to_status(task_id, status)
 
             task = with_project_write_lock(
@@ -1073,7 +1097,11 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
 
         self._send_json(
             HTTPStatus.OK,
-            {"task": _task_payload(task, project=self.server.project, mutable=True)},
+            {
+                "task": _task_payload(
+                    task, project=self.server.project, mutable=True, repository=self._cached_repository()
+                )
+            },
         )
 
     def log_message(self, format: str, *args: object) -> None:
@@ -1119,6 +1147,14 @@ class _BrowserHttpHandler(BaseHTTPRequestHandler):
             return False
         parsed = urlparse(origin)
         return parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS and parsed.netloc == host
+
+    def _cached_repository(self) -> ReadOnlyRepository:
+        """The board's scan, current for the project as it is on disk now.
+
+        A mutation response that reuses it pays for the rescan the browser's
+        follow-up page reload would otherwise pay for again.
+        """
+        return self.server.scan_cache.repository(_refreshed_project(self.server.project))
 
     def _send_json(
         self,
@@ -1894,12 +1930,12 @@ def _local_task_signatures(
 def _browser_task_provenance(
     project: BacklogProject,
     task_id: str,
+    cache: ProjectScanCache,
 ) -> tuple[BacklogProject, TaskRecord, MutableRepository, bool]:
     current_project = _refreshed_project(project)
-    visible_task = ReadOnlyRepository(
-        current_project,
-        refresh_remote_refs=False,
-    ).get_task(task_id)
+    # The board's cached scan is checked for freshness on every call, so it
+    # answers "which record is visible" without re-parsing every task file.
+    visible_task = cache.repository(current_project).get_task(task_id)
     local_repository = MutableRepository(current_project, refresh_remote_refs=False)
     try:
         local_task = local_repository.get_task(task_id)
@@ -1913,8 +1949,9 @@ def _browser_task_provenance(
 def _mutable_browser_task_repository(
     project: BacklogProject,
     task_id: str,
+    cache: ProjectScanCache,
 ) -> MutableRepository:
-    _, _, local_repository, mutable = _browser_task_provenance(project, task_id)
+    _, _, local_repository, mutable = _browser_task_provenance(project, task_id, cache)
     if not mutable:
         raise TaskMutationError(f"Task is read only in the browser: {task_id}")
     return local_repository
