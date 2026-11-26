@@ -86,7 +86,8 @@ def _split_frontmatter(source: str) -> tuple[str | None, dict[str, Any], str]:
     raw_frontmatter = "".join(lines[: closing_index + 1])
     yaml_source = "".join(lines[1:closing_index])
     try:
-        loaded = yaml.load(yaml_source, Loader=_YAML_SAFE_LOADER) or {}
+        # Always CSafeLoader or SafeLoader; bandit only accepts those by name.
+        loaded = yaml.load(yaml_source, Loader=_YAML_SAFE_LOADER) or {}  # nosec B506
     except yaml.YAMLError:
         # libyaml's errors quote no source snippet; the pure-Python parser's
         # do, and it stays the reference for what parses. Errors are rare.
