@@ -14,6 +14,20 @@
   the same matcher and are about 15 times faster.
 - The TUI search dialog no longer re-reads every task file on each keystroke.
   It reuses one scan until a task file, the config or the Git state changes.
+- Make browser board actions 3–4 times faster on large projects. On a
+  2,000-task project a drag-and-drop status move plus the page reload that
+  follows drops from 4.6 s to 1.9 s of CPU time, a task edit from 3.3 s to
+  0.9 s, and a checklist toggle from 2.5 s to 0.8 s. Task frontmatter is now
+  parsed with libyaml when PyYAML has it (about 9 times faster, same values;
+  a malformed header still reports the same error), and browser task changes
+  reuse the board's cached scan instead of re-reading every task file.
+
+### Fixed
+
+- A cached project scan (browser, MCP server, daemon, TUI) no longer re-reads
+  every task file about two seconds after any write. A recently written file
+  is fingerprinted by its content, and that hash used to drop out of the
+  fingerprint once the file aged, which made an unchanged project look changed.
 
 ## 2.2.0 - 2026-10-19
 
