@@ -36,20 +36,18 @@ _WORKTREE_CACHE: dict[str, tuple[float, bool, bool]] = {}
 # work_dir -> (probe time, path of work_dir relative to the repo root: "" or "pkg/")
 _PREFIX_CACHE: dict[str, tuple[float, str]] = {}
 
-# A commit's history never changes, so a log walk's answer is keyed by the commit
-# it started from and survives until that ref moves. Walks are what made a scan
-# slow: ~10s each on a large repository, one per active branch.
-# (work_dir, pathspecs) -> (HEAD commit, first-sighting times, walk reached the root)
-_HEAD_WALKS: dict[tuple[str, tuple[str, ...]], tuple[str, dict[str, float], bool]] = {}
-# (work_dir, backlog path) -> {branch tip: task entries}. Holds the tips of the
-# latest scan only, so a branch that moves on drops its old answer.
+# A commit's history never changes, so the answers below hold until a ref moves.
+# Each holds the latest scan's refs only, so a moved ref drops its old answer.
 # ponytail: module-global, never released for a project the process stops
-# reading; tie it to ProjectScanCache eviction if a daemon serves many repos.
-_BRANCH_WALKS: dict[tuple[str, str], dict[str, dict[str, tuple[str, float]]]] = {}
-# A walk for a few paths first reads this many commits, which answers paths
-# that changed recently; otherwise it reads the whole log, so a walk that must
-# reach the root costs one short page more than it did.
-_FIRST_LOG_PAGE = 256
+# reading; tie them to ProjectScanCache eviction if a daemon serves many repos.
+# (work_dir, backlog path) -> (commits walked from, (path, blob id) -> commit time)
+_CONTENT_WALKS: dict[tuple[str, str], tuple[frozenset[str], dict[tuple[str, str], float]]] = {}
+# (work_dir, backlog path) -> {branch tip: {task path: blob id}}
+_BRANCH_TREES: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+# That walk reads the whole task history of every active branch: local work,
+# not a hang, so the usual cap would only turn a slow disk into wrong ranking.
+# 3 to 5s for 150 branches of a 4,700-task repository.
+_CONTENT_WALK_TIMEOUT_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -133,15 +131,16 @@ def maybe_fetch_remote_refs(project: BacklogProject) -> None:
 def current_task_snapshot_timestamps(
     project: BacklogProject, paths: Sequence[Path]
 ) -> dict[Path, float]:
-    """Checkout timestamps for many task files using a bounded number of git calls.
+    """When each task file's content was last committed, from `_task_content_dates`.
 
-    The per-file form cost three subprocesses each (worktree probe, status, log),
-    so a scan of N tasks forked O(3N) git processes while holding the project
-    write lock. This resolves the whole set with one status call and one log walk.
+    A modified, untracked or otherwise unknown file reports ``inf``, newer than
+    any commit. A bounded number of git calls answers the whole set: the
+    per-file form forked three per task while holding the project write lock.
     """
     results: dict[Path, float] = {path: inf for path in paths}
     located = _task_git_paths(project, paths)
-    if located is None:
+    backlog_path = _relative_backlog_path(project)
+    if located is None or backlog_path is None:
         return results
     git_paths, scope = located
     work_dir = project.root
@@ -150,13 +149,16 @@ def current_task_snapshot_timestamps(
         # Status failed: every path stays ``inf``, matching the per-file
         # implementation's fail-closed behaviour.
         return results
-    clean = {git_path for git_path in git_paths.values() if git_path not in dirty}
-    committed = _head_commit_timestamps(work_dir, scope, clean) if clean else {}
-
-    for path, git_path in git_paths.items():
-        if git_path in dirty:
-            continue
-        results[path] = committed.get(git_path, inf)
+    clean = [path for path, git_path in git_paths.items() if git_path not in dirty]
+    if not clean:
+        return results
+    # A clean file holds the blob HEAD has at its path.
+    blobs, _ = _task_entries_for_ref(work_dir, "HEAD", backlog_path)
+    dates = _task_content_dates(project, backlog_path) if blobs else {}
+    for path in clean:
+        name = _relative_path(work_dir, path)
+        if name is not None and name in blobs:
+            results[path] = dates.get((name, blobs[name]), inf)
     return results
 
 
@@ -242,82 +244,74 @@ def _dirty_relative_paths(work_dir: Path, scope: Sequence[str]) -> set[str] | No
     return dirty
 
 
-def _head_commit_timestamps(work_dir: Path, scope: Sequence[str], wanted: set[str]) -> dict[str, float]:
-    """`_last_commit_timestamps` at HEAD for ``wanted``, reusing an earlier walk of the same commit."""
-    head = _run_git(work_dir, "rev-parse", "--verify", "--quiet", "HEAD")
-    if head.returncode != 0:
-        return {}  # no commits yet
-    commit = head.stdout.strip()
-    key = (str(work_dir), tuple(scope))
-    cached = _HEAD_WALKS.get(key)
-    if cached is not None and cached[0] == commit and (cached[2] or wanted <= cached[1].keys()):
-        return cached[1]
-    walk = _last_commit_timestamps(work_dir, scope, commit, wanted=wanted)
-    if walk is None:
-        return {}
-    _HEAD_WALKS[key] = (commit, *walk)
-    return walk[0]
+def _task_content_dates(project: BacklogProject, backlog_path: str) -> dict[tuple[str, str], float]:
+    """When each task file version, a ``(path, blob id)``, was last written, in one walk.
 
+    The walk covers HEAD and every active branch at once: a version shared by
+    sixty branches is one blob at one path, and when it was written does not
+    depend on which branch carries it.
 
-def _last_commit_timestamps(
-    work_dir: Path,
-    scope: Sequence[str],
-    ref: str = "HEAD",
-    *,
-    wanted: Collection[str] = (),
-) -> tuple[dict[str, float], bool] | None:
-    """Most recent commit timestamp per path under ``scope``, from one log walk.
-
-    With ``wanted``, the newest commits are read first, and the rest only if
-    some of those paths were not seen. A page is a prefix of the same
-    newest-first log, so a path's first sighting is the one a full walk reports.
-
-    Returns:
-        The timestamps and whether the walk reached the root, or ``None`` when
-        git failed.
+    ponytail: a rebase or cherry-pick rewrites a version at its own commit
+    time, so a rebased copy looks as new as the rebase. Author time (`%at`)
+    keeps the edit's time instead, at the cost of dating an amended version by
+    its first commit. On a 29-branch project, rebased copies made 2 of 2,391
+    winners differ from per-file `git log -1`.
     """
-    # `--no-renames`: rename detection compares file contents for every commit
-    # that moves a task between directories, up to half the cost of a walk. All
-    # it changes is that a renamed-away path is also listed, as deleted. A path
-    # still present at the tip was re-added after that, and the newer commit is
-    # sighted first unless commit dates run backwards. Same answers for 33k task
-    # paths across two large repositories.
-    log_args = ("-c", "core.quotePath=false", "log", "--format=%x00%ct", "--name-only", "--no-renames")
-    limit = _FIRST_LOG_PAGE if wanted else 0
-    while True:
-        page = ("-n", str(limit)) if limit else ()
-        # `--name-only` prints nothing for a merge commit, so a file whose content
-        # was produced while resolving a conflict would be attributed to an older
-        # ancestor instead of the merge. Ordinary merges are simplified out of a
-        # path-limited log and so are unaffected. `--diff-merges` needs git >= 2.31;
-        # older git rejects the option outright, which would report *every* task
-        # as unknown, so fall back to the plain walk when git says it does not
-        # know the option.
-        result = _run_git(work_dir, *log_args, *page, "--diff-merges=first-parent", ref, "--", *scope)
-        if result.returncode != 0 and "diff-merges" in (result.stderr or ""):
-            result = _run_git(work_dir, *log_args, *page, ref, "--", *scope)
-        if result.returncode != 0:
-            return None
-        timestamps: dict[str, float] = {}
-        commits = 0
-        for chunk in result.stdout.split("\0"):
-            if not chunk.strip():
-                continue
-            lines = [line for line in chunk.splitlines() if line.strip()]
-            if not lines:
-                continue
-            try:
-                committed_at = float(lines[0].strip())
-            except ValueError:
-                continue
-            commits += 1
-            for name in lines[1:]:
-                # log walks newest-first, so the first sighting is the latest commit.
-                timestamps.setdefault(name, committed_at)
-        complete = not limit or commits < limit
-        if complete or all(name in timestamps for name in wanted):
-            return timestamps, complete
-        limit = 0
+    work_dir = project.root
+    head = _run_git(work_dir, "rev-parse", "--verify", "--quiet", "HEAD")
+    tips = {head.stdout.strip()} if head.returncode == 0 else set()
+    if project.config.check_active_branches:
+        tips.update(tip for _, tip in _recent_branch_tips(project, _current_branch_name(work_dir)))
+    key = (str(work_dir), backlog_path)
+    cached = _CONTENT_WALKS.get(key)
+    if cached is not None and cached[0] == tips:
+        return cached[1]
+    if not tips:
+        return {}
+
+    progress.report(f"Reading task history of {len(tips)} branches")
+    # `--relative`: paths relative to the project root, as ls-tree and the
+    # checkout name them. `--no-renames`: rename detection compares contents
+    # for every commit that moves a task between directories, up to half the
+    # walk; without it a move is a deletion plus an addition of the same blob.
+    # `log -c`: a merge lists only the files whose version matches none of its
+    # parents, a conflict resolved in the merge. One that brings a version in
+    # from a parent did not write it, and dating it there would make every
+    # version a merge of the main branch carries look new. With `--raw` given,
+    # `-c` prints no patch.
+    log_args = (
+        "-c", "core.quotePath=false", "log", "-c", "--format=%x00%ct",
+        "--raw", "--no-abbrev", "--no-renames", "--relative",
+    )
+    scope = (f"{backlog_path}/tasks", f"{backlog_path}/completed")
+    result = _run_git(
+        work_dir, *log_args, *sorted(tips), "--", *scope, timeout=_CONTENT_WALK_TIMEOUT_SECONDS
+    )
+    if result.returncode != 0:
+        logger.warning("Ranking duplicate task ids without commit times: git log failed: {}", _git_error(result))
+        return {}
+
+    dates: dict[tuple[str, str], float] = {}
+    for chunk in result.stdout.split("\0"):
+        lines = chunk.split("\n")
+        try:
+            committed_at = float(lines[0])
+        except ValueError:
+            continue
+        for line in lines[1:]:
+            # ":<old mode> <new mode> <old blob> <new blob> <status>\t<path>",
+            # with one more colon, mode and blob per extra parent of a merge.
+            metadata, tab, name = line.partition("\t")
+            fields = metadata.split()
+            if not tab or len(fields) < 5 or not fields[-2].strip("0"):
+                continue  # not a change line, or a deletion, which writes no blob
+            version = (sys.intern(name), sys.intern(fields[-2]))
+            # The newest write, not the first sighting: log order follows
+            # commit dates only as far as the clocks that wrote them agreed.
+            if committed_at > dates.get(version, -inf):
+                dates[version] = committed_at
+    _CONTENT_WALKS[key] = (frozenset(tips), dates)
+    return dates
 
 
 def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSnapshot]:
@@ -333,35 +327,41 @@ def list_active_branch_task_snapshots(project: BacklogProject) -> list[GitTaskSn
         return []
 
     refs = _recent_branch_tips(project, _current_branch_name(work_dir))
-    walks_key = (str(work_dir), backlog_path)
-    known = _BRANCH_WALKS.get(walks_key, {})
-    walked: dict[str, dict[str, tuple[str, float]]] = {}
-    entries: list[tuple[str, str, str, float]] = []
+    trees_key = (str(work_dir), backlog_path)
+    known = _BRANCH_TREES.get(trees_key, {})
+    trees: dict[str, dict[str, str]] = {}
+    entries: list[tuple[str, str, str, str]] = []
     for index, (ref, tip) in enumerate(refs, start=1):
-        ref_entries = walked.get(tip, known.get(tip))
-        final = ref_entries is not None
-        if ref_entries is None:
-            # This walk takes minutes on a project with many active branches, and
-            # said nothing at all while it ran.
+        blobs = trees.get(tip, known.get(tip))
+        final = blobs is not None
+        if blobs is None:
             progress.report(f"Reading branch {index}/{len(refs)}: {ref.rsplit('/', 1)[-1]}")
-            ref_entries, final = _task_entries_for_ref(work_dir, tip, backlog_path)
+            blobs, final = _task_entries_for_ref(work_dir, tip, backlog_path)
         if final:
-            walked[tip] = ref_entries
-        for relative_path, (oid, committed_at) in ref_entries.items():
-            entries.append((ref, relative_path, oid, committed_at))
-    _BRANCH_WALKS[walks_key] = walked
+            trees[tip] = blobs
+        entries.extend((ref, tip, relative_path, oid) for relative_path, oid in blobs.items())
+    _BRANCH_TREES[trees_key] = trees
+    dates = _task_content_dates(project, backlog_path) if entries else {}
 
     # Branches overwhelmingly share task files, and a shared file is one blob
     # with one id, so the unique-id set is a small fraction of the entry count.
-    unique_blobs = {oid for _, _, oid, _ in entries}
+    unique_blobs = {oid for *_, oid in entries}
     progress.report(f"Reading {len(unique_blobs)} task versions from {len(refs)} branches")
     sources = _blob_contents(work_dir, unique_blobs)
 
+    tip_dates: dict[str, float] = {}
     snapshots: list[GitTaskSnapshot] = []
-    for ref, relative_path, oid, committed_at in entries:
+    for ref, tip, relative_path, oid in entries:
         source = sources.get(oid)
         if source is None:
             continue
+        committed_at = dates.get((relative_path, oid))
+        if committed_at is None:
+            # A version the walk never saw written (a failed walk, a commit
+            # older than a shallow clone) takes its branch's tip time, once.
+            if tip not in tip_dates:
+                tip_dates[tip] = _ref_commit_timestamp(work_dir, tip)
+            committed_at = tip_dates[tip]
         snapshots.append(
             GitTaskSnapshot(
                 ref=ref,
@@ -658,8 +658,8 @@ def _current_branch_name(work_dir: Path) -> str:
 
 def _task_entries_for_ref(
     work_dir: Path, ref: str, backlog_path: str
-) -> tuple[dict[str, tuple[str, float]], bool]:
-    """Blob id and last-commit timestamp for every task file at ``ref``.
+) -> tuple[dict[str, str], bool]:
+    """Blob id of every task file at ``ref``.
 
     Returns:
         The entries, and whether they are final for ``ref``: not when a git call
@@ -669,7 +669,7 @@ def _task_entries_for_ref(
     result = _run_git(
         work_dir,
         # Without this git C-quotes any non-ASCII name, and the quoted form
-        # matches neither the log walk's output nor a path on disk.
+        # matches neither the content walk's output nor a path on disk.
         "-c",
         "core.quotePath=false",
         "ls-tree",
@@ -694,26 +694,7 @@ def _task_entries_for_ref(
             # Branches share nearly every name and blob, and these entries are
             # kept for each branch: interned, they are stored once.
             oids[sys.intern(name)] = sys.intern(fields[2])
-    names = list(oids)
-    if not names:
-        return {}, True
-    # One log walk for the whole ref instead of one per task file.
-    walk = _last_commit_timestamps(
-        work_dir, [f"{backlog_path}/tasks", f"{backlog_path}/completed"], ref=ref
-    )
-    committed = walk[0] if walk is not None else {}
-    # A path the walk never reported (an unsimplified merge, a shallow clone)
-    # falls back to the ref tip, as the per-file form did — resolved at most once.
-    ref_tip: float | None = None
-    entries: dict[str, tuple[str, float]] = {}
-    for name in names:
-        committed_at = committed.get(name)
-        if committed_at is None:
-            if ref_tip is None:
-                ref_tip = _ref_commit_timestamp(work_dir, ref)
-            committed_at = ref_tip
-        entries[name] = (oids[name], committed_at)
-    return entries, walk is not None
+    return oids, True
 
 
 def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
@@ -740,7 +721,9 @@ def _git_error(result: subprocess.CompletedProcess[str]) -> str:
     return (result.stderr or result.stdout or f"exit code {result.returncode}").strip()
 
 
-def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run_git(
+    work_dir: Path, *args: str, timeout: float = GIT_COMMAND_TIMEOUT_SECONDS
+) -> subprocess.CompletedProcess[str]:
     command = ["git", *args]
     # GIT_TERMINAL_PROMPT=0 makes git fail fast instead of blocking on an
     # interactive credential prompt; the timeout bounds a slow/unreachable
@@ -762,12 +745,10 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
             # ``Path``) builds for the same file, so the two still compare equal.
             encoding=sys.getfilesystemencoding(),
             errors="surrogateescape",
-            timeout=GIT_COMMAND_TIMEOUT_SECONDS,
+            timeout=timeout,
             env=env,
         )
     except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            command, 124, "", f"git command timed out after {GIT_COMMAND_TIMEOUT_SECONDS}s"
-        )
+        return subprocess.CompletedProcess(command, 124, "", f"git command timed out after {timeout}s")
     except OSError as exc:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
