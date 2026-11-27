@@ -24,7 +24,6 @@ MYPY_ERRORS = {
     "src/backlog_py/browser/service.py": 23,
     "src/backlog_py/cli/main.py": 4,
     "src/backlog_py/core/repository.py": 4,
-    "src/backlog_py/mcp/http_server.py": 1,
     "src/backlog_py/mcp/protocol.py": 1,
     "src/backlog_py/mcp/tools.py": 2,
     "src/backlog_py/orchestration/reports.py": 2,
