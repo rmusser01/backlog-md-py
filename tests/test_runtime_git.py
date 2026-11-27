@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import posixpath
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -747,3 +748,36 @@ def test_a_reverted_version_is_as_new_as_the_revert(tmp_path: Path) -> None:
     tasks = ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
 
     assert [task.title for task in tasks] == ["T"], "the revert was dated by the version's first commit"
+
+
+@pytest.mark.parametrize("backlog_dir", [":(top)weird", "."])
+def test_branch_tasks_and_dates_resolve_for_any_backlog_directory(tmp_path: Path, backlog_dir: str) -> None:
+    """A backlog named like pathspec magic, or the project root itself."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo, backlog_dir=backlog_dir).project
+    path = _task(project, "task-2 - y.md")
+    _commit(repo, "main backlog")
+    _git(repo, "checkout", "-q", "-b", "feature/x")
+    source = _task(project, "task-1 - x.md").read_text(encoding="utf-8")
+    _commit(repo, "add task")
+    _git(repo, "checkout", "-q", "main")
+
+    snapshots = git_module.list_active_branch_task_snapshots(project)
+
+    expected = posixpath.normpath(f"{backlog_dir}/tasks/task-1 - x.md")
+    assert (expected, source) in [(snapshot.relative_path, snapshot.source) for snapshot in snapshots]
+    assert current_task_snapshot_timestamps(project, [path])[path] != inf
+
+
+@pytest.mark.parametrize("name", ['task-1 - "quoted".md', "task-1 - tab\there.md", "task-1 - line\nbreak.md"])
+def test_dates_resolve_for_names_git_would_quote(tmp_path: Path, name: str) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    path = _task(project, name)
+    _commit(repo, "seed")
+
+    assert current_task_snapshot_timestamps(project, [path])[path] != inf

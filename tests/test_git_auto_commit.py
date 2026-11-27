@@ -72,6 +72,40 @@ def test_auto_commit_does_not_stage_unrelated_files(tmp_path, monkeypatch):
     assert "?? unrelated.txt" in _status_entries(repo)
 
 
+def test_auto_commit_keeps_unrelated_staged_file_out_of_nested_project_commit(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
+    repo = tmp_path / "repo"
+    project_root = repo / "nested"
+    (project_root / "backlog" / "tasks").mkdir(parents=True)
+    _write_config(project_root, auto_commit=True)
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    project = _project(project_root, auto_commit=True)
+    (repo / "unrelated.txt").write_text("pre-staged\n", encoding="utf-8")
+    _git(repo, "add", "unrelated.txt")
+
+    with_project_write_lock(
+        project,
+        "task_create",
+        lambda: _write_task(
+            project_root,
+            "task-2 - Nested.md",
+            "id: TASK-2\ntitle: Nested\n",
+        ),
+    )
+
+    assert _git(repo, "log", "-1", "--format=%s") == "backlog: task_create"
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD") == (
+        "nested/backlog/tasks/task-2 - Nested.md"
+    )
+    assert _git(repo, "diff", "--cached", "--name-only") == "unrelated.txt"
+
+
 def test_project_write_lock_runs_git_hooks_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLOG_PY_STATE_DIR", str(tmp_path / "state"))
     repo = _git_backlog_repo(tmp_path, auto_commit=True, bypass_git_hooks=False)

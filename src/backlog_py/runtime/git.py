@@ -105,6 +105,7 @@ def maybe_auto_commit(project: BacklogProject, operation: str, context: AutoComm
     if config.bypass_git_hooks:
         commit_args.append("--no-verify")
     commit_args.extend(("-m", f"backlog: {operation}"))
+    commit_args.extend(("--only", "--", *pathspecs))
     commit = _run_git(context.work_dir, *commit_args)
     if commit.returncode == 0:
         return
@@ -278,11 +279,8 @@ def _task_content_dates(project: BacklogProject, backlog_path: str) -> dict[tupl
     # parents, a conflict resolved in the merge. One that brings a version in
     # from a parent did not write it, and dating it there would make every
     # version a merge of the main branch carries look new. With `--raw` given,
-    # `-c` prints no patch.
-    log_args = (
-        "-c", "core.quotePath=false", "log", "-c", "--format=%x00%ct",
-        "--raw", "--no-abbrev", "--no-renames", "--relative",
-    )
+    # `-c` prints no patch. `-z`: names unquoted, each in its own field.
+    log_args = ("log", "-c", "-z", "--format=%ct", "--raw", "--no-abbrev", "--no-renames", "--relative")
     scope = (f"{backlog_path}/tasks", f"{backlog_path}/completed")
     result = _run_git(
         work_dir, *log_args, *sorted(tips), "--", *scope, timeout=_CONTENT_WALK_TIMEOUT_SECONDS
@@ -292,20 +290,22 @@ def _task_content_dates(project: BacklogProject, backlog_path: str) -> dict[tupl
         return {}
 
     dates: dict[tuple[str, str], float] = {}
-    for chunk in result.stdout.split("\0"):
-        lines = chunk.split("\n")
-        try:
-            committed_at = float(lines[0])
-        except ValueError:
-            continue
-        for line in lines[1:]:
-            # ":<old mode> <new mode> <old blob> <new blob> <status>\t<path>",
-            # with one more colon, mode and blob per extra parent of a merge.
-            metadata, tab, name = line.partition("\t")
-            fields = metadata.split()
-            if not tab or len(fields) < 5 or not fields[-2].strip("0"):
-                continue  # not a change line, or a deletion, which writes no blob
-            version = (sys.intern(name), sys.intern(fields[-2]))
+    committed_at = -inf
+    # Fields: a commit time, then per file ":<old mode> <new mode> <old blob>
+    # <new blob> <status>" and its path, with one more colon, mode and blob per
+    # extra parent of a merge. A path is always read right after its change,
+    # so only times and changes reach the branches below.
+    fields = iter(result.stdout.split("\0"))
+    for field in fields:
+        field = field.strip("\n")
+        if field.isdigit():
+            committed_at = float(field)
+        elif field.startswith(":"):
+            name = next(fields, "")
+            change = field.split()
+            if len(change) < 5 or not change[-2].strip("0"):
+                continue  # a deletion, which writes no blob
+            version = (sys.intern(name), sys.intern(change[-2]))
             # The newest write, not the first sighting: log order follows
             # commit dates only as far as the clocks that wrote them agreed.
             if committed_at > dates.get(version, -inf):
@@ -404,7 +404,7 @@ def other_checkout_task_file_names(project: BacklogProject) -> list[str]:
     names = _tree_file_names(
         project.root,
         [
-            f"{tip}:{prefix}{backlog_path}/{bucket}"
+            f"{tip}:{posixpath.normpath(f'{prefix}{backlog_path}/{bucket}')}"
             for _, tip in _recent_branch_tips(project, _current_branch_name(project.root))
             for bucket in buckets
         ],
@@ -668,12 +668,11 @@ def _task_entries_for_ref(
     """
     result = _run_git(
         work_dir,
-        # Without this git C-quotes any non-ASCII name, and the quoted form
-        # matches neither the content walk's output nor a path on disk.
-        "-c",
-        "core.quotePath=false",
         "ls-tree",
         "-r",
+        # Without this git quotes a name holding a quote, tab, newline or
+        # non-ASCII byte, and matches no path on disk.
+        "-z",
         ref,
         "--",
         f"{backlog_path}/tasks",
@@ -683,7 +682,7 @@ def _task_entries_for_ref(
         return {}, False
     # "<mode> <type> <oid>\t<path>"
     oids: dict[str, str] = {}
-    for line in result.stdout.splitlines():
+    for line in result.stdout.split("\0"):
         metadata, tab, name = line.partition("\t")
         if not tab:
             continue
@@ -708,13 +707,9 @@ def _ref_commit_timestamp(work_dir: Path, ref: str) -> float:
 
 
 def _is_task_markdown_path(relative_path: str, backlog_path: str) -> bool:
-    return (
-        relative_path.endswith(".md")
-        and (
-            relative_path.startswith(f"{backlog_path}/tasks/")
-            or relative_path.startswith(f"{backlog_path}/completed/")
-        )
-    )
+    # git names a root backlog's files "tasks/...", never "./tasks/...".
+    prefix = "" if backlog_path == "." else f"{backlog_path}/"
+    return relative_path.endswith(".md") and relative_path.startswith((f"{prefix}tasks/", f"{prefix}completed/"))
 
 
 def _git_error(result: subprocess.CompletedProcess[str]) -> str:
@@ -730,7 +725,9 @@ def _run_git(
     # remote so read commands and the TUI refresh cannot hang indefinitely.
     # GIT_OPTIONAL_LOCKS=0 keeps the frequent read-only `status` calls from taking
     # the index lock, so they cannot collide with the user's own git commands.
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
+    # GIT_LITERAL_PATHSPECS=1: every path passed here is a real file or
+    # directory, and a backlog directory named `:(top)x` is legal.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_LITERAL_PATHSPECS": "1"}
     try:
         return subprocess.run(  # nosec B603
             command,
