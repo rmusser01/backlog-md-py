@@ -287,36 +287,6 @@ def test_evil_merge_reports_the_merge_commit_timestamp(tmp_path: Path) -> None:
     assert timestamps[path] == 1700000300, "merge-time edit reported an older ancestor's timestamp"
 
 
-def test_log_falls_back_when_diff_merges_is_unsupported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`--diff-merges` needs git >= 2.31; on older git it must not blank the scan."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git_init(repo)
-    project = init_project(repo).project
-    path = _task(project, "task-1 - oldgit.md")
-    _commit(repo, "seed")
-
-    original = git_module._run_git
-    rejected: list[tuple[str, ...]] = []
-
-    def without_diff_merges(work_dir, *args, **kwargs):
-        if any(arg.startswith("--diff-merges") for arg in args):
-            rejected.append(args)
-            return subprocess.CompletedProcess(
-                ["git", *args], 129, "", "error: unknown option `diff-merges=first-parent'"
-            )
-        return original(work_dir, *args, **kwargs)
-
-    monkeypatch.setattr(git_module, "_run_git", without_diff_merges)
-
-    timestamps = current_task_snapshot_timestamps(project, [path])
-
-    assert rejected, "the log walk no longer asks for merge diffs, so this guard tests nothing"
-    assert timestamps[path] != inf, "an unsupported log option made every task report no timestamp"
-
-
 def test_worktree_probe_is_rechecked_after_its_ttl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -637,42 +607,16 @@ def _record_log_walks(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     walks: list[tuple[str, ...]] = []
     real_run = git_module._run_git
 
-    def recording(work_dir, *args):
-        if "log" in args and "--name-only" in args:
+    def recording(work_dir, *args, **kwargs):
+        if "log" in args and "--raw" in args:
             walks.append(args)
-        return real_run(work_dir, *args)
+        return real_run(work_dir, *args, **kwargs)
 
     monkeypatch.setattr(git_module, "_run_git", recording)
     return walks
 
 
-def test_a_walk_stopped_early_reports_what_a_full_walk_does(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Reading the log in pages must not credit a path to a different commit."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git_init(repo)
-    project = init_project(repo).project
-    _task(project, "task-1 - old.md")
-    _commit(repo, "old", when=1700000000)
-    for index in range(2, 6):
-        _task(project, f"task-{index} - newer.md")
-        _commit(repo, f"newer {index}", when=1700000000 + index * 100)
-    monkeypatch.setattr(git_module, "_FIRST_LOG_PAGE", 1)
-    tasks = project.backlog_dir.relative_to(repo).as_posix() + "/tasks"
-    old, newest = f"{tasks}/task-1 - old.md", f"{tasks}/task-5 - newer.md"
-
-    full = git_module._last_commit_timestamps(repo, [tasks])
-    paged = git_module._last_commit_timestamps(repo, [tasks], wanted={old})
-    early = git_module._last_commit_timestamps(repo, [tasks], wanted={newest})
-
-    assert full is not None and paged is not None and early is not None
-    assert paged[0][old] == full[0][old] == 1700000000
-    assert early == ({newest: full[0][newest]}, False), "the walk read past the commit it needed"
-
-
-def test_branch_walks_are_reused_until_the_branch_moves(
+def test_history_walk_is_reused_until_a_ref_moves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = _branch_snapshot_repo(tmp_path, 2)
@@ -681,7 +625,7 @@ def test_branch_walks_are_reused_until_the_branch_moves(
     first = git_module.list_active_branch_task_snapshots(project)
     assert len(walks) == 1
     assert git_module.list_active_branch_task_snapshots(project) == first
-    assert len(walks) == 1, "a branch whose tip did not move was walked again"
+    assert len(walks) == 1, "history was walked again though no ref moved"
 
     repo = project.root
     _git(repo, "checkout", "-q", "feature")
@@ -747,3 +691,59 @@ def test_one_record_per_branch_version_keeps_the_tie_break_winner(
     tasks = repository_module.ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
 
     assert [task.title for task in tasks] == ["X"]
+
+
+def test_a_merge_does_not_make_the_versions_it_brings_in_newer(tmp_path: Path) -> None:
+    """Merging main into a feature branch rewrites main's changed task files on
+    that branch; the edit that wrote a version, not the merge, says how new it is."""
+    from backlog_py.core.repository import ReadOnlyRepository
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    config = project.config_path
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("check_active_branches: false", "check_active_branches: true"),
+        encoding="utf-8",
+    )
+    start = int(datetime.now(timezone.utc).timestamp()) - 1000
+    ours = _task(project, "task-1 - ours.md")
+    _commit(repo, "ours", start + 100)
+    _git(repo, "checkout", "-qb", "feature")
+    theirs = _task(project, "task-1 - theirs.md")
+    _commit(repo, "theirs", start + 200)
+    _git(repo, "checkout", "-q", "main")
+    ours.write_text(ours.read_text(encoding="utf-8").replace("title: T", "title: Ours edited"), encoding="utf-8")
+    _commit(repo, "edit ours", start + 300)
+    _git(repo, "checkout", "-q", "feature")
+    theirs.write_text(theirs.read_text(encoding="utf-8").replace("title: T", "title: Theirs edited"), encoding="utf-8")
+    _commit(repo, "edit theirs", start + 400)
+    merged = f"@{start + 500} +0000"
+    _git(repo, "merge", "-q", "--no-ff", "-m", "merge main", "main", GIT_AUTHOR_DATE=merged, GIT_COMMITTER_DATE=merged)
+    _git(repo, "checkout", "-q", "main")
+
+    tasks = ReadOnlyRepository(discover_project(repo), refresh_remote_refs=False).list_tasks()
+
+    assert [task.title for task in tasks] == ["Theirs edited"], "the merge outdated the later edit"
+
+
+def test_a_reverted_version_is_as_new_as_the_revert(tmp_path: Path) -> None:
+    from backlog_py.core.repository import ReadOnlyRepository
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    project = init_project(repo).project
+    ours = _task(project, "task-1 - ours.md")
+    _commit(repo, "ours", 1700000100)
+    ours.write_text(ours.read_text(encoding="utf-8").replace("title: T", "title: Edited"), encoding="utf-8")
+    _commit(repo, "edit ours", 1700000200)
+    theirs = _task(project, "task-1 - theirs.md")
+    theirs.write_text(theirs.read_text(encoding="utf-8").replace("title: T", "title: Theirs"), encoding="utf-8")
+    _commit(repo, "theirs", 1700000300)
+    _git(repo, "revert", "--no-edit", "HEAD~1", GIT_COMMITTER_DATE="@1700000400 +0000")
+
+    tasks = ReadOnlyRepository(project, refresh_remote_refs=False).list_tasks()
+
+    assert [task.title for task in tasks] == ["T"], "the revert was dated by the version's first commit"

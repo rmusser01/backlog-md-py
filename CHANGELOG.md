@@ -22,23 +22,30 @@
   a malformed header still reports the same error), and browser task changes
   reuse the board's cached scan instead of re-reading every task file.
 - Make project scans fast on repositories with long histories and many
-  branches. Which file wins a task id is unchanged. Most of a scan was `git log`
-  walks of the whole history, one for this checkout and one per active branch,
-  repeated on every rescan. Now:
+  branches. Most of a scan was `git log` walks of the whole history, one for
+  this checkout and one per active branch, repeated on every rescan. Now:
+  - one walk dates every task file version on this checkout and on all active
+    branches, and its answer is kept until a branch moves;
   - commit times are only looked up for ids that two different files claim,
     and not at all when one of them is uncommitted, since it is newer than any
     commit;
-  - a walk's answer is kept until its branch moves, so a rescan walks only the
-    branches that changed;
   - each distinct task file is parsed once, rather than once per branch that
     holds a copy;
-  - walks skip rename detection, which cost up to half their time.
+  - the walk skips rename detection, which cost up to half its time.
 
   On a 6,700-task project the browser board went from 14 s to 5 s and the
   Settings and Milestones dialogs from 15 s to under half a second.
-  On a project with 154 active branches, a rescan after a commit takes
-  5–11 s where it used to repeat the whole 32-minute scan, and the first scan
-  takes about 18 minutes.
+  On a project with about 150 active branches, the first scan takes 10 s where
+  it took 32 minutes, and a rescan after a commit about 6 s. (#170)
+- When two files claim one task id, or branches hold different versions of a
+  task, the version written most recently wins: dated by the last commit that
+  wrote that exact content, on this checkout or any active branch. A merge no
+  longer counts as writing the versions it brings in from another branch, so
+  merging the main branch into a feature branch no longer makes main's task
+  files look new there. A conflict resolved in a merge, and a revert, still
+  count. On a project with about 150 active branches this changed the winner
+  for 77 of 2,505 such ids, and the winner now agrees with `git log -1` on each
+  file for 2,466 of the 2,469 ids it orders, up from 2,412.
 - Browser tabs open on one board share a recent freshness check instead of
   each running its own every five seconds, and off-screen cards skip layout.
 
