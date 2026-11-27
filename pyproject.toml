@@ -43,7 +43,9 @@ Documentation = "https://github.com/rmusser01/backlog-md-py/tree/main/docs"
 dev = [
   "bandit>=1.7.0",
   "build>=1.2.0",
-  "mypy>=1.11.0",
+  # Exact: scripts/check_quality_baseline.py records what this mypy reports,
+  # and another version reports different errors. Re-record when raising it.
+  "mypy==2.4.1",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
   # Upper bound keeps the blocking lint gate deterministic: new ruff minors can
@@ -87,27 +89,24 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
-# Ratchet list. Every entry below is a rule the tree genuinely violates today.
-# Fix the code, then delete the entry. Re-measure rather than adjusting a count
-# by eye; the counts below are diagnostics, not files, and were taken with
-# ruff 0.16.1 as:
-#   ruff check --select <RULE> --statistics src tests   # with `ignore` emptied
+# Ratchet list. Every entry below is a rule the tree genuinely violates today;
+# scripts/check_quality_baseline.py records how often, and CI fails when that
+# changes. Fix the code, lower the count there, and delete the entry at zero.
 ignore = [
-  # 45 lines over the 120-char limit (39 src, 6 tests); the longest single line
-  # is 777 chars in src/backlog_py/compat/inventory.py.
+  # Lines over the 120-char limit; the longest is in src/backlog_py/compat/inventory.py.
   "E501",
-  # 59 unsorted/ungrouped import blocks (30 src, 29 tests) across 56 files.
-  # `ruff check --select I001 --fix src tests` clears this in one pass.
+  # Unsorted/ungrouped import blocks. `ruff check --select I001 --fix src tests`
+  # clears this in one pass.
   "I001",
-  # 32 uses of `datetime.timezone.utc` instead of `datetime.UTC` (21 src, 11 tests).
+  # `datetime.timezone.utc` instead of `datetime.UTC`.
   "UP017",
-  # 21 deprecated `typing` imports (typing.Iterable/Sequence/... vs collections.abc).
+  # Deprecated `typing` imports (typing.Iterable/Sequence/... vs collections.abc).
   "UP035",
-  # 13 quoted annotations that no longer need quoting under PEP 563.
+  # Quoted annotations that no longer need quoting under PEP 563.
   "UP037",
-  # 4 `raise` statements inside `except` without `from err` / `from None`.
+  # `raise` statements inside `except` without `from err` / `from None`.
   "B904",
-  # 2 `getattr()` calls with a constant attribute name.
+  # `getattr()` calls with a constant attribute name.
   "B009",
 ]
 
@@ -132,15 +131,7 @@ files = ["src"]
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_unused_configs = true
-# Ratchet plan. This comment is the single source of truth for the baseline;
-# .github/workflows/ci.yml points here rather than repeating the number.
-#
-# `python -m mypy` (no arguments - it reads `files` above) reports 60 errors
-# across 14 files, mostly [arg-type], concentrated in browser/service.py (24)
-# and tui/data.py (11). The CI step therefore runs with
-# `continue-on-error: true`. Burn the list down file by file, then drop
-# `continue-on-error` from ci.yml and start enabling strict flags here.
-#
-# The number is the whole point of a ratchet, so re-measure it - never adjust it
-# by eye - whenever it changes:
-#   uv run --extra dev python -m mypy | tail -1
+# Ratchet plan. `python -m mypy` (no arguments - it reads `files` above) reports
+# errors in a known set of files, mostly [arg-type]; scripts/check_quality_baseline.py
+# records how many per file, and CI fails when that changes. Burn the list down
+# file by file, then start enabling strict flags here.

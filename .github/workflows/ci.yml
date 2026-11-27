@@ -65,20 +65,18 @@ jobs:
       - name: Install package and lint dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          # tui: mypy checks the TUI against textual's real types, and the
+          # recorded counts assume it.
+          python -m pip install -e ".[dev,tui]"
 
       - name: Run Ruff
-        run: python -m ruff check src tests
+        run: python -m ruff check src tests scripts
 
-      - name: Run mypy
-        # Advisory only: mypy runs against a known baseline of pre-existing
-        # errors on a codebase that was never type checked. The baseline count
-        # and the burn-down plan live in [tool.mypy] in pyproject.toml and are
-        # deliberately not restated here - two copies of one number is how they
-        # drifted apart last time. Drop continue-on-error once the baseline is
-        # clean, so a green CI run keeps meaning "safe to tag and publish".
-        continue-on-error: true
-        run: python -m mypy
+      - name: Check quality baselines
+        # mypy and every Ruff rule pyproject.toml ignores must report exactly
+        # the counts recorded in the script: no new errors, and a fix lowers
+        # its count in the same change.
+        run: python scripts/check_quality_baseline.py
 
   package:
     name: Package build

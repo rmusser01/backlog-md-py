@@ -69,23 +69,19 @@ Run the full local gate before opening a pull request:
 ```bash
 uv run --extra dev python -m pytest tests -v
 uv run --extra dev python -m bandit -r src
-uv run --extra dev python -m ruff check src tests
+uv run --extra dev python -m ruff check src tests scripts
+uv run --extra dev --extra tui python scripts/check_quality_baseline.py
 uv run --extra dev python -m build
 uv run --extra dev python -m twine check dist/*
 ```
 
-`ruff check` blocks CI. Its rule set and the per-rule ignore ratchet live in
-`[tool.ruff.lint]` in `pyproject.toml`; each ignored rule records how many
-violations the tree had when the ignore was added, so entries can be burned down
-and deleted.
-
-```bash
-uv run --extra dev python -m mypy
-```
-
-`mypy` is advisory. It runs in CI with `continue-on-error: true` against a known
-baseline of pre-existing errors. Do not add new ones; see the ratchet plan in
-`[tool.mypy]` in `pyproject.toml`.
+Both lint commands block CI. `ruff check` enforces the rule set in
+`[tool.ruff.lint]` in `pyproject.toml`. The tree still violates the rules in its
+`ignore` list, and mypy still reports errors, so
+`scripts/check_quality_baseline.py` records how many of each, per rule and per
+file, and fails when a count changes in either direction: fix what is new, and
+when you fix an old one, lower its count in the same change. The counts assume
+the `dev` and `tui` extras and the pinned mypy.
 
 For focused agent-cutover work, also run:
 

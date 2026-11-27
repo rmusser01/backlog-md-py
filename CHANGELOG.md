@@ -4,6 +4,10 @@
 
 ### Changed
 
+- CI now fails when mypy, or a Ruff rule the config ignores, reports a
+  different number of problems than `scripts/check_quality_baseline.py`
+  records. mypy used to be advisory, so new type errors passed unnoticed.
+  mypy is pinned to 2.4.1, since another version reports different errors.
 - Make search fast on large projects. Results and their order are unchanged.
   Searching used to compare every query word against every word of every task
   with a fuzzy matcher; on a 2,000-task project one `search` or MCP
