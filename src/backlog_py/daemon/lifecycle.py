@@ -24,6 +24,7 @@ from backlog_py.runtime.state import (
     read_runtime_record,
     write_runtime_record,
 )
+from backlog_py.security.http import http_url
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18765
@@ -35,6 +36,10 @@ class DaemonNotRunningError(RuntimeError):
 
 class DaemonStartError(RuntimeError):
     """Raised when a freshly launched daemon never becomes healthy."""
+
+
+class DaemonOwnershipError(RuntimeError):
+    """Raised when daemon process ownership cannot be verified safely."""
 
 
 class DaemonStopTimeoutError(TimeoutError):
@@ -150,7 +155,7 @@ def daemon_start(
         _prune_state_dir(layout)
         log_path = allocate_log_path(layout)
         token = os.urandom(32).hex()
-        endpoint = f"http://{host}:{port}/mcp"
+        endpoint = http_url(host, port, "/mcp")
         command = [
             sys.executable,
             "-m",
@@ -219,10 +224,16 @@ def _daemon_stop_locked(*, force: bool, timeout: float) -> bool:
     if not is_pid_alive(record.pid):
         delete_runtime_record(layout)
         return False
-    if _daemon_endpoint_owned(record) is False:
+    ownership = _daemon_endpoint_owned(record)
+    if ownership is False:
         # The PID was reused by an unrelated process; never signal it.
         delete_runtime_record(layout)
         return False
+    if ownership is None:
+        raise DaemonOwnershipError(
+            f"unable to verify daemon ownership for process {record.pid}: its endpoint did not answer."
+            f" If {record.pid} is the backlog-py daemon, stop it with `kill {record.pid}`."
+        )
 
     os.kill(record.pid, signal.SIGTERM)
     if _wait_for_exit(record.pid, timeout):
@@ -252,7 +263,7 @@ def _wait_for_daemon_healthy(
     squats on the port would satisfy it while our child dies on a bind failure.
     Only the freshly minted token proves the listener is the child we launched.
     """
-    url = f"http://{_bracketed_host(host)}:{port}/status"
+    url = http_url(host, port, "/status")
     headers = {"Authorization": f"Bearer {token}"}
     deadline = time.monotonic() + max(timeout, 0)
     while time.monotonic() < deadline:
@@ -287,14 +298,8 @@ def _terminate_process(process: "subprocess.Popen[bytes]") -> None:
                 process.wait(timeout=2)
 
 
-def _bracketed_host(host: str) -> str:
-    if ":" in host and not host.startswith("["):
-        return f"[{host}]"
-    return host
-
-
 def _status_url(record: RuntimeRecord) -> str:
-    return f"http://{_bracketed_host(record.host)}:{record.port}/status"
+    return http_url(record.host, record.port, "/status")
 
 
 def _daemon_endpoint_owned(record: RuntimeRecord) -> bool | None:

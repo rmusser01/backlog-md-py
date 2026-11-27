@@ -59,6 +59,25 @@
   every task file about two seconds after any write. A recently written file
   is fingerprinted by its content, and that hash used to drop out of the
   fingerprint once the file aged, which made an unchanged project look changed.
+- Browser Markdown links no longer let a control character hide a scheme:
+  `java<tab>script:` reached the page as a clickable link, and browsers drop
+  the tab. Any link holding a control character now renders as `#`.
+- A default `backlog/` or `.backlog/` directory that is a symlink, or a
+  symlink loop, is refused, as a symlinked `backlog/docs` already was. A link
+  out of the project sent every task write outside it.
+- Auto-commit commits only the backlog files it wrote. Files you had already
+  staged elsewhere went into the `backlog:` commit with them.
+- Editing a task or the config keeps the file's permissions; every write
+  turned it into `0600`.
+- `daemon stop` no longer signals the recorded process when the daemon's
+  endpoint does not answer, since it cannot tell the daemon from a process
+  that reused its PID. It says so, and names the PID to stop by hand.
+- The browser and MCP servers can listen on `::1`, which was accepted but
+  failed to bind, and IPv6 URLs are bracketed.
+- Branch tasks and commit dates now resolve when the backlog directory is the
+  project root (`backlogDirectory: .`) or has a name git reads as pathspec
+  syntax (`:(top)x`), and for task files whose names hold a quote, tab or
+  newline.
 
 ## 2.2.0 - 2026-10-19
 

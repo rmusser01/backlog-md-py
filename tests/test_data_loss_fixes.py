@@ -5,6 +5,7 @@ verified against the shipped 1.0.0 code before the fix.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -119,6 +120,30 @@ def test_atomic_write_preserves_crlf_bytes(tmp_path):
     raw = target.read_bytes()
     assert b"\r\r\n" not in raw
     assert raw == content.encode("utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_edit_task_preserves_existing_file_mode(tmp_path):
+    project = _project(tmp_path)
+    repo = MutableRepository(project)
+    task = repo.create_task(title="Mode keeper")
+    task.path.chmod(0o644)
+
+    updated = repo.edit_task(task.id, description="Updated")
+
+    assert updated.path.stat().st_mode & 0o777 == 0o644
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_create_task_keeps_secure_file_mode_with_permissive_umask(tmp_path):
+    project = _project(tmp_path)
+    previous_umask = os.umask(0)
+    try:
+        task = MutableRepository(project).create_task(title="Secure mode")
+    finally:
+        os.umask(previous_umask)
+
+    assert task.path.stat().st_mode & 0o777 == 0o600
 
 
 # --- substring done-status detection ----------------------------------------
