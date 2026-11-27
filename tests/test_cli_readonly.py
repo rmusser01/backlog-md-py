@@ -13,6 +13,7 @@ from backlog_py.cli.main import main
 from backlog_py.core.decisions import DecisionService
 from backlog_py.core.documents import DocumentService
 from backlog_py.core.repository import MutableRepository
+from backlog_py.daemon import DaemonOwnershipError
 from backlog_py.storage.config import set_config_value
 from backlog_py.storage.project import discover_project
 
@@ -122,6 +123,21 @@ def test_top_level_version_reports_package_version():
 
     assert result.exit_code == 0
     assert __version__ in result.output
+
+
+def test_daemon_stop_uncertain_ownership_shows_clean_error(monkeypatch):
+    from backlog_py.cli import main as cli_main
+
+    def fail_stop(*, force: bool):
+        raise DaemonOwnershipError("unable to verify daemon ownership for process 12345")
+
+    monkeypatch.setattr(cli_main, "daemon_stop", fail_stop)
+
+    result = CliRunner().invoke(main, ["daemon", "stop"])
+
+    assert result.exit_code != 0
+    assert "unable to verify daemon ownership" in result.output.lower()
+    assert "traceback" not in result.output.lower()
 
 
 def test_tui_command_invokes_lazy_runner_with_discovered_project(monkeypatch):

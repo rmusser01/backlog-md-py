@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from backlog_py.core.models import BacklogProject
-from backlog_py.security.paths import PathContainmentError, assert_path_within_base
+from backlog_py.security.paths import PathContainmentError, assert_path_within_base, assert_trusted_subpath
 from backlog_py.storage.config import load_config
 
 
@@ -49,11 +49,11 @@ def _config_for_root(root: Path) -> tuple[Path, Path, Path] | None:
 
     backlog_config = root / "backlog" / "config.yml"
     if backlog_config.is_file():
-        return root, root / "backlog", backlog_config
+        return root, _trusted_backlog_dir(root, root / "backlog"), backlog_config
 
     dot_backlog_config = root / ".backlog" / "config.yml"
     if dot_backlog_config.is_file():
-        return root, root / ".backlog", dot_backlog_config
+        return root, _trusted_backlog_dir(root, root / ".backlog"), dot_backlog_config
 
     return None
 
@@ -65,7 +65,7 @@ def _backlog_dir_for_root_config(root: Path, config_path: Path) -> Path:
 
     configured = raw.get("backlogDirectory", raw.get("backlog_directory"))
     if configured is None:
-        return root / "backlog"
+        return _trusted_backlog_dir(root, root / "backlog")
     if not isinstance(configured, str) or not configured.strip():
         raise ValueError(f"Backlog config value backlogDirectory must be a non-empty string: {config_path}")
 
@@ -76,3 +76,10 @@ def _backlog_dir_for_root_config(root: Path, config_path: Path) -> Path:
         return assert_path_within_base(root, root / relative_path)
     except PathContainmentError as exc:
         raise ValueError(str(exc)) from exc
+
+
+def _trusted_backlog_dir(root: Path, candidate: Path) -> Path:
+    try:
+        return assert_trusted_subpath(root, candidate)
+    except PathContainmentError as exc:
+        raise ValueError(f"Backlog directory anchor cannot be a symlink: {exc}") from exc

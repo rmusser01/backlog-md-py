@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import threading
 import unicodedata
 import webbrowser
@@ -53,7 +54,7 @@ from backlog_py.orchestration import (
 )
 from backlog_py.orchestration.reports import _parse_datetime
 from backlog_py.runtime.locks import with_project_write_lock
-from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback
+from backlog_py.security.http import LOOPBACK_HOSTNAMES, host_header_is_loopback, http_url
 from backlog_py.storage.config import (
     get_definition_of_done_defaults,
     load_config,
@@ -177,11 +178,16 @@ class BrowserThreadingHTTPServer(ThreadingHTTPServer):
     local_scan_cache: ProjectScanCache
 
 
+class _BrowserIPv6ThreadingHTTPServer(BrowserThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
 def create_browser_server(*, project: BacklogProject, host: str, port: int) -> BrowserThreadingHTTPServer:
     """Create a loopback browser HTTP server without starting it."""
     if host not in _LOOPBACK_HOSTS:
         raise ValueError("Browser service only supports loopback hosts")
-    server = BrowserThreadingHTTPServer((host, port), _BrowserHttpHandler)
+    server_class = _BrowserIPv6ThreadingHTTPServer if ":" in host else BrowserThreadingHTTPServer
+    server = server_class((host, port), _BrowserHttpHandler)
     server.project = project
     server.request_log_limit = 50
     server.request_log = deque(maxlen=server.request_log_limit)
@@ -202,7 +208,7 @@ def start_browser_service(project: BacklogProject, *, host: str = "127.0.0.1", p
     thread = threading.Thread(target=server.serve_forever, name="backlog-md-py-browser", daemon=True)
     thread.start()
     actual_host, actual_port = server.server_address[:2]
-    root_url = _root_url(str(actual_host), int(actual_port))
+    root_url = http_url(str(actual_host), int(actual_port), "/")
     return BrowserService(
         server=server,
         thread=thread,
@@ -222,7 +228,7 @@ def run_browser_service_foreground(
     """Run the loopback browser service until interrupted."""
     server = create_browser_server(project=project, host=host, port=port)
     actual_host, actual_port = server.server_address[:2]
-    root_url = _root_url(str(actual_host), int(actual_port))
+    root_url = http_url(str(actual_host), int(actual_port), "/")
     print(f"Serving Backlog.md browser at {root_url}")
     print("Press Ctrl-C to stop.")
     if open_browser:
@@ -425,7 +431,7 @@ def _service_status_payload(server: BrowserThreadingHTTPServer) -> dict[str, obj
         "backlogDir": str(server.project.backlog_dir),
         "host": str(host),
         "port": int(port),
-        "rootUrl": _root_url(str(host), int(port)),
+        "rootUrl": http_url(str(host), int(port), "/"),
         "shutdownSupported": True,
         **_shutdown_state_payload(server),
     }
@@ -2214,7 +2220,12 @@ def _render_markdown_link(match: re.Match[str]) -> str:
     return f'<a href="{href}">{label}</a>'
 
 
+_URL_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def _safe_markdown_href(href: str) -> str:
+    if _URL_CONTROL_CHARACTERS.search(href):
+        return "#"
     value = href.strip()
     scheme = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*):", value)
     if scheme and scheme.group(1).lower() not in {"http", "https", "mailto"}:
@@ -2461,10 +2472,6 @@ def _metadata_string(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
-
-
-def _root_url(host: str, port: int) -> str:
-    return f"http://{host}:{port}/"
 
 
 def _endpoint_segment(path: str, prefix: str, suffix: str = "", *, allow_separators: bool = False) -> str | None:

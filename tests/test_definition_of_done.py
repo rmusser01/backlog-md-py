@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -52,6 +54,17 @@ def test_config_definition_of_done_defaults_can_be_read_and_replaced(tmp_path):
     config_source = (repo / "backlog" / "config.yml").read_text(encoding="utf-8")
     assert "definitionOfDone:" in config_source
     assert "- Tests pass" in config_source
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes only")
+def test_replacing_definition_of_done_defaults_preserves_config_mode(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+    project.config_path.chmod(0o644)
+
+    replace_definition_of_done_defaults(project, ["Tests pass"])
+
+    assert project.config_path.stat().st_mode & 0o777 == 0o644
 
 
 def test_config_definition_of_done_defaults_reject_non_string_items_without_mutation(tmp_path):

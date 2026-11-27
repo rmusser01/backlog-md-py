@@ -63,6 +63,73 @@ def test_discovers_custom_backlog_directory_from_root_config(tmp_path):
     assert project.config.project_name == "custom-demo"
 
 
+def test_root_config_rejects_default_backlog_directory_symlinked_outside(tmp_path):
+    project_root = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project_root.mkdir()
+    outside.mkdir()
+    (project_root / "backlog.config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (project_root / "backlog").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(project_root)
+
+
+def test_root_config_rejects_default_backlog_directory_self_symlink(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (tmp_path / "backlog").symlink_to("backlog", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(tmp_path)
+
+
+def test_root_config_rejects_default_backlog_directory_two_link_symlink_cycle(tmp_path):
+    (tmp_path / "backlog.config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (tmp_path / "backlog").symlink_to("alternate-backlog", target_is_directory=True)
+    (tmp_path / "alternate-backlog").symlink_to("backlog", target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(tmp_path)
+
+
+def test_nested_backlog_config_rejects_backlog_directory_symlinked_outside(tmp_path):
+    project_root = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project_root.mkdir()
+    outside.mkdir()
+    (outside / "config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (project_root / "backlog").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(project_root)
+
+
+def test_dot_backlog_config_rejects_dot_backlog_directory_symlinked_outside(tmp_path):
+    project_root = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project_root.mkdir()
+    outside.mkdir()
+    (outside / "config.yml").write_text("projectName: demo\n", encoding="utf-8")
+    (project_root / ".backlog").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        discover_project(project_root)
+
+
+def test_configured_backlog_directory_symlinked_inside_project_remains_supported(tmp_path):
+    target = tmp_path / "storage"
+    target.mkdir()
+    (tmp_path / "linked-backlog").symlink_to(target, target_is_directory=True)
+    (tmp_path / "backlog.config.yml").write_text(
+        "projectName: custom-demo\nbacklogDirectory: linked-backlog\n",
+        encoding="utf-8",
+    )
+
+    project = discover_project(tmp_path)
+
+    assert project.backlog_dir == target
+
+
 def test_discovers_custom_backlog_directory_from_snake_case_root_config(tmp_path):
     (tmp_path / "backlog.config.yml").write_text(
         "project_name: custom-demo\nbacklog_directory: work/backlog\n",
