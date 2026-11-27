@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess  # nosec B404
+import sys
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -2629,7 +2630,8 @@ def _run_editor_command(command: list[str], path: Path) -> None:
 
 
 def _stdin_is_interactive() -> bool:
-    return click.get_text_stream("stdin").isatty()
+    # Not click.get_text_stream: Click 8.5 deprecates it, for removal in 9.0.
+    return sys.stdin is not None and sys.stdin.isatty()
 
 
 def _read_interactive_key() -> str:
