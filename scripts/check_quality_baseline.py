@@ -5,6 +5,11 @@ Exact, not at-most: a fix has to lower its number in the same change, so the
 ratchet only turns one way. The counts hold for the CI lint environment,
 ``pip install -e ".[dev,tui]"`` with the mypy that pins: another mypy, or no
 textual, reports different errors.
+
+ponytail: only mypy is pinned, so a new release of a dependency can change what
+mypy reports (Click 8.5 deprecating `get_text_stream` added one). Re-record the
+counts when that happens; pin the lint job's dependencies with a constraints
+file if it keeps happening.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # `python -m mypy`, errors per file.
 MYPY_ERRORS = {
     "src/backlog_py/browser/service.py": 23,
-    "src/backlog_py/cli/main.py": 4,
+    "src/backlog_py/cli/main.py": 3,
     "src/backlog_py/core/repository.py": 4,
     "src/backlog_py/mcp/protocol.py": 1,
     "src/backlog_py/mcp/tools.py": 2,
